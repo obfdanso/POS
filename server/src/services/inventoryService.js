@@ -39,36 +39,17 @@ async function listInventory({ page = 1, per_page = 20, search, status } = {}) {
   return { products, total, page, per_page: take, total_pages: Math.ceil(total / take) }
 }
 
-async function getLowStockProducts() {
-  return prisma.product.findMany({
-    where: {
-      is_active: true,
-      quantity: { lte: prisma.product.fields.low_stock_threshold },
-    },
-    select: {
-      id: true,
-      name: true,
-      sku: true,
-      quantity: true,
-      low_stock_threshold: true,
-      category: { select: { id: true, name: true } },
-    },
-    orderBy: { quantity: 'asc' },
-  })
-}
-
 async function getLowStockCount() {
-  // Raw query for comparing two columns
   const result = await prisma.$queryRaw`
     SELECT COUNT(*)::int as count
     FROM "Product"
     WHERE is_active = true AND quantity <= low_stock_threshold
   `
-  return result[0].count
+  return Number(result[0].count)
 }
 
 async function getLowStock() {
-  return prisma.$queryRaw`
+  const rows = await prisma.$queryRaw`
     SELECT p.id, p.name, p.sku, p.quantity, p.low_stock_threshold,
            json_build_object('id', c.id, 'name', c.name) as category
     FROM "Product" p
@@ -76,6 +57,11 @@ async function getLowStock() {
     WHERE p.is_active = true AND p.quantity <= p.low_stock_threshold
     ORDER BY p.quantity ASC
   `
+  return rows.map((r) => ({
+    ...r,
+    quantity: Number(r.quantity),
+    low_stock_threshold: Number(r.low_stock_threshold),
+  }))
 }
 
 async function adjustStock(productId, quantityChange, changeType, userId, notes) {

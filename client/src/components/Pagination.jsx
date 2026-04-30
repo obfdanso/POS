@@ -10,10 +10,10 @@ export function Pagination({ page, total_pages, onPageChange }) {
   for (let i = left; i <= right; i++) pages.push(i)
   if (right < total_pages) { if (right < total_pages - 1) pages.push('...'); pages.push(total_pages) }
 
-  const btnBase = 'px-3 py-1.5 text-sm rounded-lg transition'
+  const btnBase = 'px-3 py-1.5 text-sm rounded-full transition'
   const active = `${btnBase} bg-primary-600 text-white font-medium`
-  const inactive = `${btnBase} text-gray-600 hover:bg-gray-100`
-  const disabled = `${btnBase} text-gray-300 cursor-not-allowed`
+  const inactive = `${btnBase} text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800`
+  const disabled = `${btnBase} text-gray-300 dark:text-gray-600 cursor-not-allowed`
 
   return (
     <div className="flex items-center gap-1">
@@ -26,7 +26,7 @@ export function Pagination({ page, total_pages, onPageChange }) {
       </button>
       {pages.map((p, i) =>
         p === '...' ? (
-          <span key={`ellipsis-${i}`} className="px-2 text-gray-400">…</span>
+          <span key={`ellipsis-${i}`} className="px-2 text-gray-400 dark:text-gray-600">…</span>
         ) : (
           <button
             key={p}

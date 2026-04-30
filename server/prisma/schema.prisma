@@ -45,9 +45,9 @@ model User {
   created_at            DateTime  @default(now())
   updated_at            DateTime  @updatedAt
 
-  sales          Sale[]
-  inventory_logs InventoryLog[]
-  auth_logs      AuthLog[]
+  sales            Sale[]
+  inventory_logs   InventoryLog[]
+  auth_logs        AuthLog[]
 }
 
 model Category {
@@ -60,12 +60,26 @@ model Category {
   products Product[]
 }
 
+model Supplier {
+  id         String   @id @default(uuid())
+  name       String   @unique
+  phone      String?
+  email      String?
+  address    String?
+  website    String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  products Product[]
+}
+
 model Product {
   id                  String   @id @default(uuid())
   name                String
   sku                 String   @unique
   barcode             String?  @unique
   category_id         String
+  supplier_id         String?
   price               Decimal  @db.Decimal(10, 2)
   cost_price          Decimal? @db.Decimal(10, 2)
   quantity            Int      @default(0)
@@ -76,6 +90,7 @@ model Product {
   updated_at          DateTime @updatedAt
 
   category       Category       @relation(fields: [category_id], references: [id])
+  supplier       Supplier?      @relation(fields: [supplier_id], references: [id])
   sale_items     SaleItem[]
   inventory_logs InventoryLog[]
 

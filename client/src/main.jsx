@@ -5,16 +5,19 @@ import { Toaster } from 'react-hot-toast'
 import { AuthProvider } from './context/AuthContext'
 import { CartProvider } from './context/CartContext'
 import { SettingsProvider } from './context/SettingsContext'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import App from './App.jsx'
 import './index.css'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <BrowserRouter>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <AuthProvider>
         <SettingsProvider>
           <CartProvider>
+            <ErrorBoundary>
               <App />
+            </ErrorBoundary>
             <Toaster
               position="top-right"
               toastOptions={{

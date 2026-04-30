@@ -49,14 +49,16 @@ async function createCustomer(data) {
     if (existing) throw new ConflictError('Email already registered')
   }
 
-  return prisma.customer.create({
+  const customer = await prisma.customer.create({
     data: {
-      name: data.name,
+      name: data.name.trim(),
       phone: data.phone || null,
       email: data.email || null,
       address: data.address || null,
     },
   })
+
+  return customer
 }
 
 async function updateCustomer(id, data) {

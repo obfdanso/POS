@@ -5,13 +5,17 @@ import { DashboardLayout } from '../layouts/DashboardLayout'
 import { Button } from '../components/Button'
 import { Input } from '../components/Input'
 import { productsService } from '../services/products'
+import { useSettings } from '../context/SettingsContext'
+import api from '../services/api'
 
 export default function ProductFormPage() {
   const navigate = useNavigate()
   const { id } = useParams()
   const isEditing = Boolean(id)
+  const { currency_symbol } = useSettings()
 
   const [categories, setCategories] = useState([])
+  const [suppliers, setSuppliers] = useState([])
   const [isLoadingProduct, setIsLoadingProduct] = useState(isEditing)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errors, setErrors] = useState({})
@@ -22,6 +26,7 @@ export default function ProductFormPage() {
     sku: '',
     barcode: '',
     category_id: '',
+    supplier_id: '',
     price: '',
     cost_price: '',
     quantity: '0',
@@ -31,11 +36,14 @@ export default function ProductFormPage() {
   const [imageFile, setImageFile] = useState(null)
   const [imagePreview, setImagePreview] = useState(null)
 
-  // Load categories
+  // Load categories and suppliers in parallel
   useEffect(() => {
     productsService.categories()
       .then((res) => setCategories(res.data?.data || []))
       .catch(() => toast.error('Failed to load categories'))
+    api.get('/suppliers', { params: { per_page: 100 } })
+      .then((res) => setSuppliers(res.data?.data || []))
+      .catch(() => {}) // non-critical — supplier field will just be empty
   }, [])
 
   // Load product if editing
@@ -50,6 +58,7 @@ export default function ProductFormPage() {
           sku: p.sku || '',
           barcode: p.barcode || '',
           category_id: p.category_id || '',
+          supplier_id: p.supplier_id || '',
           price: p.price?.toString() || '',
           cost_price: p.cost_price?.toString() || '',
           quantity: p.quantity?.toString() || '0',
@@ -111,6 +120,7 @@ export default function ProductFormPage() {
         payload.append('sku', form.sku.trim())
         if (form.barcode.trim()) payload.append('barcode', form.barcode.trim())
         payload.append('category_id', form.category_id)
+        if (form.supplier_id) payload.append('supplier_id', form.supplier_id)
         payload.append('price', form.price)
         if (form.cost_price) payload.append('cost_price', form.cost_price)
         payload.append('quantity', form.quantity)
@@ -123,6 +133,7 @@ export default function ProductFormPage() {
           sku: form.sku.trim(),
           barcode: form.barcode.trim() || null,
           category_id: form.category_id,
+          supplier_id: form.supplier_id || null,
           price: parseFloat(form.price),
           cost_price: form.cost_price ? parseFloat(form.cost_price) : null,
           quantity: parseInt(form.quantity),
@@ -178,22 +189,23 @@ export default function ProductFormPage() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate('/products')}
-            className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 transition"
+            aria-label="Go back"
+            className="p-2 rounded-full hover:bg-gray-100 text-gray-500 transition"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
           </button>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">{isEditing ? 'Edit Product' : 'Add Product'}</h1>
-            <p className="text-sm text-gray-500">{isEditing ? 'Update the product details below' : 'Fill in the details for the new product'}</p>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{isEditing ? 'Edit Product' : 'Add Product'}</h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400">{isEditing ? 'Update the product details below' : 'Fill in the details for the new product'}</p>
           </div>
         </div>
 
         <form onSubmit={handleSubmit} noValidate>
           {/* Basic info */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
-            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Basic Information</h2>
+          <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6 space-y-4">
+            <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">Basic Information</h2>
 
             <Input
               label="Product Name *"
@@ -220,29 +232,45 @@ export default function ProductFormPage() {
               />
             </div>
 
-            <div>
-              <label className="text-sm font-medium text-gray-700 block mb-1">Category *</label>
-              <select
-                value={form.category_id}
-                onChange={(e) => setField('category_id', e.target.value)}
-                className={`block w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition bg-white
-                  ${errors.category_id ? 'border-danger-500 bg-danger-50' : 'border-gray-300'}`}
-              >
-                <option value="">Select a category…</option>
-                {categories.map((cat) => (
-                  <option key={cat.id} value={cat.id}>{cat.name}</option>
-                ))}
-              </select>
-              {errors.category_id && <p className="text-xs text-danger-600 mt-1">{errors.category_id}</p>}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">Category *</label>
+                <select
+                  value={form.category_id}
+                  onChange={(e) => setField('category_id', e.target.value)}
+                  className={`block w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition bg-white dark:bg-gray-800 dark:text-gray-100 dark:border-gray-700
+                    ${errors.category_id ? 'border-danger-500 bg-danger-50' : 'border-gray-300'}`}
+                >
+                  <option value="">Select a category…</option>
+                  {categories.map((cat) => (
+                    <option key={cat.id} value={cat.id}>{cat.name}</option>
+                  ))}
+                </select>
+                {errors.category_id && <p className="text-xs text-danger-600 mt-1">{errors.category_id}</p>}
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">Supplier</label>
+                <select
+                  value={form.supplier_id}
+                  onChange={(e) => setField('supplier_id', e.target.value)}
+                  className="block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition bg-white dark:bg-gray-800 dark:text-gray-100"
+                >
+                  <option value="">No supplier</option>
+                  {suppliers.map((sup) => (
+                    <option key={sup.id} value={sup.id}>{sup.name}</option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 
           {/* Pricing */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4 mt-4">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6 space-y-4 mt-4">
             <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Pricing</h2>
             <div className="grid grid-cols-2 gap-4">
               <Input
-                label="Selling Price (GH₵) *"
+                label={`Selling Price (${currency_symbol}) *`}
                 type="number"
                 min="0.01"
                 step="0.01"
@@ -252,7 +280,7 @@ export default function ProductFormPage() {
                 error={errors.price}
               />
               <Input
-                label="Cost Price (GH₵)"
+                label={`Cost Price (${currency_symbol})`}
                 type="number"
                 min="0"
                 step="0.01"
@@ -265,7 +293,7 @@ export default function ProductFormPage() {
           </div>
 
           {/* Inventory */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4 mt-4">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6 space-y-4 mt-4">
             <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Inventory</h2>
             <div className="grid grid-cols-2 gap-4">
               <Input
@@ -298,7 +326,7 @@ export default function ProductFormPage() {
           </div>
 
           {/* Image upload */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4 mt-4">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6 space-y-4 mt-4">
             <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Product Image</h2>
 
             <div className="flex items-start gap-4">

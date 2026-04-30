@@ -11,6 +11,18 @@ import DashboardPage from './pages/DashboardPage'
 import ReportsPage from './pages/ReportsPage'
 import UsersPage from './pages/UsersPage'
 import SettingsPage from './pages/SettingsPage'
+import CashierDashboardPage from './pages/CashierDashboardPage'
+import CashierSalesPage from './pages/CashierSalesPage'
+import CashierProfilePage from './pages/CashierProfilePage'
+import CashierCustomerLookupPage from './pages/CashierCustomerLookupPage'
+
+const STAFF_ROLES = ['ADMIN', 'MANAGER', 'CASHIER']
+
+function getDefaultPath(role) {
+  if (role === 'ADMIN' || role === 'MANAGER') return '/dashboard'
+  if (role === 'CASHIER') return '/cashier/dashboard'
+  return '/login'
+}
 
 function LoadingScreen() {
   return (
@@ -31,7 +43,10 @@ function ProtectedRoute({ children, roles }) {
 
   if (isLoading) return <LoadingScreen />
   if (!isAuthenticated) return <Navigate to="/login" replace />
-  if (roles && !roles.includes(user.role)) return <Navigate to="/pos" replace />
+
+  if (roles && !roles.includes(user.role)) {
+    return <Navigate to={getDefaultPath(user.role)} replace />
+  }
 
   return children
 }
@@ -41,7 +56,7 @@ function PublicRoute({ children }) {
 
   if (isLoading) return <LoadingScreen />
   if (isAuthenticated) {
-    return <Navigate to={['ADMIN', 'MANAGER'].includes(user.role) ? '/dashboard' : '/pos'} replace />
+    return <Navigate to={getDefaultPath(user.role)} replace />
   }
 
   return children
@@ -60,17 +75,57 @@ export default function App() {
         }
       />
 
-      {/* Cashier + above */}
+      {/* ── Cashier routes ── */}
       <Route
-        path="/pos"
+        path="/cashier/dashboard"
         element={
-          <ProtectedRoute roles={['CASHIER', 'MANAGER', 'ADMIN']}>
-            <POSPage />
+          <ProtectedRoute roles={['CASHIER']}>
+            <CashierDashboardPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/cashier/sales"
+        element={
+          <ProtectedRoute roles={['CASHIER']}>
+            <CashierSalesPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/cashier/customers"
+        element={
+          <ProtectedRoute roles={['CASHIER']}>
+            <CashierCustomerLookupPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/cashier/customers/:id"
+        element={
+          <ProtectedRoute roles={['CASHIER']}>
+            <CustomerDetailPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/cashier/profile"
+        element={
+          <ProtectedRoute roles={['CASHIER']}>
+            <CashierProfilePage />
           </ProtectedRoute>
         }
       />
 
-      {/* Manager + above */}
+      {/* ── Staff routes ── */}
+      <Route
+        path="/pos"
+        element={
+          <ProtectedRoute roles={STAFF_ROLES}>
+            <POSPage />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/products"
         element={
@@ -119,8 +174,6 @@ export default function App() {
           </ProtectedRoute>
         }
       />
-
-      {/* Manager + Admin */}
       <Route
         path="/dashboard"
         element={
@@ -155,7 +208,7 @@ export default function App() {
       />
 
       {/* Redirects */}
-      <Route path="/" element={<Navigate to="/pos" replace />} />
+      <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   )

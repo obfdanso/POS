@@ -135,8 +135,8 @@ export default function InventoryPage() {
       label: 'Product',
       render: (val, row) => (
         <div>
-          <p className="font-medium text-gray-900">{val}</p>
-          <p className="text-xs text-gray-400">{row.sku}</p>
+          <p className="font-medium text-gray-900 dark:text-gray-100">{val}</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500">{row.sku}</p>
         </div>
       ),
     },
@@ -150,7 +150,7 @@ export default function InventoryPage() {
       label: 'Current Stock',
       render: (val, row) => (
         <div className="flex items-center gap-2">
-          <span className={`text-lg font-bold ${val === 0 ? 'text-danger-600' : val <= row.low_stock_threshold ? 'text-warning-600' : 'text-gray-900'}`}>
+          <span className={`text-lg font-bold ${val === 0 ? 'text-danger-600' : val <= row.low_stock_threshold ? 'text-warning-600' : 'text-gray-900 dark:text-gray-100'}`}>
             {val}
           </span>
           <span className="text-xs text-gray-400">units</span>
@@ -160,7 +160,7 @@ export default function InventoryPage() {
     {
       key: 'low_stock_threshold',
       label: 'Threshold',
-      render: (val) => <span className="text-sm text-gray-600">{val}</span>,
+      render: (val) => <span className="text-sm text-gray-600 dark:text-gray-400">{val}</span>,
     },
     {
       key: 'price',
@@ -168,9 +168,9 @@ export default function InventoryPage() {
       render: (val) => formatCurrency(val),
     },
     {
-      key: 'quantity',
+      key: 'stock_status',
       label: 'Status',
-      render: (val, row) => <StockStatusBadge quantity={val} threshold={row.low_stock_threshold} />,
+      render: (_, row) => <StockStatusBadge quantity={row.quantity} threshold={row.low_stock_threshold} />,
     },
     {
       key: 'id',
@@ -188,15 +188,15 @@ export default function InventoryPage() {
       <div className="space-y-5">
         {/* Page header */}
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Inventory</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Monitor and manage stock levels across all products</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Inventory</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Monitor and manage stock levels across all products</p>
         </div>
 
         {/* Stats bar */}
         <div className="grid grid-cols-3 gap-4">
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
-            <p className="text-sm text-gray-500">Total Products</p>
-            <p className="text-3xl font-bold text-gray-900 mt-1">{stats.total}</p>
+          <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-4">
+            <p className="text-sm text-gray-500 dark:text-gray-400">Total Products</p>
+            <p className="text-3xl font-bold text-gray-900 dark:text-gray-100 mt-1">{stats.total}</p>
           </div>
           <div className="bg-warning-50 rounded-xl border border-warning-100 p-4">
             <p className="text-sm text-warning-700">Low Stock</p>
@@ -211,15 +211,15 @@ export default function InventoryPage() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
+        <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 p-1 rounded-xl w-fit">
           {TABS.map((tab) => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition ${
+              className={`px-4 py-2 text-sm font-medium rounded-full transition ${
                 activeTab === tab.key
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-700'
+                  ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
               }`}
             >
               {tab.label}
@@ -234,7 +234,7 @@ export default function InventoryPage() {
         </div>
 
         {/* Table */}
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
           <Table
             columns={columns}
             data={products}
@@ -252,7 +252,7 @@ export default function InventoryPage() {
         {/* Pagination (not for low-stock tab since it returns all results) */}
         {activeTab !== 'low' && meta.total_pages > 1 && (
           <div className="flex items-center justify-between">
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-gray-500 dark:text-gray-400">
               Page {meta.page} of {meta.total_pages} &mdash; {meta.total} results
             </p>
             <Pagination page={meta.page} total_pages={meta.total_pages} onPageChange={setPage} />
@@ -270,17 +270,17 @@ export default function InventoryPage() {
         {adjustTarget && (
           <div className="space-y-4">
             {/* Product info */}
-            <div className="bg-gray-50 rounded-lg px-4 py-3">
-              <p className="text-sm font-semibold text-gray-900">{adjustTarget.name}</p>
-              <p className="text-xs text-gray-500">{adjustTarget.sku}</p>
-              <p className="text-sm mt-1">
-                Current stock: <span className="font-bold text-gray-900">{adjustTarget.quantity} units</span>
+            <div className="bg-gray-50 dark:bg-gray-800 rounded-xl px-4 py-3">
+              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{adjustTarget.name}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{adjustTarget.sku}</p>
+              <p className="text-sm mt-1 dark:text-gray-300">
+                Current stock: <span className="font-bold text-gray-900 dark:text-gray-100">{adjustTarget.quantity} units</span>
               </p>
             </div>
 
             {/* Type selector */}
             <div>
-              <p className="text-sm font-medium text-gray-700 mb-2">Adjustment Type</p>
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Adjustment Type</p>
               <div className="grid grid-cols-2 gap-2">
                 {[
                   { value: 'RESTOCK', label: 'Restock (+)', desc: 'Add stock' },
@@ -290,13 +290,13 @@ export default function InventoryPage() {
                     key={opt.value}
                     type="button"
                     onClick={() => { setAdjustForm((f) => ({ ...f, type: opt.value })); setAdjustErrors({}) }}
-                    className={`py-2.5 px-3 rounded-lg border text-left transition ${
+                    className={`py-2.5 px-3 rounded-full border text-left transition ${
                       adjustForm.type === opt.value
                         ? 'border-primary-500 bg-primary-50'
-                        : 'border-gray-200 bg-white hover:border-gray-300'
+                        : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600'
                     }`}
                   >
-                    <p className={`text-sm font-medium ${adjustForm.type === opt.value ? 'text-primary-700' : 'text-gray-700'}`}>{opt.label}</p>
+                    <p className={`text-sm font-medium ${adjustForm.type === opt.value ? 'text-primary-700' : 'text-gray-700 dark:text-gray-300'}`}>{opt.label}</p>
                     <p className="text-xs text-gray-400">{opt.desc}</p>
                   </button>
                 ))}
@@ -318,13 +318,13 @@ export default function InventoryPage() {
 
             {/* Notes */}
             <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium text-gray-700">Notes (optional)</label>
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Notes (optional)</label>
               <textarea
                 value={adjustForm.notes}
                 onChange={(e) => setAdjustForm((f) => ({ ...f, notes: e.target.value }))}
                 placeholder="Reason for adjustment…"
                 rows={2}
-                className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none"
+                className="block w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none"
               />
             </div>
 

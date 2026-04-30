@@ -100,11 +100,12 @@ export default function CustomersPage() {
       if (editTarget) {
         await customersService.update(editTarget.id, payload)
         toast.success('Customer updated')
+        closeModal()
       } else {
         await customersService.create(payload)
-        toast.success('Customer added')
+        closeModal()
+        toast.success('Customer added successfully')
       }
-      closeModal()
       fetchCustomers()
     } catch (err) {
       const msg = err?.response?.data?.error?.message ?? 'Failed to save customer'
@@ -115,7 +116,7 @@ export default function CustomersPage() {
   }
 
   const columns = [
-    { key: 'name', label: 'Name', render: (v) => <span className="font-medium text-gray-900">{v}</span> },
+    { key: 'name', label: 'Name', render: (v) => <span className="font-medium text-gray-900 dark:text-gray-100">{v}</span> },
     { key: 'phone', label: 'Phone', render: (v) => v ?? <span className="text-gray-400">—</span> },
     { key: 'email', label: 'Email', render: (v) => v ?? <span className="text-gray-400">—</span> },
     {
@@ -140,10 +141,7 @@ export default function CustomersPage() {
       label: 'Actions',
       render: (_, row) => (
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="ghost" onClick={() => navigate(`/customers/${row.id}`)}>
-            View
-          </Button>
-          <Button size="sm" variant="secondary" onClick={() => openEdit(row)}>
+          <Button size="sm" variant="secondary" onClick={(e) => { e.stopPropagation(); openEdit(row) }}>
             Edit
           </Button>
         </div>
@@ -157,8 +155,8 @@ export default function CustomersPage() {
         {/* Header */}
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Customers</h1>
-            <p className="text-sm text-gray-500 mt-1">Manage customer accounts and loyalty points</p>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Customers</h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Manage customer accounts and loyalty points</p>
           </div>
           <Button onClick={openAdd}>
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -178,8 +176,8 @@ export default function CustomersPage() {
         </div>
 
         {/* Table */}
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-          <Table columns={columns} data={customers} isLoading={loading} emptyMessage="No customers found." />
+        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm overflow-hidden">
+          <Table columns={columns} data={customers} isLoading={loading} emptyMessage="No customers found." onRowClick={(row) => navigate(`/customers/${row.id}`)} />
         </div>
 
         {/* Pagination */}

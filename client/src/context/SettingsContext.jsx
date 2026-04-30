@@ -1,22 +1,62 @@
-import { createContext, useContext, useState, useEffect } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { settingsService } from '../services/settings'
 
 const DEFAULT_SETTINGS = {
-  store_name: 'GhanaShop POS',
-  store_address: '14 Liberation Road, Accra, Ghana',
-  store_phone: '030-200-0000',
+  store_name: 'QuickMart',
+  store_address: '27 Kwame Nkrumah Ave, Kumasi, Ghana',
+  store_phone: '032-204-1234',
   tax_rate: '0',
   loyalty_points_rate: '10',
   currency_symbol: 'GH₵',
-  receipt_footer: 'Thank you for your business!',
+  receipt_footer: 'Thank you for choosing QuickMart!',
 }
 
-export const SettingsContext = createContext(DEFAULT_SETTINGS)
+export const SettingsContext = createContext({ ...DEFAULT_SETTINGS, refreshSettings: () => {} })
+export const ThemeContext = createContext({ theme: 'system', setTheme: () => {} })
+
+function applyTheme(theme) {
+  const root = document.documentElement
+  if (theme === 'dark') {
+    root.classList.add('dark')
+  } else if (theme === 'light') {
+    root.classList.remove('dark')
+  } else {
+    // system
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+    if (prefersDark) {
+      root.classList.add('dark')
+    } else {
+      root.classList.remove('dark')
+    }
+  }
+}
 
 export function SettingsProvider({ children }) {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS)
 
+  const [theme, setThemeState] = useState(() => {
+    return localStorage.getItem('pos-theme') || 'system'
+  })
+
   useEffect(() => {
+    applyTheme(theme)
+  }, [theme])
+
+  useEffect(() => {
+    if (theme !== 'system') return
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const handler = () => applyTheme('system')
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [theme])
+
+  function setTheme(newTheme) {
+    localStorage.setItem('pos-theme', newTheme)
+    setThemeState(newTheme)
+    applyTheme(newTheme)
+  }
+
+  const loadSettings = useCallback(() => {
     settingsService
       .get()
       .then((res) => {
@@ -28,9 +68,27 @@ export function SettingsProvider({ children }) {
       })
   }, [])
 
-  return <SettingsContext.Provider value={settings}>{children}</SettingsContext.Provider>
+  // Load on mount
+  useEffect(() => {
+    loadSettings()
+  }, [loadSettings])
+
+  const contextValue = {
+    ...settings,
+    refreshSettings: loadSettings,
+  }
+
+  return (
+    <ThemeContext.Provider value={{ theme, setTheme }}>
+      <SettingsContext.Provider value={contextValue}>{children}</SettingsContext.Provider>
+    </ThemeContext.Provider>
+  )
 }
 
 export function useSettings() {
   return useContext(SettingsContext)
+}
+
+export function useTheme() {
+  return useContext(ThemeContext)
 }

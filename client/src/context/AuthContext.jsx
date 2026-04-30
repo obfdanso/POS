@@ -29,6 +29,11 @@ function authReducer(state, action) {
         ...state,
         isLoading: false,
       }
+    case 'SET_USER':
+      return {
+        ...state,
+        user: { ...state.user, ...action.payload },
+      }
     default:
       return state
   }
@@ -59,7 +64,10 @@ export function AuthProvider({ children }) {
     const { data } = await api.post('/auth/login', { username, password })
     const { accessToken, user } = data.data
     setAccessToken(accessToken)
-    dispatch({ type: 'LOGIN_SUCCESS', payload: { user } })
+    // Fetch full profile so created_at and all fields are available
+    const meRes = await api.get('/auth/me')
+    const fullUser = meRes.data.data
+    dispatch({ type: 'LOGIN_SUCCESS', payload: { user: fullUser } })
     return user
   }
 
@@ -72,8 +80,13 @@ export function AuthProvider({ children }) {
     }
   }
 
+  async function refreshUser() {
+    const meRes = await api.get('/auth/me')
+    dispatch({ type: 'SET_USER', payload: meRes.data.data })
+  }
+
   return (
-    <AuthContext.Provider value={{ ...state, login, logout }}>
+    <AuthContext.Provider value={{ ...state, login, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   )

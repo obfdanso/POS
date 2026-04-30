@@ -48,9 +48,9 @@ function Spinner() {
 
 function KpiCard({ label, value }) {
   return (
-    <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
-      <p className="text-sm text-gray-500">{label}</p>
-      <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
+    <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl p-5 shadow-sm">
+      <p className="text-sm text-gray-500 dark:text-gray-400">{label}</p>
+      <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">{value}</p>
     </div>
   )
 }
@@ -71,6 +71,12 @@ export default function ReportsPage() {
   const [startDate, setStartDate] = useState(formatDate(-29))
   const [endDate, setEndDate] = useState(formatDate(0))
   const [loading, setLoading] = useState(false)
+
+  // Reset date range to last 30 days on every app start / page mount
+  useEffect(() => {
+    setStartDate(formatDate(-29))
+    setEndDate(formatDate(0))
+  }, [])
 
   const [summaryData, setSummaryData] = useState(null)
   const [dailyData, setDailyData] = useState([])
@@ -179,30 +185,30 @@ export default function ReportsPage() {
       <div className="space-y-6">
         {/* Header */}
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Reports</h1>
-          <p className="text-sm text-gray-500 mt-1">Business analytics and performance insights</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Reports</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Business analytics and performance insights</p>
         </div>
 
         {/* Date range */}
-        <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm flex flex-wrap items-end gap-4">
+        <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl p-4 shadow-sm flex flex-wrap items-end gap-4">
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">Start Date</label>
+            <label className="text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide">Start Date</label>
             <input
               type="date"
               value={startDate}
               max={endDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">End Date</label>
+            <label className="text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide">End Date</label>
             <input
               type="date"
               value={endDate}
               min={startDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
             />
           </div>
           <Button onClick={handleApply} isLoading={loading}>
@@ -211,7 +217,7 @@ export default function ReportsPage() {
         </div>
 
         {/* Tabs */}
-        <div className="border-b border-gray-200">
+        <div className="border-b border-gray-200 dark:border-gray-800">
           <nav className="-mb-px flex gap-1 overflow-x-auto">
             {TABS.map((tab) => (
               <button
@@ -220,7 +226,7 @@ export default function ReportsPage() {
                 className={`whitespace-nowrap px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
                   activeTab === tab.id
                     ? 'border-primary-600 text-primary-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-600'
                 }`}
               >
                 {tab.label}
@@ -268,8 +274,8 @@ export default function ReportsPage() {
               ) : dailyData.length === 0 ? (
                 <p className="text-center text-gray-400 py-10">No data available</p>
               ) : (
-                <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm">
-                  <h2 className="text-base font-semibold text-gray-900 mb-4">Daily Revenue</h2>
+                <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-xl p-6 shadow-sm">
+                  <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-4">Daily Revenue</h2>
                   <ResponsiveContainer width="100%" height={320}>
                     <BarChart data={dailyData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -297,24 +303,24 @@ export default function ReportsPage() {
               ) : topData.length === 0 ? (
                 <p className="text-center text-gray-400 py-10">No data available</p>
               ) : (
-                <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
+                <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-xl shadow-sm overflow-hidden">
+                  <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead className="bg-gray-50 dark:bg-gray-800">
                       <tr>
                         {['#', 'Product', 'Qty Sold', 'Revenue'].map((h) => (
-                          <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                             {h}
                           </th>
                         ))}
                       </tr>
                     </thead>
-                    <tbody className="bg-white divide-y divide-gray-100">
+                    <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-800">
                       {topData.map((p, i) => (
-                        <tr key={i} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 text-sm text-gray-500">{i + 1}</td>
-                          <td className="px-4 py-3 text-sm font-medium text-gray-900">{p.name ?? p.label}</td>
-                          <td className="px-4 py-3 text-sm text-gray-700">{p.quantity_sold ?? p.quantity ?? '—'}</td>
-                          <td className="px-4 py-3 text-sm font-semibold text-gray-900">{formatCurrency(p.revenue ?? p.value ?? 0)}</td>
+                        <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                          <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">{i + 1}</td>
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{p.name ?? p.label}</td>
+                          <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{p.quantity_sold ?? p.quantity ?? '—'}</td>
+                          <td className="px-4 py-3 text-sm font-semibold text-gray-900 dark:text-gray-100">{formatCurrency(p.revenue ?? p.value ?? 0)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -338,28 +344,28 @@ export default function ReportsPage() {
                 <p className="text-center text-gray-400 py-10">No data available</p>
               ) : (
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                  <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
-                    <table className="min-w-full divide-y divide-gray-200">
-                      <thead className="bg-gray-50">
+                  <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-xl shadow-sm overflow-hidden">
+                    <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                      <thead className="bg-gray-50 dark:bg-gray-800">
                         <tr>
                           {['Category', 'Revenue'].map((h) => (
-                            <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                               {h}
                             </th>
                           ))}
                         </tr>
                       </thead>
-                      <tbody className="bg-white divide-y divide-gray-100">
+                      <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-800">
                         {catData.map((c, i) => (
-                          <tr key={i} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 text-sm font-medium text-gray-900">{c.label}</td>
-                            <td className="px-4 py-3 text-sm text-gray-900">{formatCurrency(c.value ?? 0)}</td>
+                          <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{c.label}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">{formatCurrency(c.value ?? 0)}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
-                  <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-6">
+                  <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-xl shadow-sm p-6">
                     <ResponsiveContainer width="100%" height={280}>
                       <PieChart>
                         <Pie data={catData} dataKey="value" nameKey="label" cx="50%" cy="50%" outerRadius={100}>
@@ -390,23 +396,23 @@ export default function ReportsPage() {
               ) : cashierData.length === 0 ? (
                 <p className="text-center text-gray-400 py-10">No data available</p>
               ) : (
-                <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
+                <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-xl shadow-sm overflow-hidden">
+                  <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead className="bg-gray-50 dark:bg-gray-800">
                       <tr>
                         {['Cashier', 'Transactions', 'Total Revenue'].map((h) => (
-                          <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                             {h}
                           </th>
                         ))}
                       </tr>
                     </thead>
-                    <tbody className="bg-white divide-y divide-gray-100">
+                    <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-800">
                       {cashierData.map((c, i) => (
-                        <tr key={i} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 text-sm font-medium text-gray-900">{c.name ?? c.label}</td>
-                          <td className="px-4 py-3 text-sm text-gray-700">{c.transaction_count ?? c.count ?? 0}</td>
-                          <td className="px-4 py-3 text-sm font-semibold text-gray-900">{formatCurrency(c.total_revenue ?? c.value ?? 0)}</td>
+                        <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{c.name ?? c.label}</td>
+                          <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{c.transaction_count ?? c.count ?? 0}</td>
+                          <td className="px-4 py-3 text-sm font-semibold text-gray-900 dark:text-gray-100">{formatCurrency(c.total_revenue ?? c.value ?? 0)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -429,29 +435,29 @@ export default function ReportsPage() {
               ) : profitData.length === 0 ? (
                 <p className="text-center text-gray-400 py-10">No data available</p>
               ) : (
-                <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
+                <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-xl shadow-sm overflow-hidden">
+                  <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead className="bg-gray-50 dark:bg-gray-800">
                       <tr>
                         {['Product', 'Revenue', 'Cost', 'Profit', 'Margin %'].map((h) => (
-                          <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                             {h}
                           </th>
                         ))}
                       </tr>
                     </thead>
-                    <tbody className="bg-white divide-y divide-gray-100">
+                    <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-800">
                       {profitData.map((p, i) => {
                         const margin = p.margin ?? (p.revenue && p.profit != null ? ((p.profit / p.revenue) * 100) : null)
                         return (
-                          <tr key={i} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 text-sm font-medium text-gray-900">{p.name ?? p.label}</td>
-                            <td className="px-4 py-3 text-sm text-gray-700">{formatCurrency(p.revenue ?? 0)}</td>
-                            <td className="px-4 py-3 text-sm text-gray-700">{formatCurrency(p.cost ?? 0)}</td>
+                          <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{p.name ?? p.label}</td>
+                            <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{formatCurrency(p.revenue ?? 0)}</td>
+                            <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{formatCurrency(p.cost ?? 0)}</td>
                             <td className={`px-4 py-3 text-sm font-semibold ${(p.profit ?? 0) >= 0 ? 'text-success-700' : 'text-danger-700'}`}>
                               {formatCurrency(p.profit ?? 0)}
                             </td>
-                            <td className="px-4 py-3 text-sm text-gray-700">
+                            <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
                               {margin != null ? `${margin.toFixed(1)}%` : '—'}
                             </td>
                           </tr>

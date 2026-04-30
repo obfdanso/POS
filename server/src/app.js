@@ -16,6 +16,8 @@ const customerRoutes = require('./routes/customers')
 const reportRoutes = require('./routes/reports')
 const userRoutes = require('./routes/users')
 const settingsRoutes = require('./routes/settings')
+const paymentRoutes = require('./routes/payments')
+const supplierRoutes = require('./routes/suppliers')
 
 const app = express()
 
@@ -31,7 +33,7 @@ app.use(
 )
 
 // Request parsing
-app.use(express.json({ limit: '10mb' }))
+app.use(express.json({ limit: '1mb' }))
 app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())
 
@@ -40,6 +42,9 @@ app.use(morgan('combined', { stream: morganStream }))
 
 // Static files for uploaded product images
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')))
+
+// Static files for seeded product images (named by SKU, e.g. /product-images/BEV-001.jpg)
+app.use('/product-images', express.static(path.join(__dirname, '..', 'product-images')))
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -59,6 +64,8 @@ app.use('/api/customers', customerRoutes)
 app.use('/api/reports', reportRoutes)
 app.use('/api/users', userRoutes)
 app.use('/api/settings', settingsRoutes)
+app.use('/api/payments', paymentRoutes)
+app.use('/api/suppliers', supplierRoutes)
 
 // 404 handler
 app.use((req, res) => {

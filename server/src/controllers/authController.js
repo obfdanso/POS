@@ -34,7 +34,7 @@ async function login(req, res, next) {
 
 async function logout(req, res, next) {
   try {
-    await authService.logout(req.user?.id, req.ip, req.headers['user-agent'])
+    await authService.logout(req.user?.id, req.ip, req.headers['user-agent'], req.cookies?.refreshToken)
 
     res.clearCookie('refreshToken', {
       httpOnly: true,
@@ -55,6 +55,9 @@ async function refresh(req, res, next) {
   try {
     const tokenFromCookie = req.cookies?.refreshToken
     const result = await authService.refreshToken(tokenFromCookie)
+
+    // Rotate cookie: replace old refresh token with newly issued one
+    res.cookie('refreshToken', result.refreshToken, COOKIE_OPTIONS)
 
     res.status(200).json({
       success: true,
@@ -78,4 +81,28 @@ async function getMe(req, res, next) {
   }
 }
 
-module.exports = { login, logout, refresh, getMe }
+async function changePassword(req, res, next) {
+  try {
+    const { current_password, new_password } = req.body
+    await authService.changePassword(req.user.id, current_password, new_password)
+    res.status(200).json({ success: true, message: 'Password changed successfully' })
+  } catch (err) {
+    next(err)
+  }
+}
+
+async function updateProfile(req, res, next) {
+  try {
+    const { full_name, email } = req.body
+    const user = await authService.updateProfile(req.user.id, { full_name, email })
+    res.status(200).json({
+      success: true,
+      data: user,
+      message: 'Profile updated successfully',
+    })
+  } catch (err) {
+    next(err)
+  }
+}
+
+module.exports = { login, logout, refresh, getMe, changePassword, updateProfile }

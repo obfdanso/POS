@@ -5,6 +5,10 @@ const { authenticate, authorize } = require('../middleware/auth')
 const router = express.Router()
 
 router.use(authenticate)
+
+// Cashier-accessible route (must be registered before the ADMIN/MANAGER authorize middleware)
+router.get('/cashier-stats', authorize(['ADMIN', 'MANAGER', 'CASHIER']), reportController.getCashierStats)
+
 router.use(authorize(['ADMIN', 'MANAGER']))
 
 router.get('/dashboard', reportController.getDashboardSummary)

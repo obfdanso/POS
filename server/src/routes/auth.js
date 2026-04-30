@@ -26,9 +26,21 @@ const loginValidation = [
   body('password').notEmpty().withMessage('Password is required'),
 ]
 
+const changePasswordValidation = [
+  body('current_password').notEmpty().withMessage('Current password is required'),
+  body('new_password').isLength({ min: 6 }).withMessage('New password must be at least 6 characters'),
+]
+
+const profileValidation = [
+  body('full_name').optional().trim().isLength({ max: 100 }).withMessage('Full name must be under 100 characters'),
+  body('email').optional().isEmail().normalizeEmail().withMessage('Valid email is required'),
+]
+
 router.post('/login', authLimiter, loginValidation, validate, authController.login)
 router.post('/logout', authenticate, authController.logout)
 router.post('/refresh', authLimiter, authController.refresh)
 router.get('/me', authenticate, authController.getMe)
+router.post('/change-password', authenticate, changePasswordValidation, validate, authController.changePassword)
+router.put('/profile', authenticate, profileValidation, validate, authController.updateProfile)
 
 module.exports = router

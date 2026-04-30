@@ -23,7 +23,10 @@ async function listProducts({ page = 1, per_page = 20, search, category_id, incl
       where,
       skip,
       take,
-      include: { category: { select: { id: true, name: true } } },
+      include: {
+        category: { select: { id: true, name: true } },
+        supplier: { select: { id: true, name: true } },
+      },
       orderBy: { name: 'asc' },
     }),
     prisma.product.count({ where }),
@@ -35,7 +38,10 @@ async function listProducts({ page = 1, per_page = 20, search, category_id, incl
 async function getProductById(id) {
   const product = await prisma.product.findUnique({
     where: { id },
-    include: { category: { select: { id: true, name: true } } },
+    include: {
+      category: { select: { id: true, name: true } },
+      supplier: { select: { id: true, name: true } },
+    },
   })
   if (!product) throw new NotFoundError('Product not found')
   return product
@@ -44,7 +50,10 @@ async function getProductById(id) {
 async function getProductByBarcode(barcode) {
   const product = await prisma.product.findUnique({
     where: { barcode },
-    include: { category: { select: { id: true, name: true } } },
+    include: {
+      category: { select: { id: true, name: true } },
+      supplier: { select: { id: true, name: true } },
+    },
   })
   if (!product) throw new NotFoundError('Product not found')
   if (!product.is_active) throw new NotFoundError('Product is inactive')
@@ -71,13 +80,17 @@ async function createProduct(data) {
       sku: data.sku,
       barcode: data.barcode || null,
       category_id: data.category_id,
+      supplier_id: data.supplier_id || null,
       price: data.price,
       cost_price: data.cost_price || null,
       quantity: data.quantity ?? 0,
       low_stock_threshold: data.low_stock_threshold ?? 10,
       image_url: data.image_url || null,
     },
-    include: { category: { select: { id: true, name: true } } },
+    include: {
+      category: { select: { id: true, name: true } },
+      supplier: { select: { id: true, name: true } },
+    },
   })
 
   return product
@@ -108,13 +121,17 @@ async function updateProduct(id, data) {
       ...(data.sku !== undefined && { sku: data.sku }),
       ...(data.barcode !== undefined && { barcode: data.barcode || null }),
       ...(data.category_id !== undefined && { category_id: data.category_id }),
+      ...(data.supplier_id !== undefined && { supplier_id: data.supplier_id || null }),
       ...(data.price !== undefined && { price: data.price }),
       ...(data.cost_price !== undefined && { cost_price: data.cost_price || null }),
       ...(data.quantity !== undefined && { quantity: data.quantity }),
       ...(data.low_stock_threshold !== undefined && { low_stock_threshold: data.low_stock_threshold }),
       ...(data.image_url !== undefined && { image_url: data.image_url || null }),
     },
-    include: { category: { select: { id: true, name: true } } },
+    include: {
+      category: { select: { id: true, name: true } },
+      supplier: { select: { id: true, name: true } },
+    },
   })
 
   return product

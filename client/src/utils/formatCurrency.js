@@ -7,7 +7,7 @@
 export function formatCurrency(amount, symbol = 'GH₵') {
   const num = parseFloat(amount)
   if (isNaN(num)) return `${symbol} 0.00`
-  return `${symbol} ${num.toLocaleString('en-GH', {
+  return `${symbol} ${num.toLocaleString('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`

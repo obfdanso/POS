@@ -29,7 +29,7 @@ const logger = winston.createLogger({
 })
 
 const morganStream = {
-  write: (message) => logger.http(message.trim()),
+  write: (message) => logger.info(message.trim()),
 }
 
 module.exports = { logger, morganStream }

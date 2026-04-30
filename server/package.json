@@ -12,6 +12,9 @@
     "db:seed": "npx prisma db seed",
     "db:studio": "npx prisma studio",
     "db:backup": "node scripts/backup.js",
+    "db:restore": "node scripts/restore.js",
+    "clear-sales": "node scripts/clear-sales.js",
+    "import-images": "node scripts/import-product-images.js",
     "lint": "eslint src/"
   },
   "prisma": {

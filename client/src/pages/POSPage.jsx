@@ -11,6 +11,7 @@ import { Modal } from '../components/Modal'
 import { Badge } from '../components/Badge'
 import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../context/SettingsContext'
+import { DashboardLayout } from '../layouts/DashboardLayout'
 
 // ─── Receipt Component (rendered inside a modal, printable) ───────────────────
 function Receipt({ sale, onClose }) {
@@ -19,12 +20,87 @@ function Receipt({ sale, onClose }) {
   const fmt = (v) => formatCurrency(v, sym)
 
   function handlePrint() {
-    window.print()
+    const sym = settings.currency_symbol || 'GH₵'
+    function fmt(v) {
+      const num = parseFloat(v)
+      if (isNaN(num)) return `${sym} 0.00`
+      return `${sym} ${num.toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    }
+
+    const itemsHTML = (items || []).map((item) => `
+      <tr>
+        <td style="text-align:left;padding:2px 0;">${item.product?.name || item.name || ''}</td>
+        <td style="text-align:center;padding:2px 4px;">${item.quantity}</td>
+        <td style="text-align:right;padding:2px 4px;">${fmt(item.unit_price)}</td>
+        <td style="text-align:right;padding:2px 0;">${fmt(item.total)}</td>
+      </tr>`).join('')
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Receipt ${transaction_id}</title>
+  <style>
+    body { font-family: monospace; font-size: 12px; width: 80mm; margin: 0 auto; padding: 8px; color: #000; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; }
+    .center { text-align: center; }
+    .right { text-align: right; }
+    .bold { font-weight: bold; }
+    .dashed { border-top: 1px dashed #000; margin: 6px 0; }
+    .row { display: flex; justify-content: space-between; margin: 2px 0; }
+  </style>
+</head>
+<body>
+  <div class="center">
+    <div class="bold" style="font-size:14px;">${settings.store_name || 'QuickMart'}</div>
+    ${settings.store_address ? `<div>${settings.store_address}</div>` : ''}
+    ${settings.store_phone ? `<div>Tel: ${settings.store_phone}</div>` : ''}
+  </div>
+  <div class="dashed"></div>
+  <div class="row"><span>TXN:</span><span>${transaction_id}</span></div>
+  <div class="row"><span>Date:</span><span>${new Date(created_at).toLocaleString('en-GH')}</span></div>
+  <div class="row"><span>Cashier:</span><span>${user?.full_name || '—'}</span></div>
+  ${customer ? `<div class="row"><span>Customer:</span><span>${customer.name}</span></div>` : ''}
+  <div class="dashed"></div>
+  <table>
+    <thead>
+      <tr>
+        <th>Item</th>
+        <th style="text-align:center;">Qty</th>
+        <th style="text-align:right;">Price</th>
+        <th style="text-align:right;">Total</th>
+      </tr>
+    </thead>
+    <tbody>${itemsHTML}</tbody>
+  </table>
+  <div class="dashed"></div>
+  <div class="row"><span>Subtotal:</span><span>${fmt(subtotal)}</span></div>
+  ${parseFloat(discount_amount) > 0 ? `<div class="row"><span>Discount:</span><span>-${fmt(discount_amount)}</span></div>` : ''}
+  ${parseFloat(tax_amount) > 0 ? `<div class="row"><span>Tax:</span><span>${fmt(tax_amount)}</span></div>` : ''}
+  <div class="dashed"></div>
+  <div class="row bold" style="font-size:14px;"><span>TOTAL:</span><span>${fmt(total_amount)}</span></div>
+  <div class="row"><span>Payment:</span><span>${payment_method}</span></div>
+  ${payment?.amount_paid ? `<div class="row"><span>Amount Paid:</span><span>${fmt(payment.amount_paid)}</span></div>` : ''}
+  ${parseFloat(payment?.change_given) > 0 ? `<div class="row"><span>Change:</span><span>${fmt(payment.change_given)}</span></div>` : ''}
+  ${payment?.reference ? `<div class="row"><span>Reference:</span><span>${payment.reference}</span></div>` : ''}
+  <div class="dashed"></div>
+  <div class="center">${settings.receipt_footer || 'Thank you for choosing QuickMart!'}</div>
+</body>
+</html>`
+
+    const win = window.open('', '_blank', `width=${screen.availWidth},height=${screen.availHeight},left=0,top=0`)
+    win.document.write(html)
+    win.document.close()
+    win.focus()
+    win.print()
+    win.addEventListener('afterprint', () => win.close())
   }
 
   if (!sale) return null
 
-  const { transaction_id, created_at, user, customer, items, subtotal, discount_amount, tax_amount, total_amount, payment_method, payment } = sale
+  const { transaction_id, created_at, user, customer, sale_items: items, subtotal, discount_amount, tax_amount, total_amount, payment_method, payments } = sale
+  const payment = payments?.[0]
 
   return (
     <>
@@ -37,12 +113,14 @@ function Receipt({ sale, onClose }) {
           .receipt-no-print { display: none !important; }
         }
         .receipt-print-wrapper { display: none; }
+        .receipt-root { background-color: white !important; color: #111827 !important; }
+        .receipt-root, .receipt-root p, .receipt-root span, .receipt-root div { color: #111827 !important; border-color: #9ca3af !important; }
       `}</style>
 
       {/* Screen receipt inside modal */}
       <div className="receipt-root font-mono text-sm text-gray-900">
         <div className="text-center mb-3">
-          <p className="font-bold text-base">{settings.store_name || 'GhanaShop POS'}</p>
+          <p className="font-bold text-base">{settings.store_name || 'QuickMart'}</p>
           {settings.store_address && <p className="text-xs text-gray-500">{settings.store_address}</p>}
           {settings.store_phone && <p className="text-xs text-gray-500">Tel: {settings.store_phone}</p>}
         </div>
@@ -97,7 +175,7 @@ function Receipt({ sale, onClose }) {
         </div>
 
         <div className="border-t border-dashed border-gray-400 mt-3 pt-2 text-center text-xs text-gray-500">
-          <p>{settings.receipt_footer || 'Thank you for shopping with us!'}</p>
+          <p>{settings.receipt_footer || 'Thank you for choosing QuickMart!'}</p>
         </div>
       </div>
 
@@ -105,7 +183,7 @@ function Receipt({ sale, onClose }) {
       <div className="receipt-print-wrapper">
         <div className="receipt-root font-mono text-sm text-gray-900 p-4">
           <div className="text-center mb-3">
-            <p className="font-bold text-base">{settings.store_name || 'GhanaShop POS'}</p>
+            <p className="font-bold text-base">{settings.store_name || 'QuickMart'}</p>
             {settings.store_address && <p className="text-xs">{settings.store_address}</p>}
             {settings.store_phone && <p className="text-xs">Tel: {settings.store_phone}</p>}
           </div>
@@ -141,7 +219,7 @@ function Receipt({ sale, onClose }) {
             {payment?.change_given > 0 && <div className="flex justify-between"><span>Change:</span><span>{formatCurrency(payment.change_given)}</span></div>}
             {payment?.reference && <div className="flex justify-between"><span>Ref:</span><span>{payment.reference}</span></div>}
           </div>
-          <div className="border-t border-dashed mt-2 pt-2 text-center text-xs">{settings.receipt_footer || 'Thank you for shopping with us!'}</div>
+          <div className="border-t border-dashed mt-2 pt-2 text-center text-xs">{settings.receipt_footer || 'Thank you for choosing QuickMart!'}</div>
         </div>
       </div>
 
@@ -159,17 +237,15 @@ function Receipt({ sale, onClose }) {
 }
 
 // ─── Payment Modal ─────────────────────────────────────────────────────────────
-function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading }) {
+function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCustomer }) {
   const [method, setMethod] = useState('CASH')
   const [amountPaid, setAmountPaid] = useState('')
-  const [reference, setReference] = useState('')
   const [errors, setErrors] = useState({})
 
   useEffect(() => {
     if (isOpen) {
       setMethod('CASH')
       setAmountPaid('')
-      setReference('')
       setErrors({})
     }
   }, [isOpen])
@@ -182,28 +258,52 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading }) {
       if (!amountPaid || parseFloat(amountPaid) < total) {
         errs.amountPaid = `Amount must be at least ${formatCurrency(total)}`
       }
-    } else {
-      if (!reference.trim()) {
-        errs.reference = 'Transaction reference is required'
-      }
     }
     setErrors(errs)
     return Object.keys(errs).length === 0
   }
 
   function handleConfirm() {
-    if (!validate()) return
-    onConfirm({
-      payment_method: method,
-      amount_paid: method === 'CASH' ? parseFloat(amountPaid) : total,
-      reference: method !== 'CASH' ? reference : undefined,
+    if (method === 'CASH') {
+      if (!validate()) return
+      onConfirm({
+        payment_method: 'CASH',
+        amount_paid: parseFloat(amountPaid),
+      })
+      return
+    }
+
+    // CARD or MOBILE_MONEY — open Paystack popup
+    const handler = window.PaystackPop.setup({
+      key: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY,
+      email: selectedCustomer?.email || 'guest@quickmart.com',
+      amount: Math.round(total * 100), // Paystack uses pesewas
+      currency: 'GHS',
+      ref: 'QM-' + Date.now() + '-' + Math.floor(Math.random() * 1000000),
+      channels: method === 'CARD' ? ['card'] : ['mobile_money'],
+      metadata: {
+        custom_fields: [
+          { display_name: 'Store', variable_name: 'store', value: 'QuickMart' },
+        ],
+      },
+      onClose: () => {
+        toast.error('Payment was cancelled')
+      },
+      callback: (response) => {
+        onConfirm({
+          payment_method: method,
+          amount_paid: total,
+          reference: response.reference,
+        })
+      },
     })
+    handler.openIframe()
   }
 
   const methods = [
     { value: 'CASH', label: 'Cash' },
-    { value: 'MOBILE_MONEY', label: 'Mobile Money' },
-    { value: 'CARD', label: 'Card' },
+    { value: 'MOBILE_MONEY', label: 'Mobile Money (Paystack)' },
+    { value: 'CARD', label: 'Card (Paystack)' },
   ]
 
   return (
@@ -217,16 +317,16 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading }) {
 
         {/* Payment Method */}
         <div>
-          <p className="text-sm font-medium text-gray-700 mb-2">Payment Method</p>
+          <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Payment Method</p>
           <div className="grid grid-cols-3 gap-2">
             {methods.map((m) => (
               <button
                 key={m.value}
                 onClick={() => { setMethod(m.value); setErrors({}) }}
-                className={`py-2.5 px-3 rounded-lg border text-sm font-medium transition ${
+                className={`py-2.5 px-3 rounded-full border text-sm font-medium transition ${
                   method === m.value
                     ? 'border-primary-500 bg-primary-50 text-primary-700'
-                    : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                    : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
                 }`}
               >
                 {m.label}
@@ -257,15 +357,11 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading }) {
           </div>
         )}
 
-        {/* Mobile Money / Card: reference */}
+        {/* Card / Mobile Money: Paystack handles payment details in its popup */}
         {(method === 'MOBILE_MONEY' || method === 'CARD') && (
-          <Input
-            label="Transaction Reference"
-            value={reference}
-            onChange={(e) => { setReference(e.target.value); setErrors({}) }}
-            placeholder="e.g. MTN-123456 or POS-789"
-            error={errors.reference}
-          />
+          <div className="rounded-lg border border-primary-100 bg-primary-50 px-4 py-3 text-sm text-primary-700">
+            A secure Paystack payment window will open to complete this transaction.
+          </div>
         )}
 
         <div className="flex gap-3 pt-2">
@@ -318,15 +414,15 @@ function CustomerModal({ isOpen, onClose, onSelect }) {
         {!isLoading && results.length === 0 && query && (
           <p className="text-sm text-gray-400 text-center py-2">No customers found.</p>
         )}
-        <ul className="divide-y divide-gray-100 max-h-64 overflow-y-auto rounded-lg border border-gray-100">
+        <ul className="divide-y divide-gray-100 dark:divide-gray-800 max-h-64 overflow-y-auto rounded-lg border border-gray-100 dark:border-gray-700">
           {results.map((c) => (
             <li key={c.id}>
               <button
                 onClick={() => { onSelect(c); onClose() }}
-                className="w-full text-left px-4 py-3 hover:bg-primary-50 transition"
+                className="w-full text-left px-4 py-3 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition"
               >
-                <p className="text-sm font-medium text-gray-900">{c.name}</p>
-                <p className="text-xs text-gray-500">{c.phone || c.email || 'No contact info'} &bull; {c.loyalty_points} pts</p>
+                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{c.name}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{c.phone || c.email || 'No contact info'} &bull; {c.loyalty_points} pts</p>
               </button>
             </li>
           ))}
@@ -344,16 +440,17 @@ function CustomerModal({ isOpen, onClose, onSelect }) {
 // ─── Cart Item Row ─────────────────────────────────────────────────────────────
 function CartItem({ item, onUpdate, onRemove, onDiscountChange }) {
   return (
-    <div className="py-2.5 border-b border-gray-100 last:border-0">
+    <div className="py-2.5 border-b border-gray-100 dark:border-gray-800 last:border-0">
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
+          <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{item.name}</p>
           <p className="text-xs text-gray-400">{formatCurrency(item.price)} each</p>
         </div>
         <button
           onClick={() => onRemove(item.product_id)}
           className="text-gray-300 hover:text-danger-500 transition flex-shrink-0 p-0.5"
           title="Remove item"
+          aria-label="Remove item"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -366,7 +463,8 @@ function CartItem({ item, onUpdate, onRemove, onDiscountChange }) {
         <div className="flex items-center gap-1">
           <button
             onClick={() => onUpdate(item.product_id, item.quantity - 1)}
-            className="w-6 h-6 rounded border border-gray-200 flex items-center justify-center text-gray-600 hover:bg-gray-100 transition text-sm"
+            aria-label="Decrease quantity"
+            className="w-6 h-6 rounded border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition text-sm"
           >
             −
           </button>
@@ -376,11 +474,12 @@ function CartItem({ item, onUpdate, onRemove, onDiscountChange }) {
             max={item.quantity_available}
             value={item.quantity}
             onChange={(e) => onUpdate(item.product_id, parseInt(e.target.value) || 1)}
-            className="w-10 text-center text-sm border border-gray-200 rounded py-0.5 focus:outline-none focus:ring-1 focus:ring-primary-400"
+            className="w-10 text-center text-sm border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded py-0.5 focus:outline-none focus:ring-1 focus:ring-primary-400"
           />
           <button
             onClick={() => onUpdate(item.product_id, item.quantity + 1)}
             disabled={item.quantity >= item.quantity_available}
+            aria-label="Increase quantity"
             className="w-6 h-6 rounded border border-gray-200 flex items-center justify-center text-gray-600 hover:bg-gray-100 transition text-sm disabled:opacity-40"
           >
             +
@@ -396,12 +495,12 @@ function CartItem({ item, onUpdate, onRemove, onDiscountChange }) {
             step="0.01"
             value={item.discount || 0}
             onChange={(e) => onDiscountChange(item.product_id, parseFloat(e.target.value) || 0)}
-            className="w-16 text-right text-xs border border-gray-200 rounded py-0.5 px-1 focus:outline-none focus:ring-1 focus:ring-primary-400"
+            className="w-16 text-right text-xs border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded py-0.5 px-1 focus:outline-none focus:ring-1 focus:ring-primary-400"
           />
         </div>
 
         {/* Line total */}
-        <p className="text-sm font-semibold text-gray-900 min-w-[70px] text-right">
+        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 min-w-[70px] text-right">
           {formatCurrency(item.price * item.quantity - (item.discount || 0))}
         </p>
       </div>
@@ -412,7 +511,8 @@ function CartItem({ item, onUpdate, onRemove, onDiscountChange }) {
 // ─── Main POSPage ──────────────────────────────────────────────────────────────
 export default function POSPage() {
   const { user } = useAuth()
-  const { items, cartDiscount, customer, subtotal, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, clearCart } = useCart()
+  const { loyalty_points_rate } = useSettings()
+  const { items, cartDiscount, customer, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, clearCart } = useCart()
 
   const [searchQuery, setSearchQuery] = useState('')
   const [products, setProducts] = useState([])
@@ -437,12 +537,19 @@ export default function POSPage() {
   useEffect(() => {
     function onKey(e) {
       if (e.key === 'F1') { e.preventDefault(); searchRef.current?.focus() }
-      if (e.key === 'F2') { e.preventDefault(); if (items.length > 0) setShowPaymentModal(true) }
+      if (e.key === 'F2') { e.preventDefault(); if (items.length > 0 && customer) setShowPaymentModal(true) }
       if (e.key === 'F4') { e.preventDefault(); if (items.length > 0) setShowClearConfirm(true) }
+      // Enter = confirm the active action (clear-cart confirmation dialog)
+      if (e.key === 'Enter' && showClearConfirm) {
+        e.preventDefault()
+        clearCart()
+        setShowClearConfirm(false)
+        toast.success('Cart cleared')
+      }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [items.length])
+  }, [items.length, showClearConfirm, clearCart])
 
   // Barcode scanner detection: rapid keystrokes ending with Enter
   useEffect(() => {
@@ -527,7 +634,27 @@ export default function POSPage() {
       setShowPaymentModal(false)
       setShowReceiptModal(true)
       clearCart()
-      toast.success('Sale completed successfully!')
+
+      // Track in sessionStorage so the cashier dashboard shows this session's sales only
+      try {
+        const prev = JSON.parse(sessionStorage.getItem('pos_session_sales') || '[]')
+        prev.unshift({
+          id: sale.id,
+          transaction_id: sale.transaction_id,
+          created_at: sale.created_at,
+          customer_name: sale.customer?.name || null,
+          payment_method: sale.payment_method,
+          total_amount: sale.total_amount,
+        })
+        sessionStorage.setItem('pos_session_sales', JSON.stringify(prev.slice(0, 10)))
+      } catch (_) {
+        // sessionStorage unavailable — non-critical
+      }
+      if (reference) {
+        toast.success(`Payment successful! Ref: ${reference}`)
+      } else {
+        toast.success('Sale completed successfully!')
+      }
     } catch (err) {
       const msg = err.response?.data?.error?.message || 'Failed to process sale'
       toast.error(msg)
@@ -539,22 +666,24 @@ export default function POSPage() {
   const itemCount = items.reduce((sum, i) => sum + i.quantity, 0)
 
   return (
-    <div className="flex h-screen bg-gray-100 overflow-hidden">
-      {/* ── LEFT PANEL: Product Search ── */}
+    <DashboardLayout noPad>
+    <div className="flex flex-row-reverse h-[calc(100vh-4rem)] bg-gray-100 dark:bg-gray-950 overflow-hidden">
+      {/* ── RIGHT PANEL: Product Search ── */}
       <div className="flex flex-col flex-1 min-w-0 p-4 gap-3">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-bold text-gray-900">Point of Sale</h1>
+            <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">New Sale</h1>
             <p className="text-xs text-gray-400">
               <kbd className="bg-gray-200 px-1 rounded text-xs">F1</kbd> Search &nbsp;
               <kbd className="bg-gray-200 px-1 rounded text-xs">F2</kbd> Pay &nbsp;
-              <kbd className="bg-gray-200 px-1 rounded text-xs">F4</kbd> Clear
+              <kbd className="bg-gray-200 px-1 rounded text-xs">F4</kbd> Clear &nbsp;
+              <kbd className="bg-gray-200 px-1 rounded text-xs">↵</kbd> Confirm
             </p>
           </div>
           <div className="text-right">
-            <p className="text-xs text-gray-400">Cashier</p>
-            <p className="text-sm font-semibold text-gray-700">{user?.full_name}</p>
+            <p className="text-xs text-gray-400">Logged in as</p>
+            <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{user?.role ? user.role[0] + user.role.slice(1).toLowerCase() : '—'}</p>
           </div>
         </div>
 
@@ -571,12 +700,13 @@ export default function POSPage() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search by name, SKU, or scan barcode… (F1)"
-            className="w-full pl-9 pr-4 py-3 rounded-xl border border-gray-200 bg-white shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+            className="w-full pl-9 pr-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
           />
           {searchQuery && (
             <button
               onClick={() => { setSearchQuery(''); setProducts([]); searchRef.current?.focus() }}
-              className="absolute inset-y-0 right-3 flex items-center text-gray-400 hover:text-gray-600"
+              aria-label="Clear search"
+              className="absolute inset-y-0 right-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -590,7 +720,7 @@ export default function POSPage() {
           {isSearching && (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
               {Array.from({ length: 8 }).map((_, i) => (
-                <div key={i} className="bg-white rounded-xl p-3 animate-pulse">
+                <div key={i} className="bg-white dark:bg-gray-900 rounded-xl p-3 animate-pulse">
                   <div className="h-4 bg-gray-200 rounded mb-2" />
                   <div className="h-3 bg-gray-100 rounded w-2/3" />
                 </div>
@@ -623,8 +753,8 @@ export default function POSPage() {
                   key={product.id}
                   onClick={() => handleAddProduct(product)}
                   disabled={product.quantity === 0}
-                  className={`bg-white rounded-xl p-3 text-left shadow-sm border transition hover:shadow-md hover:border-primary-300 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
-                    product.quantity === 0 ? 'border-gray-100' : 'border-gray-100 hover:border-primary-200'
+                  className={`bg-white dark:bg-gray-900 rounded-xl p-3 text-left shadow-sm border transition hover:shadow-md hover:border-primary-300 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
+                    product.quantity === 0 ? 'border-gray-100 dark:border-gray-800' : 'border-gray-100 dark:border-gray-800 hover:border-primary-200'
                   }`}
                 >
                   {product.image_url ? (
@@ -636,8 +766,8 @@ export default function POSPage() {
                       </svg>
                     </div>
                   )}
-                  <p className="text-sm font-semibold text-gray-900 truncate">{product.name}</p>
-                  <p className="text-xs text-gray-400 mb-1">{product.sku}</p>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{product.name}</p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">{product.sku}</p>
                   <div className="flex items-center justify-between mt-1">
                     <span className="text-sm font-bold text-primary-600">{formatCurrency(product.price)}</span>
                     <Badge variant={product.quantity === 0 ? 'danger' : product.quantity <= product.low_stock_threshold ? 'warning' : 'success'}>
@@ -651,15 +781,15 @@ export default function POSPage() {
         </div>
       </div>
 
-      {/* ── RIGHT PANEL: Cart + Payment ── */}
-      <div className="w-96 flex-shrink-0 bg-white border-l border-gray-200 flex flex-col shadow-xl">
+      {/* ── LEFT PANEL: Cart + Payment ── */}
+      <div className="w-96 flex-shrink-0 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col shadow-xl">
         {/* Cart header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-800">
           <div className="flex items-center gap-2">
             <svg className="w-5 h-5 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
             </svg>
-            <h2 className="font-semibold text-gray-900">Cart</h2>
+            <h2 className="font-semibold text-gray-900 dark:text-gray-100">Cart</h2>
             {itemCount > 0 && (
               <Badge variant="primary">{itemCount} item{itemCount !== 1 ? 's' : ''}</Badge>
             )}
@@ -675,25 +805,6 @@ export default function POSPage() {
           )}
         </div>
 
-        {/* Customer selector */}
-        <div className="px-4 py-2 border-b border-gray-100">
-          <button
-            onClick={() => setShowCustomerModal(true)}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-gray-300 hover:border-primary-400 hover:bg-primary-50 transition text-left"
-          >
-            <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-            </svg>
-            {customer ? (
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-900 truncate">{customer.name}</p>
-                <p className="text-xs text-gray-400">{customer.loyalty_points} loyalty points</p>
-              </div>
-            ) : (
-              <span className="text-sm text-gray-400">Add customer (optional)</span>
-            )}
-          </button>
-        </div>
 
         {/* Cart items */}
         <div className="flex-1 overflow-y-auto px-4">
@@ -721,10 +832,60 @@ export default function POSPage() {
         </div>
 
         {/* Totals + actions */}
-        <div className="border-t border-gray-100 px-4 py-3 space-y-2.5">
+        <div className="border-t border-gray-100 dark:border-gray-800 px-4 py-3 space-y-2.5">
+          {/* Customer selector */}
+          {(() => {
+            const loyaltyRate = parseFloat(loyalty_points_rate) || 10
+            const pointsEarned = customer && loyaltyRate > 0 ? Math.floor(total / loyaltyRate) : 0
+            return customer ? (
+              <div className="flex items-center justify-between gap-2 bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 rounded-lg px-3 py-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <svg className="w-4 h-4 text-primary-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-primary-700 dark:text-primary-300 truncate">{customer.name}</p>
+                    <p className="text-xs text-primary-500 dark:text-primary-400">
+                      {customer.loyalty_points ?? 0} pts
+                      {pointsEarned > 0 && <span className="text-success-600 dark:text-success-400"> · +{pointsEarned} pts this sale</span>}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setCustomer(null)}
+                  aria-label="Remove customer"
+                  className="text-primary-400 hover:text-danger-500 transition flex-shrink-0"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowCustomerModal(true)}
+                className={`w-full flex items-center justify-between gap-2 border border-dashed rounded-lg px-3 py-2 text-sm transition
+                  ${items.length > 0
+                    ? 'border-warning-400 dark:border-warning-500 text-warning-600 dark:text-warning-400 hover:border-warning-500 hover:bg-warning-50 dark:hover:bg-warning-900/20'
+                    : 'border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500 hover:border-primary-400 hover:text-primary-500 dark:hover:text-primary-400'
+                  }`}
+              >
+                <div className="flex items-center gap-2">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  <span>Select Customer</span>
+                </div>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+              </button>
+            )
+          })()}
+
           {/* Cart discount */}
           <div className="flex items-center gap-3">
-            <label className="text-sm text-gray-500 whitespace-nowrap">Cart Discount</label>
+            <label className="text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">Cart Discount</label>
             <input
               type="number"
               min={0}
@@ -732,12 +893,12 @@ export default function POSPage() {
               value={cartDiscount || ''}
               onChange={(e) => setCartDiscount(parseFloat(e.target.value) || 0)}
               placeholder="0.00"
-              className="flex-1 text-right border border-gray-200 rounded-lg py-1.5 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="flex-1 text-right border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg py-1.5 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
           </div>
 
           {/* Subtotal */}
-          <div className="flex justify-between text-sm text-gray-500">
+          <div className="flex justify-between text-sm text-gray-500 dark:text-gray-400">
             <span>Subtotal</span>
             <span>{formatCurrency(subtotal)}</span>
           </div>
@@ -747,10 +908,16 @@ export default function POSPage() {
               <span>-{formatCurrency(cartDiscount)}</span>
             </div>
           )}
+          {taxRate > 0 && (
+            <div className="flex justify-between text-sm text-gray-500 dark:text-gray-400">
+              <span>Tax ({taxRate}%)</span>
+              <span>{formatCurrency(taxAmount)}</span>
+            </div>
+          )}
 
           {/* Total */}
-          <div className="flex justify-between items-center pt-2 border-t border-gray-100">
-            <span className="text-base font-bold text-gray-900">Total</span>
+          <div className="flex justify-between items-center pt-2 border-t border-gray-100 dark:border-gray-800">
+            <span className="text-base font-bold text-gray-900 dark:text-gray-100">Total</span>
             <span className="text-2xl font-bold text-primary-600">{formatCurrency(total)}</span>
           </div>
 
@@ -759,7 +926,7 @@ export default function POSPage() {
             variant="success"
             size="lg"
             className="w-full text-base"
-            disabled={items.length === 0}
+            disabled={items.length === 0 || !customer}
             onClick={() => setShowPaymentModal(true)}
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -767,6 +934,11 @@ export default function POSPage() {
             </svg>
             Charge {items.length > 0 && formatCurrency(total)} <span className="ml-1 text-xs opacity-75">(F2)</span>
           </Button>
+          {items.length > 0 && !customer && (
+            <p className="text-xs text-center text-warning-600 dark:text-warning-400">
+              Select a customer to proceed
+            </p>
+          )}
         </div>
       </div>
 
@@ -777,6 +949,7 @@ export default function POSPage() {
         total={total}
         onConfirm={handlePaymentConfirm}
         isLoading={isSubmitting}
+        selectedCustomer={customer}
       />
 
       <Modal
@@ -801,7 +974,7 @@ export default function POSPage() {
         title="Clear Cart"
         size="sm"
       >
-        <p className="text-sm text-gray-600 mb-4">Are you sure you want to clear all items from the cart? This cannot be undone.</p>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">Are you sure you want to clear all items from the cart? This cannot be undone.</p>
         <div className="flex gap-3">
           <Button variant="secondary" className="flex-1" onClick={() => setShowClearConfirm(false)}>Cancel</Button>
           <Button
@@ -814,5 +987,6 @@ export default function POSPage() {
         </div>
       </Modal>
     </div>
+    </DashboardLayout>
   )
 }

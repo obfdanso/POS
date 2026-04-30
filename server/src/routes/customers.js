@@ -21,7 +21,7 @@ router.get(
   validate,
   customerController.listCustomers
 )
-router.get('/:id', param('id').isUUID().withMessage('Invalid customer ID'), validate, customerController.getCustomer)
+router.get('/:id', authorize(['ADMIN', 'MANAGER', 'CASHIER']), param('id').isUUID().withMessage('Invalid customer ID'), validate, customerController.getCustomer)
 router.post('/', authorize(['ADMIN', 'MANAGER', 'CASHIER']), customerValidation, validate, customerController.createCustomer)
 router.put(
   '/:id',
@@ -32,6 +32,7 @@ router.put(
 )
 router.get(
   '/:id/purchases',
+  authorize(['ADMIN', 'MANAGER', 'CASHIER']),
   param('id').isUUID().withMessage('Invalid customer ID'),
   validate,
   customerController.getCustomerPurchases

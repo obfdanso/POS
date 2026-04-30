@@ -8,9 +8,10 @@ const router = express.Router()
 
 router.use(authenticate)
 
-router.get('/', inventoryController.listInventory)
-router.get('/low-stock', inventoryController.getLowStock)
+router.get('/', authorize(['ADMIN', 'MANAGER', 'CASHIER']), inventoryController.listInventory)
+router.get('/low-stock', authorize(['ADMIN', 'MANAGER', 'CASHIER']), inventoryController.getLowStock)
 router.get('/log/:productId',
+  authorize(['ADMIN', 'MANAGER', 'CASHIER']),
   param('productId').isUUID().withMessage('Invalid product ID'),
   validate,
   inventoryController.getInventoryLog

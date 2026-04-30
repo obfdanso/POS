@@ -12,7 +12,7 @@ function normalizeSale(sale) {
 
 async function createSale(req, res, next) {
   try {
-    const sale = await salesService.createSale(req.body, req.user.id)
+    const sale = await salesService.createSale(req.body, req.user)
     res.status(201).json({ success: true, data: normalizeSale(sale), message: 'Sale processed successfully' })
   } catch (err) {
     next(err)
@@ -42,6 +42,10 @@ async function listSales(req, res, next) {
 async function getSale(req, res, next) {
   try {
     const sale = await salesService.getSaleById(req.params.id)
+    if (req.user.role === 'CASHIER' && sale.user_id !== req.user.id) {
+      const { ForbiddenError } = require('../utils/errors')
+      throw new ForbiddenError('You can only view your own sales')
+    }
     res.json({ success: true, data: normalizeSale(sale) })
   } catch (err) {
     next(err)
@@ -60,6 +64,10 @@ async function processRefund(req, res, next) {
 async function getReceipt(req, res, next) {
   try {
     const data = await salesService.getReceiptData(req.params.id)
+    if (req.user.role === 'CASHIER' && data.sale.user_id !== req.user.id) {
+      const { ForbiddenError } = require('../utils/errors')
+      throw new ForbiddenError('You can only view receipts for your own sales')
+    }
     res.json({ success: true, data })
   } catch (err) {
     next(err)

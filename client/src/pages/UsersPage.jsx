@@ -15,6 +15,12 @@ const ROLE_BADGE = {
   CASHIER: 'success',
 }
 
+const ROLE_DISPLAY = {
+  ADMIN: 'Admin',
+  MANAGER: 'Manager',
+  CASHIER: 'Cashier',
+}
+
 const ROLES = ['ADMIN', 'MANAGER', 'CASHIER']
 
 const EMPTY_CREATE = { username: '', email: '', password: '', full_name: '', role: 'CASHIER' }
@@ -50,7 +56,6 @@ export default function UsersPage() {
   // Modals
   const [createOpen, setCreateOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
-  const [resetOpen, setResetOpen] = useState(false)
 
   const [editTarget, setEditTarget] = useState(null)
   const [createForm, setCreateForm] = useState(EMPTY_CREATE)
@@ -61,6 +66,7 @@ export default function UsersPage() {
   const [createErrors, setCreateErrors] = useState({})
   const [editErrors, setEditErrors] = useState({})
   const [saving, setSaving] = useState(false)
+  const [savingReset, setSavingReset] = useState(false)
   const [unlocking, setUnlocking] = useState(null)
 
   const fetchUsers = useCallback(async () => {
@@ -127,6 +133,8 @@ export default function UsersPage() {
       is_active: user.is_active ?? true,
     })
     setEditErrors({})
+    setNewPassword('')
+    setNewPasswordError('')
     setEditOpen(true)
   }
 
@@ -160,28 +168,22 @@ export default function UsersPage() {
     }
   }
 
-  // Reset password
-  function openReset(user) {
-    setEditTarget(user)
-    setNewPassword('')
-    setNewPasswordError('')
-    setResetOpen(true)
-  }
-
+  // Reset password (now lives inside the Edit modal)
   async function handleReset(e) {
     e.preventDefault()
     if (!newPassword.trim()) { setNewPasswordError('Password is required'); return }
     if (newPassword.length < 6) { setNewPasswordError('Password must be at least 6 characters'); return }
-    setSaving(true)
+    setSavingReset(true)
     try {
       await usersService.resetPassword(editTarget.id, { password: newPassword })
       toast.success('Password reset successfully')
-      setResetOpen(false)
+      setNewPassword('')
+      setNewPasswordError('')
     } catch (err) {
       const msg = err?.response?.data?.error?.message ?? 'Failed to reset password'
       toast.error(msg)
     } finally {
-      setSaving(false)
+      setSavingReset(false)
     }
   }
 
@@ -203,20 +205,23 @@ export default function UsersPage() {
     {
       key: 'full_name',
       label: 'Name',
-      render: (v, row) => (
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
-            {v?.[0]?.toUpperCase()}
+      render: (v, row) => {
+        const displayName = ROLE_DISPLAY[row.role] ?? v
+        return (
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
+              {displayName?.[0]?.toUpperCase()}
+            </div>
+            <div>
+              <p className="font-medium text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
+                {displayName}
+                {row.is_locked && <LockIcon className="text-danger-500" />}
+              </p>
+              <p className="text-xs text-gray-400">@{row.username}</p>
+            </div>
           </div>
-          <div>
-            <p className="font-medium text-gray-900 flex items-center gap-1.5">
-              {v}
-              {row.is_locked && <LockIcon className="text-danger-500" />}
-            </p>
-            <p className="text-xs text-gray-400">@{row.username}</p>
-          </div>
-        </div>
-      ),
+        )
+      },
     },
     { key: 'email', label: 'Email' },
     {
@@ -247,9 +252,6 @@ export default function UsersPage() {
           <Button size="sm" variant="secondary" onClick={() => openEdit(row)}>
             Edit
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => openReset(row)}>
-            Reset Pwd
-          </Button>
           {row.is_locked && (
             <Button
               size="sm"
@@ -271,8 +273,8 @@ export default function UsersPage() {
         {/* Header */}
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Users</h1>
-            <p className="text-sm text-gray-500 mt-1">Manage system users and permissions</p>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Users</h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Manage system users and permissions</p>
           </div>
           <Button onClick={openCreate}>
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -283,7 +285,7 @@ export default function UsersPage() {
         </div>
 
         {/* Table */}
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm overflow-hidden">
           <Table columns={columns} data={users} isLoading={loading} emptyMessage="No users found." />
         </div>
 
@@ -333,12 +335,12 @@ export default function UsersPage() {
             placeholder="Min 6 characters"
           />
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-700">Role</label>
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Role</label>
             <select
               name="role"
               value={createForm.role}
               onChange={handleCreateChange}
-              className="block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              className="block w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
             >
               {ROLES.map((r) => (
                 <option key={r} value={r}>{r}</option>
@@ -358,6 +360,7 @@ export default function UsersPage() {
 
       {/* Edit Modal */}
       <Modal isOpen={editOpen} onClose={() => setEditOpen(false)} title="Edit User">
+        {/* ── User info ── */}
         <form onSubmit={handleEdit} className="space-y-4">
           <Input
             label="Full Name *"
@@ -376,12 +379,12 @@ export default function UsersPage() {
             error={editErrors.email}
           />
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-700">Role</label>
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Role</label>
             <select
               name="role"
               value={editForm.role}
               onChange={handleEditChange}
-              className="block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              className="block w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
             >
               {ROLES.map((r) => (
                 <option key={r} value={r}>{r}</option>
@@ -397,11 +400,11 @@ export default function UsersPage() {
               onChange={handleEditChange}
               className="h-4 w-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
             />
-            <label htmlFor="is_active" className="text-sm font-medium text-gray-700">
+            <label htmlFor="is_active" className="text-sm font-medium text-gray-700 dark:text-gray-300">
               Account Active
             </label>
           </div>
-          <div className="flex justify-end gap-3 pt-2">
+          <div className="flex justify-end gap-3 pt-1">
             <Button type="button" variant="secondary" onClick={() => setEditOpen(false)}>
               Cancel
             </Button>
@@ -410,37 +413,29 @@ export default function UsersPage() {
             </Button>
           </div>
         </form>
-      </Modal>
 
-      {/* Reset Password Modal */}
-      <Modal isOpen={resetOpen} onClose={() => setResetOpen(false)} title="Reset Password" size="sm">
-        <form onSubmit={handleReset} className="space-y-4">
-          {editTarget && (
-            <p className="text-sm text-gray-600">
-              Set a new password for <strong>{editTarget.full_name}</strong>.
-            </p>
-          )}
-          <Input
-            label="New Password *"
-            type="password"
-            value={newPassword}
-            onChange={(e) => {
-              setNewPassword(e.target.value)
-              if (newPasswordError) setNewPasswordError('')
-            }}
-            error={newPasswordError}
-            placeholder="Min 6 characters"
-            autoFocus
-          />
-          <div className="flex justify-end gap-3 pt-2">
-            <Button type="button" variant="secondary" onClick={() => setResetOpen(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" isLoading={saving}>
-              Reset Password
-            </Button>
-          </div>
-        </form>
+        {/* ── Reset password ── */}
+        <div className="border-t border-gray-200 dark:border-gray-700 mt-5 pt-5">
+          <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Reset Password</p>
+          <form onSubmit={handleReset} className="space-y-3">
+            <Input
+              label="New Password *"
+              type="password"
+              value={newPassword}
+              onChange={(e) => {
+                setNewPassword(e.target.value)
+                if (newPasswordError) setNewPasswordError('')
+              }}
+              error={newPasswordError}
+              placeholder="Min 6 characters"
+            />
+            <div className="flex justify-end">
+              <Button type="submit" variant="secondary" isLoading={savingReset}>
+                Reset Password
+              </Button>
+            </div>
+          </form>
+        </div>
       </Modal>
     </DashboardLayout>
   )

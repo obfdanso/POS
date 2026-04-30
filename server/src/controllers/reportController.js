@@ -78,6 +78,15 @@ async function getDashboardSummary(req, res, next) {
   }
 }
 
+async function getCashierStats(req, res, next) {
+  try {
+    const data = await reportService.getCashierStats(req.user.id)
+    res.json({ success: true, data })
+  } catch (err) {
+    next(err)
+  }
+}
+
 module.exports = {
   getSalesSummary,
   getSalesByDay,
@@ -87,4 +96,5 @@ module.exports = {
   getInventoryStatus,
   getProfitReport,
   getDashboardSummary,
+  getCashierStats,
 }

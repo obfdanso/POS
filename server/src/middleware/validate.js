@@ -8,7 +8,7 @@ function validate(req, res, next) {
       field: err.path || err.param,
       message: err.msg,
     }))
-    throw new ValidationError('Validation failed', details)
+    return next(new ValidationError('Validation failed', details))
   }
   next()
 }

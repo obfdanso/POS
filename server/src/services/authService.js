@@ -3,6 +3,17 @@ const jwt = require('jsonwebtoken')
 const prisma = require('../utils/prismaClient')
 const { UnauthorizedError, NotFoundError } = require('../utils/errors')
 
+// In-memory blacklist for revoked refresh tokens.
+// Tokens are auto-removed after their 7-day expiry so memory stays bounded.
+const revokedTokens = new Set()
+
+function revokeToken(token) {
+  if (!token) return
+  revokedTokens.add(token)
+  // Clean up after the refresh token's maximum lifetime (7 days)
+  setTimeout(() => revokedTokens.delete(token), 7 * 24 * 60 * 60 * 1000)
+}
+
 async function logAuthEvent(userId, eventType, ipAddress, userAgent, details) {
   await prisma.authLog.create({
     data: {
@@ -91,7 +102,8 @@ async function login(username, password, ipAddress, userAgent) {
   }
 }
 
-async function logout(userId, ipAddress, userAgent) {
+async function logout(userId, ipAddress, userAgent, refreshToken) {
+  revokeToken(refreshToken)
   if (userId) {
     await logAuthEvent(userId, 'LOGOUT', ipAddress, userAgent, null)
   }
@@ -101,6 +113,10 @@ async function logout(userId, ipAddress, userAgent) {
 async function refreshToken(tokenFromCookie) {
   if (!tokenFromCookie) {
     throw new UnauthorizedError('No refresh token')
+  }
+
+  if (revokedTokens.has(tokenFromCookie)) {
+    throw new UnauthorizedError('Refresh token has been revoked')
   }
 
   let payload
@@ -119,11 +135,14 @@ async function refreshToken(tokenFromCookie) {
     throw new UnauthorizedError('User not found or inactive')
   }
 
+  // Rotate: revoke the old token and issue a fresh one
+  revokeToken(tokenFromCookie)
   const accessToken = generateAccessToken(user.id, user.role)
+  const newRefreshToken = generateRefreshToken(user.id)
 
   await logAuthEvent(user.id, 'TOKEN_REFRESH', null, null, null)
 
-  return { accessToken }
+  return { accessToken, refreshToken: newRefreshToken }
 }
 
 async function getMe(userId) {
@@ -147,4 +166,41 @@ async function getMe(userId) {
   return user
 }
 
-module.exports = { login, logout, refreshToken, getMe }
+async function changePassword(userId, currentPassword, newPassword) {
+  const user = await prisma.user.findUnique({ where: { id: userId } })
+  if (!user) throw new NotFoundError('User not found')
+
+  const valid = await bcrypt.compare(currentPassword, user.password_hash)
+  if (!valid) throw new UnauthorizedError('Current password is incorrect')
+
+  const password_hash = await bcrypt.hash(newPassword, 12)
+  await prisma.user.update({ where: { id: userId }, data: { password_hash } })
+  return true
+}
+
+async function updateProfile(userId, { full_name, email }) {
+  const data = {}
+  if (full_name !== undefined) data.full_name = full_name
+  if (email !== undefined) data.email = email
+
+  if (Object.keys(data).length === 0) {
+    return getMe(userId)
+  }
+
+  const user = await prisma.user.update({
+    where: { id: userId },
+    data,
+    select: {
+      id: true,
+      username: true,
+      email: true,
+      full_name: true,
+      role: true,
+      is_active: true,
+      created_at: true,
+    },
+  })
+  return user
+}
+
+module.exports = { login, logout, refreshToken, getMe, changePassword, updateProfile }

@@ -1,12 +1,12 @@
 export function Button({ children, variant = 'primary', size = 'md', className = '', isLoading = false, ...props }) {
-  const base = 'inline-flex items-center justify-center font-medium rounded-lg transition focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed'
+  const base = 'inline-flex items-center justify-center font-medium rounded-full transition focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed'
 
   const variants = {
     primary: 'bg-primary-600 hover:bg-primary-700 text-white focus:ring-primary-500',
-    secondary: 'bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 focus:ring-primary-500',
+    secondary: 'bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 focus:ring-primary-500',
     danger: 'bg-danger-600 hover:bg-danger-700 text-white focus:ring-danger-500',
     success: 'bg-success-600 hover:bg-success-700 text-white focus:ring-success-500',
-    ghost: 'hover:bg-gray-100 text-gray-700 focus:ring-gray-400',
+    ghost: 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 focus:ring-gray-400',
   }
 
   const sizes = {

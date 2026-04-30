@@ -4,6 +4,14 @@ function dateRange(start_date, end_date) {
   const start = start_date ? new Date(start_date) : new Date(new Date().setDate(new Date().getDate() - 30))
   const end = end_date ? new Date(end_date) : new Date()
   end.setHours(23, 59, 59, 999)
+
+  if (start > end) {
+    const { ValidationError } = require('../utils/errors')
+    throw new ValidationError('Invalid date range', [
+      { field: 'start_date', message: 'start_date must be before end_date' },
+    ])
+  }
+
   return { gte: start, lte: end }
 }
 
@@ -151,10 +159,17 @@ async function getInventoryStatus() {
 
   return {
     total_products: totalProducts,
-    low_stock_count: totalLowStock[0].cnt,
-    out_of_stock_count: totalOutOfStock[0].cnt,
-    low_stock: lowStockItems,
-    out_of_stock: outOfStockItems,
+    low_stock_count: Number(totalLowStock[0].cnt),
+    out_of_stock_count: Number(totalOutOfStock[0].cnt),
+    low_stock: lowStockItems.map((r) => ({
+      ...r,
+      quantity: Number(r.quantity),
+      low_stock_threshold: Number(r.low_stock_threshold),
+    })),
+    out_of_stock: outOfStockItems.map((r) => ({
+      ...r,
+      quantity: Number(r.quantity),
+    })),
   }
 }
 
@@ -225,6 +240,64 @@ async function getDashboardSummary() {
   }
 }
 
+async function getCashierStats(userId) {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const todayEnd = new Date()
+  todayEnd.setHours(23, 59, 59, 999)
+
+  const [salesAgg, itemsAgg, recentSales] = await Promise.all([
+    prisma.sale.aggregate({
+      where: {
+        user_id: userId,
+        created_at: { gte: today, lte: todayEnd },
+        payment_status: 'COMPLETED',
+      },
+      _count: { id: true },
+      _sum: { total_amount: true },
+      _avg: { total_amount: true },
+    }),
+    prisma.saleItem.aggregate({
+      where: {
+        sale: {
+          user_id: userId,
+          created_at: { gte: today, lte: todayEnd },
+          payment_status: 'COMPLETED',
+        },
+      },
+      _sum: { quantity: true },
+    }),
+    prisma.sale.findMany({
+      where: { user_id: userId, payment_status: 'COMPLETED' },
+      orderBy: { created_at: 'desc' },
+      take: 5,
+      select: {
+        id: true,
+        transaction_id: true,
+        total_amount: true,
+        payment_method: true,
+        created_at: true,
+        customer: { select: { name: true } },
+      },
+    }),
+  ])
+
+  return {
+    sales_count: salesAgg._count.id,
+    total_revenue: parseFloat(salesAgg._sum.total_amount || 0),
+    items_sold: itemsAgg._sum.quantity || 0,
+    average_sale: parseFloat(salesAgg._avg.total_amount || 0),
+    recent_sales: recentSales.map((s) => ({
+      id: s.id,
+      transaction_id: s.transaction_id,
+      total_amount: parseFloat(s.total_amount),
+      payment_method: s.payment_method,
+      created_at: s.created_at,
+      customer_name: s.customer?.name || null,
+    })),
+  }
+}
+
 module.exports = {
   getSalesSummary,
   getSalesByDay,
@@ -234,4 +307,5 @@ module.exports = {
   getInventoryStatus,
   getProfitReport,
   getDashboardSummary,
+  getCashierStats,
 }

@@ -1,4 +1,4 @@
-# GhanaShop POS System
+# QuickMart POS System
 
 A full-featured, web-based Point of Sale system for retail businesses, built as a capstone project. Supports multi-role access (Admin, Manager, Cashier), real-time inventory tracking, sales processing, customer loyalty, receipt printing, and business analytics.
 
@@ -261,3 +261,4 @@ Default currency: **GHS (Ghana Cedis)** — displayed as `GH₵ 1,234.56`. Confi
 ## License
 
 MIT
+# POS

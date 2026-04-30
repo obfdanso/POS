@@ -35,6 +35,7 @@ const productValidation = [
   body('name').notEmpty().trim().withMessage('Name is required'),
   body('sku').notEmpty().trim().withMessage('SKU is required'),
   body('category_id').notEmpty().isUUID().withMessage('Valid category ID is required'),
+  body('supplier_id').optional({ nullable: true, checkFalsy: true }).isUUID().withMessage('Valid supplier ID required'),
   body('price').isFloat({ min: 0.01 }).withMessage('Price must be greater than 0'),
   body('cost_price').optional({ nullable: true }).isFloat({ min: 0 }).withMessage('Cost price must be >= 0'),
   body('quantity').optional().isInt({ min: 0 }).withMessage('Quantity must be >= 0'),
@@ -71,6 +72,7 @@ function listProductsValidation() {
 function updateProductValidation() {
   return [
     param('id').isUUID().withMessage('Invalid product ID'),
+    body('supplier_id').optional({ nullable: true, checkFalsy: true }).isUUID().withMessage('Valid supplier ID required'),
     body('price').optional().isFloat({ min: 0.01 }).withMessage('Price must be > 0'),
     body('cost_price').optional({ nullable: true }).isFloat({ min: 0 }).withMessage('Cost price must be >= 0'),
     body('quantity').optional().isInt({ min: 0 }).withMessage('Quantity must be >= 0'),

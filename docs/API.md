@@ -285,8 +285,8 @@ Update settings. **Roles:** ADMIN
 **Body (any subset):**
 ```json
 {
-  "store_name": "GhanaShop POS",
-  "store_address": "14 Liberation Road, Accra",
+  "store_name": "QuickMart POS",
+  "store_address": "27 Kwame Nkrumah Ave, Kumasi, Ghana",
   "store_phone": "030-000-0000",
   "currency_symbol": "GH₵",
   "tax_rate": "0",

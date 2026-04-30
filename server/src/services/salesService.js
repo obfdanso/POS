@@ -1,8 +1,12 @@
 const prisma = require('../utils/prismaClient')
-const generateTransactionId = require('../utils/generateTransactionId')
 const { NotFoundError, ValidationError, AppError } = require('../utils/errors')
+const { verifyPaystackPayment } = require('../utils/paystack')
+const { logger } = require('../middleware/logger')
 
-async function createSale({ items, customer_id, payment_method, amount_paid, discount_amount = 0, notes, reference }, userId) {
+async function createSale({ items, customer_id, payment_method, amount_paid, discount_amount = 0, notes, reference }, user) {
+  // Support legacy callers that pass userId as a string
+  const userId = typeof user === 'string' ? user : user.id
+
   // Step 1: Validate all items exist and have sufficient stock
   const productIds = items.map((i) => i.product_id)
   const products = await prisma.product.findMany({
@@ -58,12 +62,51 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
     ])
   }
 
+  if (payment_method === 'MOBILE_MONEY' || payment_method === 'CARD') {
+    if (!reference) {
+      throw new ValidationError('Payment reference required', [
+        { field: 'reference', message: 'Paystack reference is required for non-cash payments' }
+      ])
+    }
+
+    let paystackRes;
+    try {
+      paystackRes = await verifyPaystackPayment(reference);
+    } catch (err) {
+      throw err instanceof AppError ? err : new AppError('payment verification unavailable', 503);
+    }
+
+    if (!paystackRes || paystackRes.status !== true || paystackRes.data?.status !== 'success') {
+      throw new ValidationError('Payment verification failed', [
+        { field: 'reference', message: 'Paystack transaction not successful' }
+      ])
+    }
+
+    const paystackAmountPesewas = paystackRes.data.amount;
+    // The frontend Paystack popup is initialized with \`Math.round(total * 100)\` where total = subtotal - discount.
+    // Tax is calculated later on the backend and NOT included in the Paystack charge by the frontend.
+    // Thus we must securely verify against the exact amount the frontend intended to charge.
+    const expectedAmountPesewas = Math.round((subtotal - discountAmt) * 100);
+    if (Math.abs(paystackAmountPesewas - expectedAmountPesewas) > 1) {
+      throw new ValidationError(`Payment verification failed: amount mismatch (Paystack: ${paystackAmountPesewas} pesewas, expected: ${expectedAmountPesewas} pesewas)`, [
+        { field: 'amount', message: 'Verified amount does not match total amount' }
+      ])
+    }
+
+    logger.info(`Paystack verification successful: Ref ${reference}, Amount ${paystackAmountPesewas} pesewas, Channel ${paystackRes.data.channel || 'unknown'}`);
+  }
+
   const changeGiven = payment_method === 'CASH' ? parseFloat((amountPaid - totalAmount).toFixed(2)) : 0
 
-  const transaction_id = await generateTransactionId()
-
   // Step 3–6: Execute in a single DB transaction
-  const sale = await prisma.$transaction(async (tx) => {
+  const runTx = () => prisma.$transaction(async (tx) => {
+    // Generate sequential human-readable transaction ID (spec: TXN-YYYYMMDD-NNNN)
+    const now = new Date()
+    const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const todayCount = await tx.sale.count({ where: { created_at: { gte: startOfDay } } })
+    const transaction_id = `TXN-${dateStr}-${String(todayCount + 1).padStart(4, '0')}`
+
     // Create Sale
     const newSale = await tx.sale.create({
       data: {
@@ -129,7 +172,7 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
     // Award loyalty points if customer is linked (1 point per GHS 10)
     if (customer_id) {
       const loyaltyRate = await getSettingValue('loyalty_points_rate', 10)
-      const pointsEarned = Math.floor(totalAmount / loyaltyRate)
+      const pointsEarned = loyaltyRate > 0 ? Math.floor(totalAmount / loyaltyRate) : 0
       if (pointsEarned > 0) {
         await tx.customer.update({
           where: { id: customer_id },
@@ -140,6 +183,19 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
 
     return newSale
   })
+
+  let sale
+  try {
+    sale = await runTx()
+  } catch (err) {
+    if (err.code === 'P2002' && err.meta?.target?.toString().includes('transaction_id')) {
+      // Extremely rare collision (two concurrent sales in same millisecond) — retry once.
+      // The retry re-counts today's committed sales, so it will generate a new unique ID.
+      sale = await runTx()
+    } else {
+      throw err
+    }
+  }
 
   // Fetch complete sale with relations
   return getSaleById(sale.id)
@@ -240,7 +296,7 @@ async function processRefund(saleId, userId) {
     // Reverse loyalty points
     if (sale.customer_id) {
       const loyaltyRate = await getSettingValue('loyalty_points_rate', 10)
-      const pointsToDeduct = Math.floor(parseFloat(sale.total_amount) / loyaltyRate)
+      const pointsToDeduct = loyaltyRate > 0 ? Math.floor(parseFloat(sale.total_amount) / loyaltyRate) : 0
       if (pointsToDeduct > 0) {
         const customer = await tx.customer.findUnique({ where: { id: sale.customer_id } })
         const newPoints = Math.max(0, customer.loyalty_points - pointsToDeduct)

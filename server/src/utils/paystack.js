@@ -1,5 +1,6 @@
 const https = require('https')
-const { AppError, ValidationError } = require('./errors')
+const { AppError } = require('./errors')
+const { logger } = require('../middleware/logger')
 
 function verifyPaystackPayment(reference) {
   return new Promise((resolve, reject) => {
@@ -32,13 +33,14 @@ function verifyPaystackPayment(reference) {
           } else {
             resolve(parsedData) // Let the caller handle application-level errors
           }
-        } catch (e) {
+        } catch {
           reject(new AppError('Failed to parse Paystack response', 503))
         }
       })
     })
 
     req.on('error', (e) => {
+      logger.error(`Paystack verification request failed: ${e.message}`)
       reject(new AppError('Payment verification unavailable', 503))
     })
 

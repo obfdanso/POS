@@ -1,7 +1,7 @@
 const { logger } = require('./logger')
-const { AppError } = require('../utils/errors')
 
-function errorHandler(err, req, res, next) {
+// Express recognises error handlers by their four parameters, so `_next` must stay
+function errorHandler(err, req, res, _next) {
   // Log the error
   if (process.env.NODE_ENV === 'development') {
     logger.error(err.stack || err.message)

@@ -1,7 +1,5 @@
 const prisma = require('../utils/prismaClient')
-const { NotFoundError, ConflictError, ValidationError, ForbiddenError } = require('../utils/errors')
-const path = require('path')
-const fs = require('fs')
+const { NotFoundError, ConflictError, ForbiddenError } = require('../utils/errors')
 
 // status: 'active' (default), 'inactive', or 'all'
 async function listProducts({ page = 1, per_page = 20, search, category_id, status = 'active' } = {}) {

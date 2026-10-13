@@ -3,6 +3,7 @@ import { DashboardLayout } from '../layouts/DashboardLayout'
 import { Modal } from '../components/Modal'
 import api from '../services/api'
 import { formatCurrency } from '../utils/formatCurrency'
+import { toISODate } from '../utils/date'
 
 function formatDateTime(dateStr) {
   return new Date(dateStr).toLocaleString('en-GH', { hour: '2-digit', minute: '2-digit' })
@@ -22,18 +23,17 @@ const DATE_FILTERS = [
 
 function getDateRange(filter) {
   const now = new Date()
-  const end = now.toISOString().split('T')[0]
+  const end = toISODate(now)
   if (filter === 'today') {
     return { start_date: end, end_date: end }
   }
   if (filter === 'week') {
     const start = new Date(now)
     start.setDate(now.getDate() - now.getDay())
-    return { start_date: start.toISOString().split('T')[0], end_date: end }
+    return { start_date: toISODate(start), end_date: end }
   }
   // month
-  const start = new Date(now.getFullYear(), now.getMonth(), 1)
-  return { start_date: start.toISOString().split('T')[0], end_date: end }
+  return { start_date: toISODate(new Date(now.getFullYear(), now.getMonth(), 1)), end_date: end }
 }
 
 export default function CashierSalesPage() {

@@ -17,6 +17,7 @@ import { DashboardLayout } from '../layouts/DashboardLayout'
 import { Button } from '../components/Button'
 import { reportsService } from '../services/reports'
 import { formatCurrency } from '../utils/formatCurrency'
+import { daysFromToday } from '../utils/date'
 
 const PIE_COLORS = ['#2563EB', '#16A34A', '#D97706', '#DC2626', '#7C3AED', '#0891B2']
 
@@ -28,12 +29,6 @@ const TABS = [
   { id: 'cashier', label: 'Cashier Performance' },
   { id: 'profit', label: 'Profit' },
 ]
-
-function formatDate(d) {
-  const date = new Date()
-  date.setDate(date.getDate() + d)
-  return date.toISOString().split('T')[0]
-}
 
 function Spinner() {
   return (
@@ -68,15 +63,10 @@ function exportCsv(filename, headers, rows) {
 
 export default function ReportsPage() {
   const [activeTab, setActiveTab] = useState('summary')
-  const [startDate, setStartDate] = useState(formatDate(-29))
-  const [endDate, setEndDate] = useState(formatDate(0))
+  // Defaults to the last 30 days on every visit
+  const [startDate, setStartDate] = useState(() => daysFromToday(-29))
+  const [endDate, setEndDate] = useState(() => daysFromToday(0))
   const [loading, setLoading] = useState(false)
-
-  // Reset date range to last 30 days on every app start / page mount
-  useEffect(() => {
-    setStartDate(formatDate(-29))
-    setEndDate(formatDate(0))
-  }, [])
 
   const [summaryData, setSummaryData] = useState(null)
   const [dailyData, setDailyData] = useState([])

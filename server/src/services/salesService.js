@@ -2,6 +2,7 @@ const prisma = require('../utils/prismaClient')
 const { NotFoundError, ValidationError, AppError } = require('../utils/errors')
 const { verifyPaystackPayment } = require('../utils/paystack')
 const { logger } = require('../middleware/logger')
+const generateTransactionId = require('../utils/generateTransactionId')
 
 async function createSale({ items, customer_id, payment_method, amount_paid, discount_amount = 0, notes, reference }, user) {
   // Support legacy callers that pass userId as a string
@@ -31,14 +32,20 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
   }
 
   // Step 2: Calculate totals
-  const taxRate = await getSettingValue('tax_rate', 0)
+  const taxRate = await getNumericSetting('tax_rate', 0)
   let subtotal = 0
   const saleItems = items.map((item) => {
     const product = productMap.get(item.product_id)
     const unit_price = parseFloat(product.price)
-    const itemDiscount = parseFloat(item.discount || 0)
-    const lineTotal = unit_price * item.quantity - itemDiscount
-    subtotal += lineTotal
+    const itemDiscount = round2(parseFloat(item.discount || 0))
+    const lineGross = round2(unit_price * item.quantity)
+    if (itemDiscount > lineGross) {
+      throw new ValidationError('Invalid discount', [
+        { field: 'items', message: `Discount on "${product.name}" cannot exceed its line total (${lineGross.toFixed(2)})` },
+      ])
+    }
+    const lineTotal = round2(lineGross - itemDiscount)
+    subtotal = round2(subtotal + lineTotal)
     return {
       product_id: item.product_id,
       quantity: item.quantity,
@@ -49,8 +56,13 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
     }
   })
 
-  const discountAmt = parseFloat(discount_amount) || 0
-  const taxableAmount = subtotal - discountAmt
+  const discountAmt = round2(parseFloat(discount_amount) || 0)
+  if (discountAmt > subtotal) {
+    throw new ValidationError('Invalid discount', [
+      { field: 'discount_amount', message: `Discount cannot exceed the subtotal (${subtotal.toFixed(2)})` },
+    ])
+  }
+  const taxableAmount = round2(subtotal - discountAmt)
   const taxAmount = parseFloat((taxableAmount * (taxRate / 100)).toFixed(2))
   const totalAmount = parseFloat((taxableAmount + taxAmount).toFixed(2))
 
@@ -82,11 +94,9 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
       ])
     }
 
+    // The customer must have been charged the full sale total (including tax), in pesewas
     const paystackAmountPesewas = paystackRes.data.amount;
-    // The frontend Paystack popup is initialized with \`Math.round(total * 100)\` where total = subtotal - discount.
-    // Tax is calculated later on the backend and NOT included in the Paystack charge by the frontend.
-    // Thus we must securely verify against the exact amount the frontend intended to charge.
-    const expectedAmountPesewas = Math.round((subtotal - discountAmt) * 100);
+    const expectedAmountPesewas = Math.round(totalAmount * 100);
     if (Math.abs(paystackAmountPesewas - expectedAmountPesewas) > 1) {
       throw new ValidationError(`Payment verification failed: amount mismatch (Paystack: ${paystackAmountPesewas} pesewas, expected: ${expectedAmountPesewas} pesewas)`, [
         { field: 'amount', message: 'Verified amount does not match total amount' }
@@ -102,10 +112,9 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
   const runTx = () => prisma.$transaction(async (tx) => {
     // Generate sequential human-readable transaction ID (spec: TXN-YYYYMMDD-NNNN)
     const now = new Date()
-    const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate())
     const todayCount = await tx.sale.count({ where: { created_at: { gte: startOfDay } } })
-    const transaction_id = `TXN-${dateStr}-${String(todayCount + 1).padStart(4, '0')}`
+    const transaction_id = generateTransactionId(now, todayCount + 1)
 
     // Create Sale
     const newSale = await tx.sale.create({
@@ -146,14 +155,20 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
       },
     })
 
-    // Deduct stock and create inventory logs
+    // Deduct stock atomically — the quantity guard stops concurrent sales from overselling
     for (const item of saleItems) {
-      const product = productMap.get(item.product_id)
-      const newQty = product.quantity - item.quantity
-
-      await tx.product.update({
+      const { count } = await tx.product.updateMany({
+        where: { id: item.product_id, quantity: { gte: item.quantity } },
+        data: { quantity: { decrement: item.quantity } },
+      })
+      if (count === 0) {
+        throw new ValidationError('Insufficient stock', [
+          { field: 'items', message: `Insufficient stock for "${item.product_name}" — it may have just been sold` },
+        ])
+      }
+      const { quantity: newQty } = await tx.product.findUnique({
         where: { id: item.product_id },
-        data: { quantity: newQty },
+        select: { quantity: true },
       })
 
       await tx.inventoryLog.create({
@@ -161,7 +176,7 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
           product_id: item.product_id,
           change_type: 'SALE',
           quantity_change: -item.quantity,
-          previous_quantity: product.quantity,
+          previous_quantity: newQty + item.quantity,
           new_quantity: newQty,
           user_id: userId,
           notes: `Sale ${transaction_id}`,
@@ -171,7 +186,7 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
 
     // Award loyalty points if customer is linked (1 point per GHS 10)
     if (customer_id) {
-      const loyaltyRate = await getSettingValue('loyalty_points_rate', 10)
+      const loyaltyRate = await getNumericSetting('loyalty_points_rate', 10)
       const pointsEarned = loyaltyRate > 0 ? Math.floor(totalAmount / loyaltyRate) : 0
       if (pointsEarned > 0) {
         await tx.customer.update({
@@ -219,7 +234,7 @@ async function getSaleById(id) {
   return sale
 }
 
-async function listSales({ page = 1, per_page = 20, start_date, end_date, user_id, customer_id } = {}) {
+async function listSales({ page = 1, per_page = 20, start_date, end_date, user_id, customer_id, payment_status, search } = {}) {
   const skip = (page - 1) * per_page
   const take = Math.min(per_page, 100)
 
@@ -235,6 +250,8 @@ async function listSales({ page = 1, per_page = 20, start_date, end_date, user_i
   }
   if (user_id) where.user_id = user_id
   if (customer_id) where.customer_id = customer_id
+  if (payment_status) where.payment_status = payment_status
+  if (search) where.transaction_id = { contains: search.trim(), mode: 'insensitive' }
 
   const [sales, total] = await Promise.all([
     prisma.sale.findMany({
@@ -264,20 +281,23 @@ async function processRefund(saleId, userId) {
   }
 
   await prisma.$transaction(async (tx) => {
-    // Update sale status
-    await tx.sale.update({
-      where: { id: saleId },
+    // Update sale status — conditional so two simultaneous refunds can't both restore stock
+    const { count } = await tx.sale.updateMany({
+      where: { id: saleId, payment_status: { not: 'REFUNDED' } },
       data: { payment_status: 'REFUNDED' },
     })
+    if (count === 0) {
+      throw new ValidationError('Sale already refunded', [
+        { field: 'sale_id', message: 'This sale has already been refunded' },
+      ])
+    }
 
     // Restore stock and create return inventory logs
     for (const item of sale.sale_items) {
-      const product = await tx.product.findUnique({ where: { id: item.product_id } })
-      const newQty = product.quantity + item.quantity
-
-      await tx.product.update({
+      const { quantity: newQty } = await tx.product.update({
         where: { id: item.product_id },
-        data: { quantity: newQty },
+        data: { quantity: { increment: item.quantity } },
+        select: { quantity: true },
       })
 
       await tx.inventoryLog.create({
@@ -285,7 +305,7 @@ async function processRefund(saleId, userId) {
           product_id: item.product_id,
           change_type: 'RETURN',
           quantity_change: item.quantity,
-          previous_quantity: product.quantity,
+          previous_quantity: newQty - item.quantity,
           new_quantity: newQty,
           user_id: userId,
           notes: `Refund for sale ${sale.transaction_id}`,
@@ -295,7 +315,7 @@ async function processRefund(saleId, userId) {
 
     // Reverse loyalty points
     if (sale.customer_id) {
-      const loyaltyRate = await getSettingValue('loyalty_points_rate', 10)
+      const loyaltyRate = await getNumericSetting('loyalty_points_rate', 10)
       const pointsToDeduct = loyaltyRate > 0 ? Math.floor(parseFloat(sale.total_amount) / loyaltyRate) : 0
       if (pointsToDeduct > 0) {
         const customer = await tx.customer.findUnique({ where: { id: sale.customer_id } })
@@ -323,15 +343,22 @@ async function getReceiptData(saleId) {
   }
 }
 
+function round2(n) {
+  return Math.round(n * 100) / 100
+}
+
 async function getSettingValue(key, defaultValue) {
   try {
     const setting = await prisma.settings.findUnique({ where: { key } })
-    if (!setting) return defaultValue
-    const val = parseFloat(setting.value)
-    return isNaN(val) ? setting.value : val
+    return setting ? setting.value : defaultValue
   } catch {
     return defaultValue
   }
+}
+
+async function getNumericSetting(key, defaultValue) {
+  const val = parseFloat(await getSettingValue(key, defaultValue))
+  return isNaN(val) ? defaultValue : val
 }
 
 module.exports = { createSale, getSaleById, listSales, processRefund, getReceiptData }

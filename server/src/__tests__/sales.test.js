@@ -3,6 +3,21 @@ const request = require('supertest')
 const app = require('../app')
 const prisma = require('../utils/prismaClient')
 const bcrypt = require('bcrypt')
+const { verifyPaystackPayment } = require('../utils/paystack')
+
+// Never call the real Paystack API from tests
+jest.mock('../utils/paystack', () => ({ verifyPaystackPayment: jest.fn() }))
+
+function mockPaystackSuccess(amountGhs) {
+  verifyPaystackPayment.mockResolvedValueOnce({
+    status: true,
+    data: { status: 'success', amount: Math.round(amountGhs * 100), channel: 'test' },
+  })
+}
+
+// Tests assume 0% tax and 1 loyalty point per GHS 10; the dev database may be configured differently
+const TEST_SETTINGS = { tax_rate: '0', loyalty_points_rate: '10' }
+let originalSettings = []
 
 let cashierToken
 let managerToken
@@ -14,6 +29,11 @@ let cashierUser
 let managerUser
 
 beforeAll(async () => {
+  originalSettings = await prisma.settings.findMany({ where: { key: { in: Object.keys(TEST_SETTINGS) } } })
+  for (const [key, value] of Object.entries(TEST_SETTINGS)) {
+    await prisma.settings.upsert({ where: { key }, update: { value }, create: { key, value } })
+  }
+
   // Create test users
   const hash = await bcrypt.hash('testpass123', 12)
   cashierUser = await prisma.user.create({
@@ -99,6 +119,10 @@ afterAll(async () => {
   await prisma.category.delete({ where: { id: testCategory.id } })
   await prisma.authLog.deleteMany({ where: { user_id: { in: [cashierUser.id, managerUser.id] } } })
   await prisma.user.deleteMany({ where: { id: { in: [cashierUser.id, managerUser.id] } } })
+  await prisma.settings.deleteMany({ where: { key: { in: Object.keys(TEST_SETTINGS) } } })
+  for (const { key, value } of originalSettings) {
+    await prisma.settings.create({ data: { key, value } })
+  }
   await prisma.$disconnect()
 })
 
@@ -125,9 +149,9 @@ describe('POST /api/sales — create sale', () => {
     expect(sale.payment_method).toBe('CASH')
     expect(sale.payment_status).toBe('COMPLETED')
     expect(parseFloat(sale.total_amount)).toBe(20.0)
-    expect(sale.sale_items).toHaveLength(1)
-    expect(sale.sale_items[0].unit_price).toBe('10.00')
-    expect(sale.payments[0].change_given).toBe('10.00')
+    expect(sale.items).toHaveLength(1)
+    expect(parseFloat(sale.items[0].unit_price)).toBe(10)
+    expect(parseFloat(sale.payment.change_given)).toBe(10)
 
     // Verify stock was deducted
     const updatedProduct = await prisma.product.findUnique({ where: { id: testProduct.id } })
@@ -143,6 +167,7 @@ describe('POST /api/sales — create sale', () => {
   })
 
   it('creates a MOBILE_MONEY sale with reference', async () => {
+    mockPaystackSuccess(10.0)
     const res = await request(app)
       .post('/api/sales')
       .set('Authorization', `Bearer ${cashierToken}`)
@@ -155,7 +180,8 @@ describe('POST /api/sales — create sale', () => {
 
     expect(res.status).toBe(201)
     expect(res.body.data.payment_method).toBe('MOBILE_MONEY')
-    expect(res.body.data.payments[0].reference).toBe('MOMO-REF-12345')
+    expect(res.body.data.payment.reference).toBe('MOMO-REF-12345')
+    expect(verifyPaystackPayment).toHaveBeenCalledWith('MOMO-REF-12345')
   })
 
   it('awards loyalty points when customer is linked', async () => {
@@ -278,6 +304,7 @@ describe('GET /api/sales/:id', () => {
   let saleId
 
   beforeAll(async () => {
+    mockPaystackSuccess(10.0)
     const res = await request(app)
       .post('/api/sales')
       .set('Authorization', `Bearer ${cashierToken}`)
@@ -297,8 +324,8 @@ describe('GET /api/sales/:id', () => {
 
     expect(res.status).toBe(200)
     expect(res.body.data.id).toBe(saleId)
-    expect(res.body.data.sale_items).toBeDefined()
-    expect(res.body.data.payments).toBeDefined()
+    expect(res.body.data.items).toHaveLength(1)
+    expect(res.body.data.payment.reference).toBe('CARD-TEST-001')
     expect(res.body.data.user).toBeDefined()
   })
 
@@ -404,5 +431,88 @@ describe('POST /api/sales/:id/refund', () => {
       .set('Authorization', `Bearer ${cashierToken}`)
 
     expect(res.status).toBe(403)
+  })
+})
+
+describe('Sale safeguards', () => {
+  let limitedProduct
+
+  beforeAll(async () => {
+    limitedProduct = await prisma.product.create({
+      data: {
+        name: 'Sales Test Limited Stock',
+        sku: 'SALES-TEST-LIMITED',
+        category_id: testCategory.id,
+        price: 4.0,
+        quantity: 3,
+      },
+    })
+  })
+
+  const cashSale = (productId, quantity = 1, extra = {}) =>
+    request(app)
+      .post('/api/sales')
+      .set('Authorization', `Bearer ${cashierToken}`)
+      .send({ items: [{ product_id: productId, quantity }], payment_method: 'CASH', amount_paid: 100, ...extra })
+
+  it('rejects a cart discount larger than the subtotal', async () => {
+    const res = await cashSale(testProduct.id, 1, { discount_amount: 50 })
+    expect(res.status).toBe(422)
+    expect(res.body.error.details[0].field).toBe('discount_amount')
+  })
+
+  it('rejects an item discount larger than its line total', async () => {
+    const res = await request(app)
+      .post('/api/sales')
+      .set('Authorization', `Bearer ${cashierToken}`)
+      .send({ items: [{ product_id: testProduct.id, quantity: 1, discount: 11 }], payment_method: 'CASH', amount_paid: 100 })
+    expect(res.status).toBe(422)
+  })
+
+  it('never oversells when sales run concurrently', async () => {
+    const results = await Promise.all(Array.from({ length: 5 }, () => cashSale(limitedProduct.id)))
+    const succeeded = results.filter((r) => r.status === 201).length
+    expect(succeeded).toBe(3)
+
+    const product = await prisma.product.findUnique({ where: { id: limitedProduct.id } })
+    expect(product.quantity).toBe(0)
+  })
+
+  it('verifies Paystack payments against the full total including tax', async () => {
+    await prisma.settings.update({ where: { key: 'tax_rate' }, data: { value: '3' } })
+    try {
+      // 1 × GHS 10.00 + 3% tax = GHS 10.30; a charge of only GHS 10.00 must be rejected
+      mockPaystackSuccess(10.0)
+      const underpaid = await request(app)
+        .post('/api/sales')
+        .set('Authorization', `Bearer ${cashierToken}`)
+        .send({ items: [{ product_id: testProduct.id, quantity: 1 }], payment_method: 'CARD', amount_paid: 10.3, reference: 'CARD-UNDERPAID' })
+      expect(underpaid.status).toBe(422)
+
+      mockPaystackSuccess(10.3)
+      const paid = await request(app)
+        .post('/api/sales')
+        .set('Authorization', `Bearer ${cashierToken}`)
+        .send({ items: [{ product_id: testProduct.id, quantity: 1 }], payment_method: 'CARD', amount_paid: 10.3, reference: 'CARD-FULL' })
+      expect(paid.status).toBe(201)
+      expect(parseFloat(paid.body.data.total_amount)).toBe(10.3)
+    } finally {
+      await prisma.settings.update({ where: { key: 'tax_rate' }, data: { value: '0' } })
+    }
+  })
+
+  it('restores stock only once when the same refund is submitted concurrently', async () => {
+    const sale = await cashSale(testProduct.id, 2)
+    const before = await prisma.product.findUnique({ where: { id: testProduct.id } })
+
+    const results = await Promise.all(
+      [1, 2, 3].map(() =>
+        request(app).post(`/api/sales/${sale.body.data.id}/refund`).set('Authorization', `Bearer ${managerToken}`)
+      )
+    )
+    expect(results.filter((r) => r.status === 200)).toHaveLength(1)
+
+    const after = await prisma.product.findUnique({ where: { id: testProduct.id } })
+    expect(after.quantity).toBe(before.quantity + 2)
   })
 })

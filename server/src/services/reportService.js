@@ -36,7 +36,7 @@ async function getSalesByDay({ start_date, end_date }) {
   const range = dateRange(start_date, end_date)
   const sales = await prisma.$queryRaw`
     SELECT
-      DATE(created_at) as label,
+      to_char(DATE(created_at), 'YYYY-MM-DD') as label,
       COUNT(id)::int as transactions,
       SUM(total_amount)::float as value
     FROM "Sale"
@@ -219,7 +219,8 @@ async function getDashboardSummary() {
       _sum: { total_amount: true },
       _count: { id: true },
     }),
-    prisma.$queryRaw`SELECT COUNT(*)::int as cnt FROM "Product" WHERE is_active = true AND quantity > 0 AND quantity <= low_stock_threshold`,
+    // Includes out-of-stock items, matching GET /inventory/low-stock
+    prisma.$queryRaw`SELECT COUNT(*)::int as cnt FROM "Product" WHERE is_active = true AND quantity <= low_stock_threshold`,
     prisma.$queryRaw`
       SELECT p.name, SUM(si.total)::float as revenue, SUM(si.quantity)::int as quantity
       FROM "SaleItem" si

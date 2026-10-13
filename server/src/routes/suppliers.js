@@ -1,8 +1,9 @@
 const express = require('express')
-const { body } = require('express-validator')
+const { body, param } = require('express-validator')
 const supplierController = require('../controllers/supplierController')
 const { authenticate, authorize } = require('../middleware/auth')
 const validate = require('../middleware/validate')
+const paginationRules = require('../middleware/pagination')
 
 const router = express.Router()
 
@@ -17,12 +18,14 @@ const supplierValidation = [
 ]
 
 // Any authenticated user can list/view suppliers (needed for product forms)
-router.get('/', supplierController.listSuppliers)
-router.get('/:id', supplierController.getSupplier)
+const idRule = param('id').isUUID().withMessage('Invalid supplier ID')
+
+router.get('/', paginationRules, validate, supplierController.listSuppliers)
+router.get('/:id', idRule, validate, supplierController.getSupplier)
 
 // Only ADMIN and MANAGER can create/update/delete
 router.post('/', authorize(['ADMIN', 'MANAGER']), supplierValidation, validate, supplierController.createSupplier)
-router.put('/:id', authorize(['ADMIN', 'MANAGER']), supplierValidation, validate, supplierController.updateSupplier)
-router.delete('/:id', authorize(['ADMIN']), supplierController.deleteSupplier)
+router.put('/:id', authorize(['ADMIN', 'MANAGER']), idRule, supplierValidation, validate, supplierController.updateSupplier)
+router.delete('/:id', authorize(['ADMIN']), idRule, validate, supplierController.deleteSupplier)
 
 module.exports = router

@@ -8,6 +8,7 @@ import { Table } from '../components/Table'
 import { Pagination } from '../components/Pagination'
 import { Badge } from '../components/Badge'
 import { usersService } from '../services/users'
+import { useAuth } from '../hooks/useAuth'
 
 const ROLE_BADGE = {
   ADMIN: 'danger',
@@ -48,6 +49,7 @@ function LockIcon({ className = '' }) {
 }
 
 export default function UsersPage() {
+  const { user: currentUser } = useAuth()
   const [users, setUsers] = useState([])
   const [meta, setMeta] = useState({ page: 1, total_pages: 1 })
   const [page, setPage] = useState(1)
@@ -122,6 +124,8 @@ export default function UsersPage() {
       setSaving(false)
     }
   }
+
+  const editingSelf = editTarget?.id === currentUser?.id
 
   // Edit
   function openEdit(user) {
@@ -384,7 +388,8 @@ export default function UsersPage() {
               name="role"
               value={editForm.role}
               onChange={handleEditChange}
-              className="block w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              disabled={editingSelf}
+              className="disabled:opacity-60 disabled:cursor-not-allowed block w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
             >
               {ROLES.map((r) => (
                 <option key={r} value={r}>{r}</option>
@@ -398,12 +403,16 @@ export default function UsersPage() {
               name="is_active"
               checked={editForm.is_active}
               onChange={handleEditChange}
+              disabled={editingSelf}
               className="h-4 w-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
             />
             <label htmlFor="is_active" className="text-sm font-medium text-gray-700 dark:text-gray-300">
               Account Active
             </label>
           </div>
+          {editingSelf && (
+            <p className="text-xs text-gray-500 dark:text-gray-400">You can't change your own role or status. Ask another admin.</p>
+          )}
           <div className="flex justify-end gap-3 pt-1">
             <Button type="button" variant="secondary" onClick={() => setEditOpen(false)}>
               Cancel

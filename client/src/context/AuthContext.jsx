@@ -76,6 +76,12 @@ export function AuthProvider({ children }) {
       await api.post('/auth/logout')
     } finally {
       clearAccessToken()
+      // Per-session data must not carry over to the next person on this till
+      try {
+        sessionStorage.removeItem('pos_session_sales')
+      } catch {
+        // sessionStorage unavailable
+      }
       dispatch({ type: 'LOGOUT' })
     }
   }

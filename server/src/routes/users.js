@@ -4,7 +4,7 @@ const { authenticate, authorize } = require('../middleware/auth')
 const validate = require('../middleware/validate')
 const prisma = require('../utils/prismaClient')
 const bcrypt = require('bcrypt')
-const { NotFoundError, ConflictError } = require('../utils/errors')
+const { NotFoundError, ConflictError, ValidationError } = require('../utils/errors')
 
 const router = express.Router()
 
@@ -73,6 +73,13 @@ router.put(
       const { role, is_active, full_name, email } = req.body
       const user = await prisma.user.findUnique({ where: { id: req.params.id } })
       if (!user) throw new NotFoundError('User not found')
+
+      // Admins can't lock themselves out of user management
+      if (user.id === req.user.id && ((role !== undefined && role !== 'ADMIN') || is_active === false)) {
+        throw new ValidationError('You cannot remove your own admin access', [
+          { field: role !== undefined && role !== 'ADMIN' ? 'role' : 'is_active', message: 'Ask another admin to change your own role or status' },
+        ])
+      }
       const updated = await prisma.user.update({
         where: { id: req.params.id },
         data: { ...(role !== undefined && { role }), ...(is_active !== undefined && { is_active }), ...(full_name && { full_name }), ...(email && { email }) },
@@ -112,6 +119,15 @@ router.post('/:id/unlock', [param('id').isUUID()], validate, async (req, res, ne
     await prisma.user.update({
       where: { id: req.params.id },
       data: { failed_login_attempts: 0, locked_until: null },
+    })
+    await prisma.authLog.create({
+      data: {
+        user_id: user.id,
+        event_type: 'ACCOUNT_UNLOCKED',
+        ip_address: req.ip,
+        user_agent: req.headers['user-agent'] || null,
+        details: `Unlocked by admin ${req.user.username}`,
+      },
     })
     res.json({ success: true, message: 'Account unlocked successfully' })
   } catch (err) {

@@ -63,8 +63,8 @@ export default function InventoryPage() {
     }
   }, [page, activeTab])
 
-  // Load stats (total, low, out)
-  useEffect(() => {
+  // Load stats (total, low, out) — refreshed after every stock change
+  const fetchStats = useCallback(() => {
     Promise.allSettled([
       inventoryService.list({ per_page: 1 }),
       inventoryService.lowStock(),
@@ -76,6 +76,10 @@ export default function InventoryPage() {
       setStats({ total, low, out })
     })
   }, [])
+
+  useEffect(() => {
+    fetchStats()
+  }, [fetchStats])
 
   useEffect(() => {
     fetchProducts()
@@ -121,6 +125,7 @@ export default function InventoryPage() {
 
       setAdjustTarget(null)
       fetchProducts()
+      fetchStats()
     } catch (err) {
       const msg = err.response?.data?.error?.message || 'Failed to adjust stock'
       toast.error(msg)

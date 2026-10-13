@@ -183,6 +183,8 @@ describe('Account lockout', () => {
     const locked = await prisma.user.findUnique({ where: { id: lockTestUser.id } })
     expect(locked.locked_until).not.toBeNull()
     expect(locked.locked_until > new Date()).toBe(true)
+    // Time-limited, so failed guesses can't lock an account out permanently
+    expect(locked.locked_until.getTime()).toBeLessThanOrEqual(Date.now() + 24 * 60 * 60 * 1000)
   })
 
   it('rejects login with correct password when account is locked', async () => {

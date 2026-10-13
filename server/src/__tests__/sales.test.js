@@ -516,3 +516,24 @@ describe('Sale safeguards', () => {
     expect(after.quantity).toBe(before.quantity + 2)
   })
 })
+
+describe('PUT /api/products/:id — activation is admin-only', () => {
+  it('forbids a manager from deactivating a product', async () => {
+    const res = await request(app)
+      .put(`/api/products/${testProduct.id}`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ is_active: false })
+    expect(res.status).toBe(403)
+    const product = await prisma.product.findUnique({ where: { id: testProduct.id } })
+    expect(product.is_active).toBe(true)
+  })
+
+  it('lets a manager edit other fields when is_active is unchanged', async () => {
+    const res = await request(app)
+      .put(`/api/products/${testProduct.id}`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ is_active: true, low_stock_threshold: 12 })
+    expect(res.status).toBe(200)
+    expect(res.body.data.low_stock_threshold).toBe(12)
+  })
+})

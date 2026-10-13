@@ -7,12 +7,16 @@ import { Input } from '../components/Input'
 import { productsService } from '../services/products'
 import { useSettings } from '../context/SettingsContext'
 import api from '../services/api'
+import { useAuth } from '../hooks/useAuth'
 
 export default function ProductFormPage() {
   const navigate = useNavigate()
   const { id } = useParams()
   const isEditing = Boolean(id)
   const { currency_symbol } = useSettings()
+  const { user } = useAuth()
+  // Activating/deactivating is ADMIN-only, matching product deletion
+  const canToggleActive = user?.role === 'ADMIN'
 
   const [categories, setCategories] = useState([])
   const [suppliers, setSuppliers] = useState([])
@@ -127,7 +131,7 @@ export default function ProductFormPage() {
         if (form.cost_price) payload.append('cost_price', form.cost_price)
         payload.append('quantity', form.quantity)
         payload.append('low_stock_threshold', form.low_stock_threshold)
-        payload.append('is_active', form.is_active ? 'true' : 'false')
+        if (canToggleActive) payload.append('is_active', form.is_active ? 'true' : 'false')
         payload.append('image', imageFile)
       } else {
         payload = {
@@ -140,7 +144,7 @@ export default function ProductFormPage() {
           cost_price: form.cost_price ? parseFloat(form.cost_price) : null,
           quantity: parseInt(form.quantity),
           low_stock_threshold: parseInt(form.low_stock_threshold),
-          is_active: form.is_active,
+          ...(canToggleActive && { is_active: form.is_active }),
           ...(isEditing && imageRemoved && { image_url: null }),
         }
       }
@@ -377,7 +381,8 @@ export default function ProductFormPage() {
             </div>
           </div>
 
-          {/* Status */}
+          {/* Status (admin only) */}
+          {canToggleActive && (
           <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 mt-4">
             <div className="flex items-center justify-between">
               <div>
@@ -395,6 +400,7 @@ export default function ProductFormPage() {
               </button>
             </div>
           </div>
+          )}
 
           {/* Form actions */}
           <div className="flex gap-3 justify-end mt-5">

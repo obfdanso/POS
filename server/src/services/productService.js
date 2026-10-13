@@ -1,5 +1,5 @@
 const prisma = require('../utils/prismaClient')
-const { NotFoundError, ConflictError, ValidationError } = require('../utils/errors')
+const { NotFoundError, ConflictError, ValidationError, ForbiddenError } = require('../utils/errors')
 const path = require('path')
 const fs = require('fs')
 
@@ -118,9 +118,14 @@ async function createProduct(data, userId) {
   })
 }
 
-async function updateProduct(id, data) {
+async function updateProduct(id, data, user) {
   const existing = await prisma.product.findUnique({ where: { id } })
   if (!existing) throw new NotFoundError('Product not found')
+
+  // Activating/deactivating mirrors DELETE /products/:id, which is ADMIN-only
+  if (data.is_active !== undefined && data.is_active !== existing.is_active && user?.role !== 'ADMIN') {
+    throw new ForbiddenError('Only an admin can activate or deactivate products')
+  }
 
   // Check uniqueness (exclude self)
   if (data.sku && data.sku !== existing.sku) {

@@ -3,6 +3,7 @@ const { NotFoundError, ValidationError, AppError } = require('../utils/errors')
 const { verifyPaystackPayment } = require('../utils/paystack')
 const { logger } = require('../middleware/logger')
 const generateTransactionId = require('../utils/generateTransactionId')
+const { buildDateRange } = require('../utils/dateRange')
 
 async function createSale({ items, customer_id, payment_method, amount_paid, discount_amount = 0, notes, reference }, user) {
   // Support legacy callers that pass userId as a string
@@ -239,15 +240,7 @@ async function listSales({ page = 1, per_page = 20, start_date, end_date, user_i
   const take = Math.min(per_page, 100)
 
   const where = {}
-  if (start_date || end_date) {
-    where.created_at = {}
-    if (start_date) where.created_at.gte = new Date(start_date)
-    if (end_date) {
-      const end = new Date(end_date)
-      end.setHours(23, 59, 59, 999)
-      where.created_at.lte = end
-    }
-  }
+  if (start_date || end_date) where.created_at = buildDateRange(start_date, end_date)
   if (user_id) where.user_id = user_id
   if (customer_id) where.customer_id = customer_id
   if (payment_status) where.payment_status = payment_status

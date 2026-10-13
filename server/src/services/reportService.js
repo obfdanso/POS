@@ -1,18 +1,27 @@
 const prisma = require('../utils/prismaClient')
+const { ValidationError } = require('../utils/errors')
+const { buildDateRange } = require('../utils/dateRange')
 
+// Defaults to the last 30 days (including today) when dates are omitted
 function dateRange(start_date, end_date) {
-  const start = start_date ? new Date(start_date) : new Date(new Date().setDate(new Date().getDate() - 30))
-  const end = end_date ? new Date(end_date) : new Date()
-  end.setHours(23, 59, 59, 999)
+  const range = buildDateRange(start_date, end_date)
+  if (!range.gte) {
+    range.gte = new Date()
+    range.gte.setDate(range.gte.getDate() - 29)
+    range.gte.setHours(0, 0, 0, 0)
+  }
+  if (!range.lte) {
+    range.lte = new Date()
+    range.lte.setHours(23, 59, 59, 999)
+  }
 
-  if (start > end) {
-    const { ValidationError } = require('../utils/errors')
+  if (range.gte > range.lte) {
     throw new ValidationError('Invalid date range', [
       { field: 'start_date', message: 'start_date must be before end_date' },
     ])
   }
 
-  return { gte: start, lte: end }
+  return range
 }
 
 async function getSalesSummary({ start_date, end_date }) {

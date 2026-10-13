@@ -1,3 +1,5 @@
+const fs = require('fs')
+const multer = require('multer')
 const { logger } = require('./logger')
 
 // Express recognises error handlers by their four parameters, so `_next` must stay
@@ -7,6 +9,28 @@ function errorHandler(err, req, res, _next) {
     logger.error(err.stack || err.message)
   } else {
     logger.error(err.message)
+  }
+
+  // Don't keep an uploaded image when the request that brought it failed
+  if (req.file?.path) {
+    fs.unlink(req.file.path, () => {})
+  }
+
+  // Malformed JSON body
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'BAD_REQUEST', message: 'Request body is not valid JSON' },
+    })
+  }
+
+  // Upload errors (e.g. file too large)
+  if (err instanceof multer.MulterError) {
+    const message = err.code === 'LIMIT_FILE_SIZE' ? 'Image must be 5 MB or smaller' : err.message
+    return res.status(422).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message, details: [{ field: 'image', message }] },
+    })
   }
 
   // Handle Prisma errors

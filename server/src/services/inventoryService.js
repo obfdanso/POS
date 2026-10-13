@@ -65,35 +65,37 @@ async function getLowStock() {
 }
 
 async function adjustStock(productId, quantityChange, changeType, userId, notes) {
-  const product = await prisma.product.findUnique({ where: { id: productId } })
+  const product = await prisma.product.findUnique({ where: { id: productId }, select: { id: true } })
   if (!product) throw new NotFoundError('Product not found')
 
-  const newQty = product.quantity + quantityChange
-  if (newQty < 0) {
-    throw new ValidationError('Adjustment would result in negative stock', [
-      { field: 'quantity_change', message: `Cannot reduce below 0. Current stock: ${product.quantity}` },
-    ])
-  }
+  return prisma.$transaction(async (tx) => {
+    // Relative update guarded against going negative, so concurrent sales are never overwritten
+    const { count } = await tx.product.updateMany({
+      where: { id: productId, ...(quantityChange < 0 && { quantity: { gte: -quantityChange } }) },
+      data: { quantity: { increment: quantityChange } },
+    })
+    if (count === 0) {
+      const { quantity } = await tx.product.findUnique({ where: { id: productId }, select: { quantity: true } })
+      throw new ValidationError('Adjustment would result in negative stock', [
+        { field: 'quantity_change', message: `Cannot reduce below 0. Current stock: ${quantity}` },
+      ])
+    }
 
-  const [updatedProduct, log] = await prisma.$transaction([
-    prisma.product.update({
-      where: { id: productId },
-      data: { quantity: newQty },
-    }),
-    prisma.inventoryLog.create({
+    const updatedProduct = await tx.product.findUnique({ where: { id: productId } })
+    const log = await tx.inventoryLog.create({
       data: {
         product_id: productId,
         change_type: changeType,
         quantity_change: quantityChange,
-        previous_quantity: product.quantity,
-        new_quantity: newQty,
+        previous_quantity: updatedProduct.quantity - quantityChange,
+        new_quantity: updatedProduct.quantity,
         user_id: userId,
         notes: notes || null,
       },
-    }),
-  ])
+    })
 
-  return { product: updatedProduct, log }
+    return { product: updatedProduct, log }
+  })
 }
 
 async function restockProduct(productId, quantity, userId, notes) {
@@ -103,30 +105,6 @@ async function restockProduct(productId, quantity, userId, notes) {
     ])
   }
   return adjustStock(productId, quantity, 'RESTOCK', userId, notes)
-}
-
-async function manualAdjust(productId, newQuantity, userId, notes) {
-  const product = await prisma.product.findUnique({ where: { id: productId } })
-  if (!product) throw new NotFoundError('Product not found')
-
-  const change = newQuantity - product.quantity
-
-  const [updatedProduct, log] = await prisma.$transaction([
-    prisma.product.update({ where: { id: productId }, data: { quantity: newQuantity } }),
-    prisma.inventoryLog.create({
-      data: {
-        product_id: productId,
-        change_type: 'ADJUSTMENT',
-        quantity_change: change,
-        previous_quantity: product.quantity,
-        new_quantity: newQuantity,
-        user_id: userId,
-        notes: notes || null,
-      },
-    }),
-  ])
-
-  return { product: updatedProduct, log }
 }
 
 async function getInventoryLog(productId, { page = 1, per_page = 20 } = {}) {
@@ -158,6 +136,5 @@ module.exports = {
   getLowStockCount,
   adjustStock,
   restockProduct,
-  manualAdjust,
   getInventoryLog,
 }

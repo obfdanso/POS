@@ -163,7 +163,7 @@ export default function ReportsPage() {
     exportCsv(
       'cashier-performance.csv',
       ['Cashier', 'Transactions', 'Total Revenue'],
-      cashierData.map((c) => [`"${c.name ?? c.label}"`, c.transaction_count ?? c.count ?? 0, c.total_revenue ?? c.value ?? 0])
+      cashierData.map((c) => [`"${c.label}"`, c.transactions ?? 0, c.value ?? 0])
     )
   }
   function exportProfit() {
@@ -411,8 +411,8 @@ export default function ReportsPage() {
                       {cashierData.map((c, i) => (
                         <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                           <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{c.name ?? c.label}</td>
-                          <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{c.transaction_count ?? c.count ?? 0}</td>
-                          <td className="px-4 py-3 text-sm font-semibold text-gray-900 dark:text-gray-100">{formatCurrency(c.total_revenue ?? c.value ?? 0)}</td>
+                          <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{c.transactions ?? 0}</td>
+                          <td className="px-4 py-3 text-sm font-semibold text-gray-900 dark:text-gray-100">{formatCurrency(c.value ?? 0)}</td>
                         </tr>
                       ))}
                     </tbody>

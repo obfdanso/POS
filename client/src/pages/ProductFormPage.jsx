@@ -35,6 +35,7 @@ export default function ProductFormPage() {
   })
   const [imageFile, setImageFile] = useState(null)
   const [imagePreview, setImagePreview] = useState(null)
+  const [imageRemoved, setImageRemoved] = useState(false)
 
   // Load categories and suppliers in parallel
   useEffect(() => {
@@ -88,6 +89,7 @@ export default function ProductFormPage() {
       return
     }
     setImageFile(file)
+    setImageRemoved(false)
     setImagePreview(URL.createObjectURL(file))
     setErrors((prev) => { const e = { ...prev }; delete e.image; return e })
   }
@@ -139,6 +141,7 @@ export default function ProductFormPage() {
           quantity: parseInt(form.quantity),
           low_stock_threshold: parseInt(form.low_stock_threshold),
           is_active: form.is_active,
+          ...(isEditing && imageRemoved && { image_url: null }),
         }
       }
 
@@ -363,7 +366,7 @@ export default function ProductFormPage() {
                     variant="ghost"
                     size="sm"
                     className="ml-2 text-danger-500 hover:text-danger-700"
-                    onClick={() => { setImageFile(null); setImagePreview(null); if (fileInputRef.current) fileInputRef.current.value = '' }}
+                    onClick={() => { setImageFile(null); setImagePreview(null); setImageRemoved(true); if (fileInputRef.current) fileInputRef.current.value = '' }}
                   >
                     Remove
                   </Button>
@@ -375,10 +378,10 @@ export default function ProductFormPage() {
           </div>
 
           {/* Status */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6 mt-4">
+          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 mt-4">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-sm font-semibold text-gray-700">Active Status</h2>
+                <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Active Status</h2>
                 <p className="text-xs text-gray-400 mt-0.5">Inactive products won't appear in the POS</p>
               </div>
               <button

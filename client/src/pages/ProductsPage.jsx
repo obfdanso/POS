@@ -23,6 +23,7 @@ export default function ProductsPage() {
   const [meta, setMeta] = useState({ page: 1, total_pages: 1, total: 0 })
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('active')
   const [page, setPage] = useState(1)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -40,6 +41,7 @@ export default function ProductsPage() {
       const params = { page, per_page: 20 }
       if (search.trim()) params.search = search.trim()
       if (categoryFilter) params.category_id = categoryFilter
+      params.status = statusFilter
       const res = await productsService.list(params)
       setProducts(res.data?.data || [])
       setMeta(res.data?.meta || { page: 1, total_pages: 1, total: 0 })
@@ -48,7 +50,7 @@ export default function ProductsPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [page, search, categoryFilter])
+  }, [page, search, categoryFilter, statusFilter])
 
   useEffect(() => {
     fetchProducts()
@@ -57,7 +59,17 @@ export default function ProductsPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setPage(1)
-  }, [search, categoryFilter])
+  }, [search, categoryFilter, statusFilter])
+
+  async function handleReactivate(product) {
+    try {
+      await productsService.update(product.id, { is_active: true })
+      toast.success(`"${product.name}" is active again`)
+      fetchProducts()
+    } catch (err) {
+      toast.error(err.response?.data?.error?.message || 'Failed to reactivate product')
+    }
+  }
 
   async function handleDelete(product) {
     setIsDeleting(true)
@@ -135,6 +147,11 @@ export default function ProductsPage() {
           >
             Edit
           </Button>
+          {!row.is_active && (
+            <Button size="sm" variant="success" onClick={() => handleReactivate(row)}>
+              Reactivate
+            </Button>
+          )}
           {isAdmin && row.is_active && (
             <Button
               size="sm"
@@ -188,6 +205,18 @@ export default function ProductsPage() {
                 {categories.map((cat) => (
                   <option key={cat.id} value={cat.id}>{cat.name}</option>
                 ))}
+              </select>
+            </div>
+            <div className="sm:w-40">
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                aria-label="Filter by status"
+                className="block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+              >
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+                <option value="all">All Statuses</option>
               </select>
             </div>
           </div>

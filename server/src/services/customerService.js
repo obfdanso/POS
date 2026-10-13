@@ -25,7 +25,16 @@ async function listCustomers({ page = 1, per_page = 20, search } = {}) {
     prisma.customer.count({ where }),
   ])
 
-  return { customers, total, page, per_page: take, total_pages: Math.ceil(total / take) }
+  // Lifetime spend for this page of customers, aggregated in SQL (refunded sales excluded)
+  const totals = await prisma.sale.groupBy({
+    by: ['customer_id'],
+    where: { customer_id: { in: customers.map((c) => c.id) }, payment_status: 'COMPLETED' },
+    _sum: { total_amount: true },
+  })
+  const spentById = new Map(totals.map((t) => [t.customer_id, parseFloat(t._sum.total_amount || 0)]))
+  const withTotals = customers.map((c) => ({ ...c, total_purchases: spentById.get(c.id) ?? 0 }))
+
+  return { customers: withTotals, total, page, per_page: take, total_pages: Math.ceil(total / take) }
 }
 
 async function getCustomerById(id) {
@@ -36,7 +45,25 @@ async function getCustomerById(id) {
     },
   })
   if (!customer) throw new NotFoundError('Customer not found')
-  return customer
+
+  // Purchase history summary (refunded sales excluded)
+  const stats = await prisma.sale.aggregate({
+    where: { customer_id: id, payment_status: 'COMPLETED' },
+    _sum: { total_amount: true },
+    _avg: { total_amount: true },
+    _count: { id: true },
+    _max: { created_at: true },
+  })
+
+  return {
+    ...customer,
+    purchase_summary: {
+      total_spent: parseFloat(stats._sum.total_amount || 0),
+      purchase_count: stats._count.id,
+      average_purchase: parseFloat(stats._avg.total_amount || 0),
+      last_purchase_at: stats._max.created_at,
+    },
+  }
 }
 
 async function createCustomer(data) {

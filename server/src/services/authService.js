@@ -4,9 +4,9 @@ const prisma = require('../utils/prismaClient')
 const { UnauthorizedError, NotFoundError } = require('../utils/errors')
 
 const MAX_FAILED_ATTEMPTS = 5
-// Time-limited so failed guesses can't lock an account (or the only admin) out permanently;
-// an admin can unlock earlier via POST /api/users/:id/unlock
-const LOCKOUT_DURATION_MS = 24 * 60 * 60 * 1000
+// Locked accounts stay locked until an admin unlocks them (POST /api/users/:id/unlock).
+// If every admin is locked out, run `npm run unlock-user -- <username>` on the server.
+const LOCKED_UNTIL_ADMIN_UNLOCK = new Date('9999-12-31T00:00:00Z')
 
 // In-memory blacklist for revoked refresh tokens.
 // Tokens are auto-removed after their 7-day expiry so memory stays bounded.
@@ -68,7 +68,7 @@ async function login(username, password, ipAddress, userAgent) {
     const updateData = { failed_login_attempts: newFailCount }
 
     if (newFailCount >= MAX_FAILED_ATTEMPTS) {
-      updateData.locked_until = new Date(Date.now() + LOCKOUT_DURATION_MS)
+      updateData.locked_until = LOCKED_UNTIL_ADMIN_UNLOCK
       await prisma.user.update({ where: { id: user.id }, data: updateData })
       await logAuthEvent(user.id, 'ACCOUNT_LOCKED', ipAddress, userAgent, `Locked after ${newFailCount} failed attempts`)
     } else {

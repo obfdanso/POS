@@ -6,6 +6,7 @@ const fs = require('fs')
 const productController = require('../controllers/productController')
 const { authenticate, authorize } = require('../middleware/auth')
 const validate = require('../middleware/validate')
+const { ValidationError } = require('../utils/errors')
 
 const router = express.Router()
 
@@ -27,7 +28,7 @@ const upload = multer({
     const allowed = ['.jpg', '.jpeg', '.png', '.webp']
     const ext = path.extname(file.originalname).toLowerCase()
     if (allowed.includes(ext)) cb(null, true)
-    else cb(new Error('Only image files are allowed'))
+    else cb(new ValidationError('Only image files are allowed', [{ field: 'image', message: 'Upload a JPG, PNG, or WebP image' }]))
   },
 })
 

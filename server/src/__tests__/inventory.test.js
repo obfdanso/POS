@@ -251,3 +251,21 @@ describe('GET /api/inventory/log/:productId', () => {
     expect(res.status).toBe(404)
   })
 })
+
+describe('Concurrent stock adjustments', () => {
+  it('applies every change exactly once and never goes below zero', async () => {
+    await prisma.product.update({ where: { id: testProduct.id }, data: { quantity: 3 } })
+
+    const adjust = (quantity_change) =>
+      request(app)
+        .post('/api/inventory/adjust')
+        .set('Authorization', `Bearer ${managerToken}`)
+        .send({ product_id: testProduct.id, quantity_change })
+
+    const results = await Promise.all([adjust(-1), adjust(-1), adjust(-1), adjust(-1), adjust(-1)])
+    expect(results.filter((r) => r.status === 200)).toHaveLength(3)
+
+    const product = await prisma.product.findUnique({ where: { id: testProduct.id } })
+    expect(product.quantity).toBe(0)
+  })
+})

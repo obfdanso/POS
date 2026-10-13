@@ -14,6 +14,7 @@
     "db:backup": "node scripts/backup.js",
     "db:restore": "node scripts/restore.js",
     "clear-sales": "node scripts/clear-sales.js",
+    "unlock-user": "node scripts/unlock-user.js",
     "import-images": "node scripts/import-product-images.js",
     "lint": "eslint src/"
   },

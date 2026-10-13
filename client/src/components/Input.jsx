@@ -1,5 +1,9 @@
+import { useId } from 'react'
+
 export function Input({ label, error, className = '', id, name, ...props }) {
-  const inputId = id || name;
+  // Always link the label to its input, even when no id or name is passed
+  const generatedId = useId()
+  const inputId = id || name || generatedId
   return (
     <div className="flex flex-col gap-1">
       {label && <label htmlFor={inputId} className="text-sm font-medium text-gray-700 dark:text-gray-300">{label}</label>}

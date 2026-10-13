@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { useAuth } from '../hooks/useAuth'
+import toast from 'react-hot-toast'
 import {
   ResponsiveContainer,
   LineChart,
@@ -16,6 +16,8 @@ import {
 } from 'recharts'
 import { DashboardLayout } from '../layouts/DashboardLayout'
 import { reportsService } from '../services/reports'
+import { inventoryService } from '../services/inventory'
+import { toISODate, daysFromToday } from '../utils/date'
 import { formatCurrency } from '../utils/formatCurrency'
 
 const PIE_COLORS = ['#0d9488', '#16A34A', '#D97706', '#DC2626', '#7C3AED', '#0891B2']
@@ -46,78 +48,50 @@ function KpiCard({ title, value, subtitle, icon, color }) {
 }
 
 export default function DashboardPage() {
-  const { user } = useAuth()
-  const today = new Date().toISOString().split('T')[0]
+  const today = toISODate()
+  const sevenDaysAgo = daysFromToday(-6)
 
   const [summary, setSummary] = useState(null)
   const [dailySales, setDailySales] = useState([])
   const [topProducts, setTopProducts] = useState([])
   const [categories, setCategories] = useState([])
-  const [inventoryStatus, setInventoryStatus] = useState(null)
+  const [lowStockItems, setLowStockItems] = useState([])
 
   const [loadingSummary, setLoadingSummary] = useState(true)
   const [loadingCharts, setLoadingCharts] = useState(true)
   const [loadingInventory, setLoadingInventory] = useState(true)
   const [error, setError] = useState(null)
 
-  // Compute date ranges
-  const sevenDaysAgo = new Date()
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6)
-  const sevenDaysAgoStr = sevenDaysAgo.toISOString().split('T')[0]
-
-  const thirtyDaysAgo = new Date()
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 29)
-  const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0]
-
+  // Today's KPIs: revenue, transaction count, and low-stock alert count
   useEffect(() => {
-    async function fetchSummary() {
-      try {
-        const res = await reportsService.salesSummary({ start_date: thirtyDaysAgoStr, end_date: today })
-        setSummary(res.data?.data ?? res.data)
-      } catch (e) {
-        setError('Failed to load summary data.')
-      } finally {
-        setLoadingSummary(false)
-      }
-    }
-    fetchSummary()
-  }, [today, thirtyDaysAgoStr])
-
-  useEffect(() => {
-    async function fetchCharts() {
-      try {
-        const [dailyRes, topRes, catRes] = await Promise.all([
-          reportsService.salesByDay({ start_date: sevenDaysAgoStr, end_date: today }),
-          reportsService.topProducts({ limit: 5, start_date: sevenDaysAgoStr, end_date: today }),
-          reportsService.categoryPerformance({ start_date: sevenDaysAgoStr, end_date: today }),
-        ])
-        setDailySales(dailyRes.data?.data ?? dailyRes.data ?? [])
-        setTopProducts(topRes.data?.data ?? topRes.data ?? [])
-        setCategories(catRes.data?.data ?? catRes.data ?? [])
-      } catch (e) {
-        // non-fatal
-      } finally {
-        setLoadingCharts(false)
-      }
-    }
-    fetchCharts()
-  }, [sevenDaysAgoStr, today])
-
-  useEffect(() => {
-    async function fetchInventory() {
-      try {
-        const res = await reportsService.inventoryStatus()
-        setInventoryStatus(res.data?.data ?? res.data)
-      } catch (e) {
-        // non-fatal
-      } finally {
-        setLoadingInventory(false)
-      }
-    }
-    fetchInventory()
+    reportsService.dashboard()
+      .then((res) => setSummary(res.data?.data))
+      .catch(() => setError('Failed to load summary data.'))
+      .finally(() => setLoadingSummary(false))
   }, [])
 
-  const lowStockItems = inventoryStatus?.low_stock ?? []
+  useEffect(() => {
+    Promise.all([
+      reportsService.salesByDay({ start_date: sevenDaysAgo, end_date: today }),
+      reportsService.topProducts({ limit: 5, start_date: sevenDaysAgo, end_date: today }),
+      reportsService.categoryPerformance({ start_date: sevenDaysAgo, end_date: today }),
+    ])
+      .then(([dailyRes, topRes, catRes]) => {
+        setDailySales(dailyRes.data?.data ?? [])
+        setTopProducts(topRes.data?.data ?? [])
+        setCategories(catRes.data?.data ?? [])
+      })
+      .catch(() => toast.error('Failed to load charts'))
+      .finally(() => setLoadingCharts(false))
+  }, [sevenDaysAgo, today])
+
+  // Includes out-of-stock items, lowest stock first
+  useEffect(() => {
+    inventoryService.lowStock()
+      .then((res) => setLowStockItems(res.data?.data ?? []))
+      .catch(() => toast.error('Failed to load low-stock alerts'))
+      .finally(() => setLoadingInventory(false))
+  }, [])
 
   return (
     <DashboardLayout>
@@ -157,9 +131,9 @@ export default function DashboardPage() {
           ) : (
             <>
               <KpiCard
-                title="Total Revenue (30 Days)"
-                value={formatCurrency(summary?.total_revenue ?? 0)}
-                subtitle="Last 30 days, completed sales"
+                title="Today's Revenue"
+                value={formatCurrency(summary?.today_revenue ?? 0)}
+                subtitle="Completed sales today"
                 color="bg-primary-100 dark:bg-primary-900/30"
                 icon={
                   <svg className="w-6 h-6 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -168,9 +142,9 @@ export default function DashboardPage() {
                 }
               />
               <KpiCard
-                title="Transactions (30 Days)"
-                value={summary?.transaction_count ?? 0}
-                subtitle="Last 30 days, completed sales"
+                title="Today's Transactions"
+                value={summary?.today_transactions ?? 0}
+                subtitle="Completed sales today"
                 color="bg-success-100 dark:bg-success-900/30"
                 icon={
                   <svg className="w-6 h-6 text-success-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -179,9 +153,9 @@ export default function DashboardPage() {
                 }
               />
               <KpiCard
-                title="Low Stock Items"
-                value={loadingInventory ? '...' : lowStockItems.length}
-                subtitle="Below threshold"
+                title="Low Stock Alerts"
+                value={summary?.low_stock_alerts ?? 0}
+                subtitle="At or below threshold, incl. out of stock"
                 color="bg-warning-100 dark:bg-warning-900/30"
                 icon={
                   <svg className="w-6 h-6 text-warning-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -190,9 +164,9 @@ export default function DashboardPage() {
                 }
               />
               <KpiCard
-                title="Total Products"
-                value={inventoryStatus?.total_products ?? (loadingInventory ? '...' : 0)}
-                subtitle="Active in catalog"
+                title="Average Sale Today"
+                value={formatCurrency(summary?.today_transactions ? summary.today_revenue / summary.today_transactions : 0)}
+                subtitle="Per completed transaction"
                 color="bg-purple-100 dark:bg-purple-900/30"
                 icon={
                   <svg className="w-6 h-6 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

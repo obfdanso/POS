@@ -77,14 +77,14 @@ function NavItem({ to, icon, label, end = false }) {
       to={to}
       end={end}
       className={({ isActive }) =>
-        `flex items-center gap-1.5 px-3 h-full text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
+        `flex items-center gap-1.5 px-2.5 h-full text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
           isActive
             ? 'border-teal-600 text-teal-600 dark:text-teal-400 dark:border-teal-400'
             : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'
         }`
       }
     >
-      <span className="w-4 h-4 flex-shrink-0">{icon}</span>
+      <span className="hidden xl:block w-4 h-4 flex-shrink-0">{icon}</span>
       <span>{label}</span>
     </NavLink>
   )
@@ -169,7 +169,7 @@ export function DashboardLayout({ children, noPad = false }) {
         <div className="max-w-screen-2xl mx-auto px-4 flex items-stretch h-16 gap-2">
 
           {/* Logo */}
-          <div className="flex items-center gap-2.5 flex-shrink-0 pr-4">
+          <div className="flex items-center gap-2.5 flex-shrink-0 pr-2 xl:pr-4">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" className="w-8 h-8 flex-shrink-0">
               <rect width="64" height="64" rx="14" ry="14" fill="#0d9488"/>
               <circle cx="31" cy="27" r="12" fill="none" stroke="white" strokeWidth="5"/>
@@ -187,10 +187,10 @@ export function DashboardLayout({ children, noPad = false }) {
               <>
                 <NavItem to="/cashier/dashboard" icon={icons.home} label="Home" end />
                 <NavItem to="/pos" icon={icons.pos} label="New Sale" end />
-                <div className="w-px bg-gray-200 dark:bg-gray-700 mx-2 my-3 flex-shrink-0" />
+                <div className="w-px bg-gray-200 dark:bg-gray-700 mx-1 xl:mx-2 my-3 flex-shrink-0" />
                 <NavItem to="/cashier/sales" icon={icons.mySales} label="My Sales" />
                 <NavItem to="/cashier/customers" icon={icons.customers} label="Customer Lookup" />
-                <div className="w-px bg-gray-200 dark:bg-gray-700 mx-2 my-3 flex-shrink-0" />
+                <div className="w-px bg-gray-200 dark:bg-gray-700 mx-1 xl:mx-2 my-3 flex-shrink-0" />
                 <NavItem to="/cashier/profile" icon={icons.profile} label="My Profile" />
               </>
             )}
@@ -200,18 +200,18 @@ export function DashboardLayout({ children, noPad = false }) {
               <>
                 <NavItem to="/dashboard" icon={icons.dashboard} label="Overview" end />
                 <NavItem to="/pos" icon={icons.pos} label="New Sale" end />
-                <div className="w-px bg-gray-200 dark:bg-gray-700 mx-2 my-3 flex-shrink-0" />
+                <div className="w-px bg-gray-200 dark:bg-gray-700 mx-1 xl:mx-2 my-3 flex-shrink-0" />
                 <NavItem to="/products" icon={icons.products} label="Products" />
                 <NavItem to="/inventory" icon={icons.inventory} label="Inventory" />
                 <NavItem to="/customers" icon={icons.customers} label="Customers" />
-                <div className="w-px bg-gray-200 dark:bg-gray-700 mx-2 my-3 flex-shrink-0" />
+                <div className="w-px bg-gray-200 dark:bg-gray-700 mx-1 xl:mx-2 my-3 flex-shrink-0" />
                 <NavItem to="/reports" icon={icons.reports} label="Reports" />
               </>
             )}
 
             {isAdmin && (
               <>
-                <div className="w-px bg-gray-200 dark:bg-gray-700 mx-2 my-3 flex-shrink-0" />
+                <div className="w-px bg-gray-200 dark:bg-gray-700 mx-1 xl:mx-2 my-3 flex-shrink-0" />
                 <NavItem to="/users" icon={icons.users} label="Users" />
                 <NavItem to="/settings" icon={icons.settings} label="Settings" />
               </>
@@ -227,7 +227,7 @@ export function DashboardLayout({ children, noPad = false }) {
               <div className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 flex items-center justify-center text-sm font-bold flex-shrink-0">
                 {user?.role?.[0]?.toUpperCase()}
               </div>
-              <div className="hidden md:block leading-tight">
+              <div className="hidden xl:block leading-tight">
                 <p className="text-sm font-medium text-gray-900 dark:text-gray-100 leading-none mb-0.5">{user?.role ? user.role[0] + user.role.slice(1).toLowerCase() : '—'}</p>
                 <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${roleBadge[user?.role]}`}>{user?.role}</span>
               </div>

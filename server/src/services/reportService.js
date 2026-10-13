@@ -43,16 +43,19 @@ async function getSalesSummary({ start_date, end_date }) {
 
 async function getSalesByDay({ start_date, end_date }) {
   const range = dateRange(start_date, end_date)
+  // Every day in the range appears, with zeros for days that had no sales
   const sales = await prisma.$queryRaw`
     SELECT
-      to_char(DATE(created_at), 'YYYY-MM-DD') as label,
-      COUNT(id)::int as transactions,
-      SUM(total_amount)::float as value
-    FROM "Sale"
-    WHERE created_at >= ${range.gte} AND created_at <= ${range.lte}
-      AND payment_status = 'COMPLETED'
-    GROUP BY DATE(created_at)
-    ORDER BY DATE(created_at) ASC
+      to_char(d.day, 'YYYY-MM-DD') AS label,
+      COUNT(s.id)::int AS transactions,
+      COALESCE(SUM(s.total_amount), 0)::float AS value
+    FROM generate_series(${range.gte}::timestamp::date, ${range.lte}::timestamp::date, interval '1 day') AS d(day)
+    LEFT JOIN "Sale" s
+      ON DATE(s.created_at) = d.day
+      AND s.payment_status = 'COMPLETED'
+      AND s.created_at >= ${range.gte} AND s.created_at <= ${range.lte}
+    GROUP BY d.day
+    ORDER BY d.day ASC
   `
   return sales.map((r) => ({ label: r.label, value: parseFloat(r.value || 0), transactions: r.transactions }))
 }

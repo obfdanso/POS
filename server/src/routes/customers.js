@@ -3,6 +3,7 @@ const { body, param, query } = require('express-validator')
 const customerController = require('../controllers/customerController')
 const { authenticate, authorize } = require('../middleware/auth')
 const validate = require('../middleware/validate')
+const paginationRules = require('../middleware/pagination')
 
 const router = express.Router()
 
@@ -23,7 +24,7 @@ function customerValidation({ nameRequired }) {
 
 router.get(
   '/',
-  [query('page').optional().isInt({ min: 1 }), query('per_page').optional().isInt({ min: 1, max: 100 })],
+  [...paginationRules, query('search').optional().trim()],
   validate,
   customerController.listCustomers
 )
@@ -39,7 +40,7 @@ router.put(
 router.get(
   '/:id/purchases',
   authorize(['ADMIN', 'MANAGER', 'CASHIER']),
-  param('id').isUUID().withMessage('Invalid customer ID'),
+  [param('id').isUUID().withMessage('Invalid customer ID'), ...paginationRules],
   validate,
   customerController.getCustomerPurchases
 )

@@ -9,6 +9,7 @@ import { Table } from '../components/Table'
 import { Pagination } from '../components/Pagination'
 import { customersService } from '../services/customers'
 import { formatCurrency } from '../utils/formatCurrency'
+import { getFieldErrors, getErrorMessage } from '../utils/apiErrors'
 
 const EMPTY_FORM = { name: '', phone: '', email: '', address: '' }
 
@@ -108,8 +109,8 @@ export default function CustomersPage() {
       }
       fetchCustomers()
     } catch (err) {
-      const msg = err?.response?.data?.error?.message ?? 'Failed to save customer'
-      toast.error(msg)
+      setErrors(getFieldErrors(err))
+      toast.error(getErrorMessage(err, 'Failed to save customer'))
     } finally {
       setSaving(false)
     }

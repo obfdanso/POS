@@ -69,11 +69,11 @@ async function getCustomerById(id) {
 async function createCustomer(data) {
   if (data.phone) {
     const existing = await prisma.customer.findUnique({ where: { phone: data.phone } })
-    if (existing) throw new ConflictError('Phone number already registered')
+    if (existing) throw new ConflictError('Phone number already registered', 'phone')
   }
   if (data.email) {
     const existing = await prisma.customer.findUnique({ where: { email: data.email } })
-    if (existing) throw new ConflictError('Email already registered')
+    if (existing) throw new ConflictError('Email already registered', 'email')
   }
 
   const customer = await prisma.customer.create({
@@ -94,11 +94,11 @@ async function updateCustomer(id, data) {
 
   if (data.phone && data.phone !== existing.phone) {
     const conflict = await prisma.customer.findUnique({ where: { phone: data.phone } })
-    if (conflict) throw new ConflictError('Phone number already registered')
+    if (conflict) throw new ConflictError('Phone number already registered', 'phone')
   }
   if (data.email && data.email !== existing.email) {
     const conflict = await prisma.customer.findUnique({ where: { email: data.email } })
-    if (conflict) throw new ConflictError('Email already registered')
+    if (conflict) throw new ConflictError('Email already registered', 'email')
   }
 
   return prisma.customer.update({

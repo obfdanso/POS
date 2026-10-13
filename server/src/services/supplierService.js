@@ -53,7 +53,7 @@ async function getSupplierById(id) {
 
 async function createSupplier({ name, phone, email, address, website }) {
   const existing = await prisma.supplier.findUnique({ where: { name } })
-  if (existing) throw new ConflictError(`Supplier "${name}" already exists`)
+  if (existing) throw new ConflictError(`Supplier "${name}" already exists`, 'name')
 
   return prisma.supplier.create({ data: { name, phone, email, address, website } })
 }
@@ -64,7 +64,7 @@ async function updateSupplier(id, { name, phone, email, address, website }) {
 
   if (name && name !== supplier.name) {
     const existing = await prisma.supplier.findUnique({ where: { name } })
-    if (existing) throw new ConflictError(`Supplier "${name}" already exists`)
+    if (existing) throw new ConflictError(`Supplier "${name}" already exists`, 'name')
   }
 
   return prisma.supplier.update({

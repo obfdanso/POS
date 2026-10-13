@@ -43,8 +43,14 @@ router.post(
   async (req, res, next) => {
     try {
       const { username, email, password, full_name, role } = req.body
-      const existing = await prisma.user.findFirst({ where: { OR: [{ username }, { email }] } })
-      if (existing) throw new ConflictError('Username or email already exists')
+      const existing = await prisma.user.findFirst({
+        where: { OR: [{ username: { equals: username, mode: 'insensitive' } }, { email }] },
+      })
+      if (existing) {
+        throw existing.email === email
+          ? new ConflictError('Email already in use', 'email')
+          : new ConflictError('Username already taken', 'username')
+      }
       const password_hash = await bcrypt.hash(password, 12)
       const user = await prisma.user.create({
         data: { username, email, password_hash, full_name, role },

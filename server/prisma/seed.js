@@ -4,6 +4,192 @@ const bcrypt = require('bcrypt')
 const prisma = new PrismaClient()
 
 const BCRYPT_COST = 12
+const TAX_RATE = 3
+const LOYALTY_RATE = 8 // GHS spent per loyalty point
+
+// ── Sample sales ──────────────────────────────────────────────────────────────
+
+// Deterministic PRNG so every reseed produces the same sample data
+function mulberry32(seed) {
+  return function () {
+    seed |= 0
+    seed = (seed + 0x6d2b79f5) | 0
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+const round2 = (n) => Math.round(n * 100) / 100
+
+// Logs each product's starting quantity so inventory history is complete
+async function seedOpeningStock(products, admin) {
+  const openedAt = new Date()
+  openedAt.setDate(openedAt.getDate() - 31)
+  openedAt.setHours(8, 0, 0, 0)
+  await prisma.inventoryLog.createMany({
+    data: Object.values(products)
+      .filter((p) => p.quantity > 0)
+      .map((p) => ({
+        product_id: p.id,
+        change_type: 'RESTOCK',
+        quantity_change: p.quantity,
+        previous_quantity: 0,
+        new_quantity: p.quantity,
+        user_id: admin.id,
+        notes: 'Opening stock',
+        created_at: openedAt,
+      })),
+  })
+}
+
+// Creates 20 completed sales spread over the past 30 days (one later refunded),
+// deducting stock, logging inventory changes, and awarding loyalty points
+async function seedSales({ products, customers, staff, admin, taxRate, loyaltyRate }) {
+  const rand = mulberry32(20260319)
+  const pick = (list) => list[Math.floor(rand() * list.length)]
+  const stock = new Map(Object.values(products).map((p) => [p.id, p.quantity]))
+  const sellable = Object.values(products).filter((p) => p.quantity >= 20)
+
+  // 20 sale times across the last 30 days, oldest first, during opening hours
+  const saleTimes = Array.from({ length: 20 }, () => {
+    const t = new Date()
+    t.setDate(t.getDate() - Math.floor(rand() * 30))
+    t.setHours(8 + Math.floor(rand() * 12), Math.floor(rand() * 60), Math.floor(rand() * 60), 0)
+    return t > new Date() ? new Date(Date.now() - 60 * 1000) : t
+  }).sort((a, b) => a - b)
+
+  // Make the last two sales happen earlier today so the dashboard's "today" figures aren't empty
+  const startOfToday = new Date()
+  startOfToday.setHours(0, 0, 0, 0)
+  for (const [offset, minutesAgo] of [[2, 95], [1, 40]]) {
+    saleTimes[saleTimes.length - offset] = new Date(Math.max(startOfToday.getTime() + 60 * 1000, Date.now() - minutesAgo * 60 * 1000))
+  }
+
+  const perDayCount = new Map()
+  const REFUNDED_INDEX = 6
+
+  for (const [i, createdAt] of saleTimes.entries()) {
+    const dayKey = createdAt.toDateString()
+    perDayCount.set(dayKey, (perDayCount.get(dayKey) || 0) + 1)
+    const dateStr = `${createdAt.getFullYear()}${String(createdAt.getMonth() + 1).padStart(2, '0')}${String(createdAt.getDate()).padStart(2, '0')}`
+    const transactionId = `TXN-${dateStr}-${String(perDayCount.get(dayKey)).padStart(4, '0')}`
+
+    // 1–4 distinct products, 1–3 units each
+    const lineCount = 1 + Math.floor(rand() * 4)
+    const chosen = new Set()
+    while (chosen.size < lineCount) chosen.add(pick(sellable))
+    const lines = [...chosen].map((p) => {
+      const quantity = 1 + Math.floor(rand() * 3)
+      const unitPrice = parseFloat(p.price)
+      return { product: p, quantity, unitPrice, total: round2(unitPrice * quantity) }
+    })
+
+    const subtotal = round2(lines.reduce((sum, l) => sum + l.total, 0))
+    const discount = rand() < 0.15 ? Math.min(round2(1 + Math.floor(rand() * 3)), subtotal) : 0
+    const taxable = round2(subtotal - discount)
+    const tax = parseFloat((taxable * (taxRate / 100)).toFixed(2))
+    const total = parseFloat((taxable + tax).toFixed(2))
+
+    const roll = rand()
+    const method = roll < 0.55 ? 'CASH' : roll < 0.85 ? 'MOBILE_MONEY' : 'CARD'
+    const amountPaid = method === 'CASH' ? Math.ceil(total / 10) * 10 : total
+    const reference =
+      method === 'MOBILE_MONEY' ? `MM-${Math.floor(1e9 + rand() * 9e9)}` :
+      method === 'CARD' ? `CARD-${Math.floor(1e7 + rand() * 9e7)}` : null
+
+    const customer = rand() < 0.5 ? pick(customers) : null
+    const cashierUser = pick(staff)
+    const refunded = i === REFUNDED_INDEX
+
+    const sale = await prisma.sale.create({
+      data: {
+        transaction_id: transactionId,
+        user_id: cashierUser.id,
+        customer_id: customer?.id ?? null,
+        subtotal,
+        discount_amount: discount,
+        tax_amount: tax,
+        total_amount: total,
+        payment_method: method,
+        payment_status: refunded ? 'REFUNDED' : 'COMPLETED',
+        created_at: createdAt,
+        sale_items: {
+          create: lines.map((l) => ({
+            product_id: l.product.id,
+            quantity: l.quantity,
+            unit_price: l.unitPrice,
+            discount: 0,
+            total: l.total,
+            created_at: createdAt,
+          })),
+        },
+        payments: {
+          create: {
+            method,
+            amount_paid: amountPaid,
+            change_given: round2(amountPaid - total),
+            reference,
+            created_at: createdAt,
+          },
+        },
+      },
+    })
+
+    for (const l of lines) {
+      const before = stock.get(l.product.id)
+      stock.set(l.product.id, before - l.quantity)
+      await prisma.inventoryLog.create({
+        data: {
+          product_id: l.product.id,
+          change_type: 'SALE',
+          quantity_change: -l.quantity,
+          previous_quantity: before,
+          new_quantity: before - l.quantity,
+          user_id: cashierUser.id,
+          notes: `Sale ${transactionId}`,
+          created_at: createdAt,
+        },
+      })
+    }
+
+    if (refunded) {
+      const refundedAt = new Date(createdAt.getTime() + 2 * 60 * 60 * 1000)
+      for (const l of lines) {
+        const before = stock.get(l.product.id)
+        stock.set(l.product.id, before + l.quantity)
+        await prisma.inventoryLog.create({
+          data: {
+            product_id: l.product.id,
+            change_type: 'RETURN',
+            quantity_change: l.quantity,
+            previous_quantity: before,
+            new_quantity: before + l.quantity,
+            user_id: admin.id,
+            notes: `Refund for sale ${transactionId}`,
+            created_at: refundedAt,
+          },
+        })
+      }
+    } else if (customer && loyaltyRate > 0) {
+      await prisma.customer.update({
+        where: { id: customer.id },
+        data: { loyalty_points: { increment: Math.floor(total / loyaltyRate) } },
+      })
+    }
+
+    if (i === saleTimes.length - 1) {
+      console.log(`20 sample sales created (latest ${sale.transaction_id})`)
+    }
+  }
+
+  // Persist the final stock levels
+  for (const p of Object.values(products)) {
+    if (stock.get(p.id) !== p.quantity) {
+      await prisma.product.update({ where: { id: p.id }, data: { quantity: stock.get(p.id) } })
+    }
+  }
+}
 
 async function main() {
   console.log('Seeding database...')
@@ -27,8 +213,8 @@ async function main() {
       { key: 'store_name', value: 'QuickMart POS' },
       { key: 'store_address', value: '27 Kwame Nkrumah Ave, Kumasi, Ghana' },
       { key: 'store_phone', value: '032-204-1234' },
-      { key: 'tax_rate', value: '3' },
-      { key: 'loyalty_points_rate', value: '8' },
+      { key: 'tax_rate', value: String(TAX_RATE) },
+      { key: 'loyalty_points_rate', value: String(LOYALTY_RATE) },
       { key: 'currency_symbol', value: 'GH₵' },
       { key: 'receipt_footer', value: 'Thank you for choosing QuickMart!' },
     ],
@@ -244,6 +430,17 @@ async function main() {
     customers.push(customer)
   }
   console.log('10 customer records created')
+
+  await seedOpeningStock(products, admin)
+  await seedSales({
+    products,
+    customers,
+    // Weighted so most sales are rung up by the cashier
+    staff: [cashier, cashier, cashier, cashier, cashier, cashier, cashier, manager, manager, admin],
+    admin,
+    taxRate: TAX_RATE,
+    loyaltyRate: LOYALTY_RATE,
+  })
 
   console.log('Database seeding completed successfully!')
   console.log('')

@@ -2,10 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { DashboardLayout } from '../layouts/DashboardLayout'
 import { Modal } from '../components/Modal'
 import api from '../services/api'
-
-function formatCurrency(amount) {
-  return `GH₵ ${Number(amount || 0).toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-}
+import { formatCurrency } from '../utils/formatCurrency'
 
 function formatDateTime(dateStr) {
   return new Date(dateStr).toLocaleString('en-GH', { hour: '2-digit', minute: '2-digit' })
@@ -164,7 +161,7 @@ export default function CashierSalesPage() {
                         {sale.customer?.name || <span className="text-gray-400 dark:text-gray-500 italic">Walk-in</span>}
                       </td>
                       <td className="px-4 py-3 text-right text-gray-600 dark:text-gray-300">
-                        {sale.sale_items?.length ?? sale.items?.length ?? '—'}
+                        {sale.items_count ?? '—'}
                       </td>
                       <td className="px-4 py-3 text-right font-semibold text-gray-900 dark:text-gray-100 whitespace-nowrap">
                         {formatCurrency(sale.total_amount)}

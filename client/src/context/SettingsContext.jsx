@@ -1,5 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { settingsService } from '../services/settings'
+import { useAuth } from '../hooks/useAuth'
+import { setDefaultCurrencySymbol } from '../utils/formatCurrency'
 
 const DEFAULT_SETTINGS = {
   store_name: 'QuickMart',
@@ -32,6 +34,7 @@ function applyTheme(theme) {
 }
 
 export function SettingsProvider({ children }) {
+  const { isAuthenticated } = useAuth()
   const [settings, setSettings] = useState(DEFAULT_SETTINGS)
 
   const [theme, setThemeState] = useState(() => {
@@ -61,17 +64,23 @@ export function SettingsProvider({ children }) {
       .get()
       .then((res) => {
         const data = res.data?.data
-        if (data) setSettings((prev) => ({ ...prev, ...data }))
+        if (data) {
+          // Update the formatter before re-rendering so every price uses the new symbol
+          setDefaultCurrencySymbol(data.currency_symbol)
+          setSettings((prev) => ({ ...prev, ...data }))
+        }
       })
       .catch(() => {
         // Fall back to defaults silently
       })
   }, [])
 
-  // Load on mount
+  // GET /settings requires auth, so (re)load whenever a user signs in.
+  // Without this, settings stay at defaults after a fresh login (e.g. tax 0%)
+  // and the cart total disagrees with what the server charges.
   useEffect(() => {
-    loadSettings()
-  }, [loadSettings])
+    if (isAuthenticated) loadSettings()
+  }, [isAuthenticated, loadSettings])
 
   const contextValue = {
     ...settings,

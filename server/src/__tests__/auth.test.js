@@ -129,6 +129,29 @@ describe('POST /api/auth/refresh', () => {
     expect(refreshRes.body.data.accessToken).toBeTruthy()
   })
 
+  it('keeps working when tokens are rotated several times within one second', async () => {
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ username: 'testuser_auth', password: 'testpass123' })
+    let cookies = loginRes.headers['set-cookie']
+
+    for (let i = 0; i < 3; i++) {
+      const res = await request(app).post('/api/auth/refresh').set('Cookie', cookies)
+      expect(res.status).toBe(200)
+      cookies = res.headers['set-cookie']
+    }
+  })
+
+  it('rejects a refresh token that has already been rotated', async () => {
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ username: 'testuser_auth', password: 'testpass123' })
+    const original = loginRes.headers['set-cookie']
+
+    expect((await request(app).post('/api/auth/refresh').set('Cookie', original)).status).toBe(200)
+    expect((await request(app).post('/api/auth/refresh').set('Cookie', original)).status).toBe(401)
+  })
+
   it('returns 401 without refresh cookie', async () => {
     const res = await request(app).post('/api/auth/refresh')
     expect(res.status).toBe(401)

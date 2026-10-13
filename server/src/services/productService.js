@@ -67,8 +67,8 @@ async function createProduct(data, userId) {
     data.barcode ? prisma.product.findUnique({ where: { barcode: data.barcode } }) : null,
   ])
 
-  if (existingSku) throw new ConflictError('SKU already exists')
-  if (existingBarcode) throw new ConflictError('Barcode already exists')
+  if (existingSku) throw new ConflictError('SKU already exists', 'sku')
+  if (existingBarcode) throw new ConflictError('Barcode already exists', 'barcode')
 
   // Check category exists
   const category = await prisma.category.findUnique({ where: { id: data.category_id } })
@@ -128,11 +128,11 @@ async function updateProduct(id, data, user) {
   // Check uniqueness (exclude self)
   if (data.sku && data.sku !== existing.sku) {
     const conflict = await prisma.product.findUnique({ where: { sku: data.sku } })
-    if (conflict) throw new ConflictError('SKU already exists')
+    if (conflict) throw new ConflictError('SKU already exists', 'sku')
   }
   if (data.barcode && data.barcode !== existing.barcode) {
     const conflict = await prisma.product.findUnique({ where: { barcode: data.barcode } })
-    if (conflict) throw new ConflictError('Barcode already exists')
+    if (conflict) throw new ConflictError('Barcode already exists', 'barcode')
   }
   if (data.category_id) {
     const category = await prisma.category.findUnique({ where: { id: data.category_id } })
@@ -181,7 +181,7 @@ async function listCategories() {
 
 async function createCategory(data) {
   const existing = await prisma.category.findUnique({ where: { name: data.name } })
-  if (existing) throw new ConflictError('Category name already exists')
+  if (existing) throw new ConflictError('Category name already exists', 'name')
 
   return prisma.category.create({
     data: { name: data.name, description: data.description || null },
@@ -194,7 +194,7 @@ async function updateCategory(id, data) {
 
   if (data.name && data.name !== existing.name) {
     const conflict = await prisma.category.findUnique({ where: { name: data.name } })
-    if (conflict) throw new ConflictError('Category name already exists')
+    if (conflict) throw new ConflictError('Category name already exists', 'name')
   }
 
   return prisma.category.update({

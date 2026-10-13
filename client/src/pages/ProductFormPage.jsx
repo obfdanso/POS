@@ -8,6 +8,7 @@ import { productsService } from '../services/products'
 import { useSettings } from '../context/SettingsContext'
 import api from '../services/api'
 import { useAuth } from '../hooks/useAuth'
+import { getFieldErrors, getErrorMessage } from '../utils/apiErrors'
 
 export default function ProductFormPage() {
   const navigate = useNavigate()
@@ -159,15 +160,9 @@ export default function ProductFormPage() {
 
       navigate('/products')
     } catch (err) {
-      const apiError = err.response?.data?.error
-      if (apiError?.details) {
-        const fieldErrors = {}
-        apiError.details.forEach(({ field, message }) => { fieldErrors[field] = message })
-        setErrors(fieldErrors)
-        toast.error('Please fix the validation errors')
-      } else {
-        toast.error(apiError?.message || 'Failed to save product')
-      }
+      const fieldErrors = getFieldErrors(err)
+      setErrors(fieldErrors)
+      toast.error(Object.keys(fieldErrors).length ? 'Please fix the errors below' : getErrorMessage(err, 'Failed to save product'))
     } finally {
       setIsSubmitting(false)
     }

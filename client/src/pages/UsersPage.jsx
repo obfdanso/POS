@@ -9,6 +9,7 @@ import { Pagination } from '../components/Pagination'
 import { Badge } from '../components/Badge'
 import { usersService } from '../services/users'
 import { useAuth } from '../hooks/useAuth'
+import { getFieldErrors, getErrorMessage } from '../utils/apiErrors'
 
 const ROLE_BADGE = {
   ADMIN: 'danger',
@@ -118,8 +119,8 @@ export default function UsersPage() {
       setCreateOpen(false)
       fetchUsers()
     } catch (err) {
-      const msg = err?.response?.data?.error?.message ?? 'Failed to create user'
-      toast.error(msg)
+      setCreateErrors(getFieldErrors(err))
+      toast.error(getErrorMessage(err, 'Failed to create user'))
     } finally {
       setSaving(false)
     }
@@ -165,8 +166,8 @@ export default function UsersPage() {
       setEditOpen(false)
       fetchUsers()
     } catch (err) {
-      const msg = err?.response?.data?.error?.message ?? 'Failed to update user'
-      toast.error(msg)
+      setEditErrors(getFieldErrors(err))
+      toast.error(getErrorMessage(err, 'Failed to update user'))
     } finally {
       setSaving(false)
     }
@@ -184,8 +185,8 @@ export default function UsersPage() {
       setNewPassword('')
       setNewPasswordError('')
     } catch (err) {
-      const msg = err?.response?.data?.error?.message ?? 'Failed to reset password'
-      toast.error(msg)
+      setNewPasswordError(getFieldErrors(err).password ?? '')
+      toast.error(getErrorMessage(err, 'Failed to reset password'))
     } finally {
       setSavingReset(false)
     }

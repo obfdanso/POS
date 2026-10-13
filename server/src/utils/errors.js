@@ -34,8 +34,10 @@ class NotFoundError extends AppError {
 }
 
 class ConflictError extends AppError {
-  constructor(message) {
+  // Pass `field` when the conflict is about one input, so forms can show it inline
+  constructor(message, field) {
     super(message, 409, 'CONFLICT')
+    if (field) this.details = [{ field, message }]
   }
 }
 

@@ -1,6 +1,5 @@
 import { createContext, useReducer, useEffect } from 'react'
-import axios from 'axios'
-import api, { setAccessToken, clearAccessToken } from '../services/api'
+import api, { setAccessToken, clearAccessToken, refreshAccessToken } from '../services/api'
 
 export const AuthContext = createContext(null)
 
@@ -46,10 +45,7 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     async function checkAuth() {
       try {
-        const { data } = await axios.post('/api/auth/refresh', {}, { withCredentials: true })
-        const newToken = data.data.accessToken
-        setAccessToken(newToken)
-
+        await refreshAccessToken()
         const meRes = await api.get('/auth/me')
         dispatch({ type: 'LOGIN_SUCCESS', payload: { user: meRes.data.data } })
       } catch {

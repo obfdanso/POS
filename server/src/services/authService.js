@@ -1,3 +1,4 @@
+const crypto = require('crypto')
 const bcrypt = require('bcrypt')
 const jwt = require('jsonwebtoken')
 const prisma = require('../utils/prismaClient')
@@ -38,8 +39,11 @@ function generateAccessToken(userId, role) {
 }
 
 function generateRefreshToken(userId) {
+  // A unique jwtid keeps rotated tokens distinct even when issued within the same second;
+  // otherwise the "new" token equals the one just revoked and the session is lost
   return jwt.sign({ userId }, process.env.JWT_REFRESH_SECRET, {
     expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
+    jwtid: crypto.randomUUID(),
   })
 }
 

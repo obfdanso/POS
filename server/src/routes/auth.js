@@ -7,12 +7,30 @@ const validate = require('../middleware/validate')
 
 const router = express.Router()
 
+// Brute-force protection for login: 10 attempts per minute per IP
 const authLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
   // Integration tests log in many times per minute
+  skip: () => process.env.NODE_ENV === 'test',
+  message: {
+    success: false,
+    error: {
+      code: 'RATE_LIMIT',
+      message: 'Too many requests. Please try again in a minute.',
+    },
+  },
+})
+
+// Refresh runs on every page load and token renewal, and every till in a shop shares one IP,
+// so it gets a looser limit; it needs a valid httpOnly refresh token, so it can't guess passwords
+const refreshLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
   skip: () => process.env.NODE_ENV === 'test',
   message: {
     success: false,
@@ -40,7 +58,7 @@ const profileValidation = [
 
 router.post('/login', authLimiter, loginValidation, validate, authController.login)
 router.post('/logout', authenticate, authController.logout)
-router.post('/refresh', authLimiter, authController.refresh)
+router.post('/refresh', refreshLimiter, authController.refresh)
 router.get('/me', authenticate, authController.getMe)
 router.post('/change-password', authenticate, changePasswordValidation, validate, authController.changePassword)
 router.put('/profile', authenticate, profileValidation, validate, authController.updateProfile)

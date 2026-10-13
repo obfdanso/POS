@@ -1,5 +1,4 @@
 const productService = require('../services/productService')
-const path = require('path')
 
 async function listProducts(req, res, next) {
   try {

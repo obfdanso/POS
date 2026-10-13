@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { DashboardLayout } from '../layouts/DashboardLayout'
-import { useAuth } from '../hooks/useAuth'
+import toast from 'react-hot-toast'
 import api from '../services/api'
 import { formatCurrency } from '../utils/formatCurrency'
 
@@ -30,24 +30,22 @@ function StatCard({ label, value, sub, icon }) {
 }
 
 export default function CashierDashboardPage() {
-  const { user } = useAuth()
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [sessionSales, setSessionSales] = useState([])
+  // Sales made during this browser session only
+  const [sessionSales] = useState(() => {
+    try {
+      return JSON.parse(sessionStorage.getItem('pos_session_sales') || '[]')
+    } catch {
+      return [] // sessionStorage unavailable
+    }
+  })
 
   useEffect(() => {
     api.get('/reports/cashier-stats')
       .then((res) => setStats(res.data.data))
-      .catch(() => {})
+      .catch(() => toast.error("Failed to load today's stats"))
       .finally(() => setLoading(false))
-
-    // Load sales made during this browser session only
-    try {
-      const saved = JSON.parse(sessionStorage.getItem('pos_session_sales') || '[]')
-      setSessionSales(saved)
-    } catch (_) {
-      // sessionStorage unavailable
-    }
   }, [])
 
   const today = new Date().toLocaleDateString('en-GH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })

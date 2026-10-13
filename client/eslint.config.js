@@ -24,6 +24,11 @@ export default defineConfig([
     },
     rules: {
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      // Context modules export their context and hook alongside the provider
+      'react-refresh/only-export-components': [
+        'error',
+        { allowExportNames: ['AuthContext', 'CartContext', 'SettingsContext', 'ThemeContext', 'useCart', 'useSettings', 'useTheme'] },
+      ],
     },
   },
 ])

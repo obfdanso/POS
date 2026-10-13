@@ -14,31 +14,27 @@ function StarIcon() {
 export default function CashierCustomerLookupPage() {
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
-  const [debouncedQuery, setDebouncedQuery] = useState('')
-  const [customers, setCustomers] = useState([])
+  // Results belong to `searchedFor`; they're hidden as soon as the box is cleared
+  const [results, setResults] = useState({ searchedFor: '', customers: [] })
   const [loading, setLoading] = useState(false)
-  const [searched, setSearched] = useState(false)
   const inputRef = useRef(null)
 
-  // Debounce search input
+  // Debounced search
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedQuery(query), 350)
+    const q = query.trim()
+    if (!q) return
+    const timer = setTimeout(() => {
+      setLoading(true)
+      api.get('/customers', { params: { search: q, per_page: 20 } })
+        .then((res) => setResults({ searchedFor: q, customers: res.data.data || [] }))
+        .catch(() => setResults({ searchedFor: q, customers: [] }))
+        .finally(() => setLoading(false))
+    }, 350)
     return () => clearTimeout(timer)
   }, [query])
 
-  useEffect(() => {
-    if (!debouncedQuery.trim()) {
-      setCustomers([])
-      setSearched(false)
-      return
-    }
-    setLoading(true)
-    setSearched(true)
-    api.get('/customers', { params: { search: debouncedQuery, per_page: 20 } })
-      .then((res) => setCustomers(res.data.data || []))
-      .catch(() => setCustomers([]))
-      .finally(() => setLoading(false))
-  }, [debouncedQuery])
+  const searched = query.trim() !== '' && results.searchedFor !== ''
+  const customers = query.trim() ? results.customers : []
 
   return (
     <DashboardLayout>
@@ -95,7 +91,7 @@ export default function CashierCustomerLookupPage() {
 
         {searched && !loading && customers.length === 0 && (
           <div className="text-center py-12 text-gray-400 dark:text-gray-500 text-sm">
-            No customers found matching &quot;{debouncedQuery}&quot;
+            No customers found matching &quot;{results.searchedFor}&quot;
           </div>
         )}
 

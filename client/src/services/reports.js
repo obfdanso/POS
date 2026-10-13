@@ -1,6 +1,7 @@
 import api from './api'
 
 export const reportsService = {
+  dashboard: () => api.get('/reports/dashboard'),
   salesSummary: (params) => api.get('/reports/sales-summary', { params }),
   salesByDay: (params) => api.get('/reports/sales-by-day', { params }),
   topProducts: (params) => api.get('/reports/top-products', { params }),

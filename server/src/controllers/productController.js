@@ -68,7 +68,7 @@ async function updateProduct(req, res, next) {
       // Clients may only clear the image (image_url: null); new images must be uploaded
       delete data.image_url
     }
-    const product = await productService.updateProduct(req.params.id, data)
+    const product = await productService.updateProduct(req.params.id, data, req.user)
     res.json({ success: true, data: product, message: 'Product updated successfully' })
   } catch (err) {
     next(err)

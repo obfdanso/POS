@@ -147,7 +147,7 @@ export default function ProductsPage() {
           >
             Edit
           </Button>
-          {!row.is_active && (
+          {isAdmin && !row.is_active && (
             <Button size="sm" variant="success" onClick={() => handleReactivate(row)}>
               Reactivate
             </Button>

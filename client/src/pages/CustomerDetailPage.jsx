@@ -100,6 +100,11 @@ export default function CustomerDetailPage() {
       label: 'Payment',
       render: (v) => v ? <Badge variant={PAYMENT_BADGE[v] ?? 'default'}>{v.replace('_', ' ')}</Badge> : '—',
     },
+    {
+      key: 'payment_status',
+      label: 'Status',
+      render: (v) => <Badge variant={v === 'REFUNDED' ? 'danger' : v === 'PENDING' ? 'warning' : 'success'}>{v}</Badge>,
+    },
   ]
 
   return (
@@ -175,6 +180,27 @@ export default function CustomerDetailPage() {
                     }
                   />
                 </dl>
+
+                {customer.purchase_summary && (
+                  <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {[
+                      { label: 'Total Spent', value: formatCurrency(customer.purchase_summary.total_spent) },
+                      { label: 'Purchases', value: customer.purchase_summary.purchase_count },
+                      { label: 'Average Purchase', value: formatCurrency(customer.purchase_summary.average_purchase) },
+                      {
+                        label: 'Last Purchase',
+                        value: customer.purchase_summary.last_purchase_at
+                          ? new Date(customer.purchase_summary.last_purchase_at).toLocaleDateString('en-GH', { day: '2-digit', month: 'short', year: 'numeric' })
+                          : '—',
+                      },
+                    ].map((stat) => (
+                      <div key={stat.label} className="rounded-xl bg-gray-50 dark:bg-gray-800 px-4 py-3">
+                        <p className="text-xs text-gray-500 dark:text-gray-400">{stat.label}</p>
+                        <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-gray-100">{stat.value}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           ) : null}

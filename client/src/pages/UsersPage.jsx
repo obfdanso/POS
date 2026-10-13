@@ -206,7 +206,7 @@ export default function UsersPage() {
       key: 'full_name',
       label: 'Name',
       render: (v, row) => {
-        const displayName = ROLE_DISPLAY[row.role] ?? v
+        const displayName = v || ROLE_DISPLAY[row.role]
         return (
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center text-xs font-bold flex-shrink-0">

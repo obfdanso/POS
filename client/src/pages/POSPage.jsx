@@ -316,7 +316,7 @@ function isTypingTarget(el) {
 
 export default function POSPage() {
   const { user } = useAuth()
-  const { loyalty_points_rate, currency_symbol } = useSettings()
+  const { loyalty_points_rate, currency_symbol, refreshSettings } = useSettings()
   const fmt = (v) => formatCurrency(v, currency_symbol || 'GH₵')
   const { items, cartDiscount, customer, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, clearCart } = useCart()
 
@@ -341,10 +341,11 @@ export default function POSPage() {
 
   const anyModalOpen = showPaymentModal || showReceiptModal || showCustomerModal || showClearConfirm
 
-  // Focus search on mount
+  // Focus search on mount, and pick up any tax/loyalty changes an admin made since login
   useEffect(() => {
     searchRef.current?.focus()
-  }, [])
+    refreshSettings()
+  }, [refreshSettings])
 
   useEffect(() => {
     productsService.categories()

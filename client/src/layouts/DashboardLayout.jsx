@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../context/SettingsContext'
+import { useCart } from '../context/CartContext'
 import { Modal } from '../components/Modal'
 import toast from 'react-hot-toast'
 
@@ -143,12 +144,14 @@ function ThemeToggle() {
 
 export function DashboardLayout({ children, noPad = false }) {
   const { user, logout } = useAuth()
+  const { clearCart } = useCart()
   const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [showLogoutModal, setShowLogoutModal] = useState(false)
 
   async function handleLogout() {
     setShowLogoutModal(false)
+    clearCart()
     await logout()
     navigate('/login')
     toast.success('Signed out successfully')

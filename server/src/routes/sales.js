@@ -1,5 +1,5 @@
 const express = require('express')
-const { body, param } = require('express-validator')
+const { body, param, query } = require('express-validator')
 const rateLimit = require('express-rate-limit')
 const salesController = require('../controllers/salesController')
 const { authenticate, authorize } = require('../middleware/auth')
@@ -15,6 +15,7 @@ const salesRateLimit = rateLimit({
   max: 60,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
   message: { success: false, error: { code: 'RATE_LIMITED', message: 'Too many requests. Please slow down.' } },
 })
 
@@ -38,7 +39,18 @@ const saleValidation = [
 ]
 
 router.post('/', salesRateLimit, saleValidation, validate, salesController.createSale)
-router.get('/', salesController.listSales)
+const listSalesValidation = [
+  query('page').optional().isInt({ min: 1 }).withMessage('Page must be >= 1'),
+  query('per_page').optional().isInt({ min: 1, max: 100 }).withMessage('Per page must be 1-100'),
+  query('start_date').optional().isISO8601().withMessage('start_date must be a valid date'),
+  query('end_date').optional().isISO8601().withMessage('end_date must be a valid date'),
+  query('user_id').optional().isUUID().withMessage('Invalid user ID'),
+  query('customer_id').optional().isUUID().withMessage('Invalid customer ID'),
+  query('payment_status').optional().isIn(['COMPLETED', 'REFUNDED', 'PENDING']).withMessage('Invalid payment status'),
+  query('search').optional().trim().isLength({ max: 50 }),
+]
+
+router.get('/', listSalesValidation, validate, salesController.listSales)
 router.get('/:id', authorize(['ADMIN', 'MANAGER', 'CASHIER']), param('id').isUUID(), validate, salesController.getSale)
 router.get('/:id/receipt', authorize(['ADMIN', 'MANAGER', 'CASHIER']), param('id').isUUID(), validate, salesController.getReceipt)
 router.post(

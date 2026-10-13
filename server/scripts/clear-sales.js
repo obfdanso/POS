@@ -28,9 +28,9 @@ async function clearSales() {
 
   // 3. InventoryLogs created by sales or refunds
   const { count: logs } = await prisma.inventoryLog.deleteMany({
-    where: { change_type: { in: ['SALE', 'REFUND'] } },
+    where: { change_type: { in: ['SALE', 'RETURN'] } },
   })
-  console.log(`✓  Deleted ${logs} inventory log entr${logs !== 1 ? 'ies' : 'y'} (SALE / REFUND)`)
+  console.log(`✓  Deleted ${logs} inventory log entr${logs !== 1 ? 'ies' : 'y'} (SALE / RETURN)`)
 
   // 4. Sales
   const { count: sales } = await prisma.sale.deleteMany()

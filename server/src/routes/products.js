@@ -36,10 +36,11 @@ const productValidation = [
   body('sku').notEmpty().trim().withMessage('SKU is required'),
   body('category_id').notEmpty().isUUID().withMessage('Valid category ID is required'),
   body('supplier_id').optional({ nullable: true, checkFalsy: true }).isUUID().withMessage('Valid supplier ID required'),
-  body('price').isFloat({ min: 0.01 }).withMessage('Price must be greater than 0'),
-  body('cost_price').optional({ nullable: true }).isFloat({ min: 0 }).withMessage('Cost price must be >= 0'),
-  body('quantity').optional().isInt({ min: 0 }).withMessage('Quantity must be >= 0'),
-  body('low_stock_threshold').optional().isInt({ min: 0 }).withMessage('Threshold must be >= 0'),
+  body('price').isFloat({ min: 0.01 }).withMessage('Price must be greater than 0').toFloat(),
+  body('cost_price').optional({ values: 'falsy' }).isFloat({ min: 0 }).withMessage('Cost price must be >= 0').toFloat(),
+  body('quantity').optional().isInt({ min: 0 }).withMessage('Quantity must be >= 0').toInt(),
+  body('low_stock_threshold').optional().isInt({ min: 0 }).withMessage('Threshold must be >= 0').toInt(),
+  body('is_active').optional().isBoolean().withMessage('is_active must be true or false').toBoolean(),
 ]
 
 const categoryValidation = [
@@ -66,6 +67,8 @@ function listProductsValidation() {
   return [
     query('page').optional().isInt({ min: 1 }).withMessage('Page must be >= 1'),
     query('per_page').optional().isInt({ min: 1, max: 100 }).withMessage('Per page must be 1-100'),
+    query('category_id').optional().isUUID().withMessage('Invalid category ID'),
+    query('status').optional().isIn(['active', 'inactive', 'all']).withMessage('Status must be active, inactive, or all'),
   ]
 }
 
@@ -73,10 +76,14 @@ function updateProductValidation() {
   return [
     param('id').isUUID().withMessage('Invalid product ID'),
     body('supplier_id').optional({ nullable: true, checkFalsy: true }).isUUID().withMessage('Valid supplier ID required'),
-    body('price').optional().isFloat({ min: 0.01 }).withMessage('Price must be > 0'),
-    body('cost_price').optional({ nullable: true }).isFloat({ min: 0 }).withMessage('Cost price must be >= 0'),
-    body('quantity').optional().isInt({ min: 0 }).withMessage('Quantity must be >= 0'),
-    body('low_stock_threshold').optional().isInt({ min: 0 }).withMessage('Threshold must be >= 0'),
+    body('name').optional().trim().notEmpty().withMessage('Name cannot be empty'),
+    body('sku').optional().trim().notEmpty().withMessage('SKU cannot be empty'),
+    body('category_id').optional().isUUID().withMessage('Valid category ID is required'),
+    body('price').optional().isFloat({ min: 0.01 }).withMessage('Price must be > 0').toFloat(),
+    body('cost_price').optional({ values: 'falsy' }).isFloat({ min: 0 }).withMessage('Cost price must be >= 0').toFloat(),
+    body('quantity').optional().isInt({ min: 0 }).withMessage('Quantity must be >= 0').toInt(),
+    body('low_stock_threshold').optional().isInt({ min: 0 }).withMessage('Threshold must be >= 0').toInt(),
+    body('is_active').optional().isBoolean().withMessage('is_active must be true or false').toBoolean(),
   ]
 }
 

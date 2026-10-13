@@ -12,6 +12,8 @@ const authLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  // Integration tests log in many times per minute
+  skip: () => process.env.NODE_ENV === 'test',
   message: {
     success: false,
     error: {

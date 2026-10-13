@@ -3,6 +3,10 @@ const jwt = require('jsonwebtoken')
 const prisma = require('../utils/prismaClient')
 const { UnauthorizedError, NotFoundError } = require('../utils/errors')
 
+const MAX_FAILED_ATTEMPTS = 5
+// Locked accounts stay locked until an admin unlocks them (POST /api/users/:id/unlock)
+const LOCKED_UNTIL_ADMIN_UNLOCK = new Date('9999-12-31T00:00:00Z')
+
 // In-memory blacklist for revoked refresh tokens.
 // Tokens are auto-removed after their 7-day expiry so memory stays bounded.
 const revokedTokens = new Set()
@@ -62,8 +66,8 @@ async function login(username, password, ipAddress, userAgent) {
     const newFailCount = user.failed_login_attempts + 1
     const updateData = { failed_login_attempts: newFailCount }
 
-    if (newFailCount >= 5) {
-      updateData.locked_until = new Date(Date.now() + 24 * 60 * 60 * 1000)
+    if (newFailCount >= MAX_FAILED_ATTEMPTS) {
+      updateData.locked_until = LOCKED_UNTIL_ADMIN_UNLOCK
       await prisma.user.update({ where: { id: user.id }, data: updateData })
       await logAuthEvent(user.id, 'ACCOUNT_LOCKED', ipAddress, userAgent, `Locked after ${newFailCount} failed attempts`)
     } else {

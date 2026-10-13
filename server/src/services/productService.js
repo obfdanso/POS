@@ -3,12 +3,14 @@ const { NotFoundError, ConflictError, ValidationError } = require('../utils/erro
 const path = require('path')
 const fs = require('fs')
 
-async function listProducts({ page = 1, per_page = 20, search, category_id, include_inactive = false } = {}) {
+// status: 'active' (default), 'inactive', or 'all'
+async function listProducts({ page = 1, per_page = 20, search, category_id, status = 'active' } = {}) {
   const skip = (page - 1) * per_page
   const take = Math.min(per_page, 100)
 
   const where = {}
-  if (!include_inactive) where.is_active = true
+  if (status === 'active') where.is_active = true
+  if (status === 'inactive') where.is_active = false
   if (category_id) where.category_id = category_id
   if (search) {
     where.OR = [
@@ -60,7 +62,7 @@ async function getProductByBarcode(barcode) {
   return product
 }
 
-async function createProduct(data) {
+async function createProduct(data, userId) {
   // Check uniqueness
   const [existingSku, existingBarcode] = await Promise.all([
     prisma.product.findUnique({ where: { sku: data.sku } }),
@@ -74,26 +76,46 @@ async function createProduct(data) {
   const category = await prisma.category.findUnique({ where: { id: data.category_id } })
   if (!category) throw new NotFoundError('Category not found')
 
-  const product = await prisma.product.create({
-    data: {
-      name: data.name,
-      sku: data.sku,
-      barcode: data.barcode || null,
-      category_id: data.category_id,
-      supplier_id: data.supplier_id || null,
-      price: data.price,
-      cost_price: data.cost_price || null,
-      quantity: data.quantity ?? 0,
-      low_stock_threshold: data.low_stock_threshold ?? 10,
-      image_url: data.image_url || null,
-    },
-    include: {
-      category: { select: { id: true, name: true } },
-      supplier: { select: { id: true, name: true } },
-    },
-  })
+  const quantity = data.quantity ?? 0
 
-  return product
+  // Create the product and log its opening stock together
+  return prisma.$transaction(async (tx) => {
+    const product = await tx.product.create({
+      data: {
+        name: data.name,
+        sku: data.sku,
+        barcode: data.barcode || null,
+        category_id: data.category_id,
+        supplier_id: data.supplier_id || null,
+        price: data.price,
+        cost_price: data.cost_price || null,
+        quantity,
+        low_stock_threshold: data.low_stock_threshold ?? 10,
+        image_url: data.image_url || null,
+        is_active: data.is_active ?? true,
+      },
+      include: {
+        category: { select: { id: true, name: true } },
+        supplier: { select: { id: true, name: true } },
+      },
+    })
+
+    if (quantity > 0) {
+      await tx.inventoryLog.create({
+        data: {
+          product_id: product.id,
+          change_type: 'RESTOCK',
+          quantity_change: quantity,
+          previous_quantity: 0,
+          new_quantity: quantity,
+          user_id: userId,
+          notes: 'Opening stock',
+        },
+      })
+    }
+
+    return product
+  })
 }
 
 async function updateProduct(id, data) {
@@ -124,9 +146,10 @@ async function updateProduct(id, data) {
       ...(data.supplier_id !== undefined && { supplier_id: data.supplier_id || null }),
       ...(data.price !== undefined && { price: data.price }),
       ...(data.cost_price !== undefined && { cost_price: data.cost_price || null }),
-      ...(data.quantity !== undefined && { quantity: data.quantity }),
+      // quantity is intentionally not editable here — stock changes go through inventory so they are logged
       ...(data.low_stock_threshold !== undefined && { low_stock_threshold: data.low_stock_threshold }),
       ...(data.image_url !== undefined && { image_url: data.image_url || null }),
+      ...(data.is_active !== undefined && { is_active: data.is_active }),
     },
     include: {
       category: { select: { id: true, name: true } },

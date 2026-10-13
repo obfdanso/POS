@@ -6,9 +6,11 @@ async function listProducts(req, res, next) {
     const page = parseInt(req.query.page) || 1
     const per_page = parseInt(req.query.per_page) || 20
     const { search, category_id } = req.query
-    const include_inactive = req.query.include_inactive === 'true'
+    // Inactive products are only listed for staff who manage the catalogue
+    const canSeeInactive = ['ADMIN', 'MANAGER'].includes(req.user.role)
+    const status = canSeeInactive ? req.query.status : 'active'
 
-    const result = await productService.listProducts({ page, per_page, search, category_id, include_inactive })
+    const result = await productService.listProducts({ page, per_page, search, category_id, status })
 
     res.json({
       success: true,
@@ -46,10 +48,11 @@ async function getProductByBarcode(req, res, next) {
 async function createProduct(req, res, next) {
   try {
     const data = { ...req.body }
+    delete data.image_url
     if (req.file) {
       data.image_url = `/uploads/products/${req.file.filename}`
     }
-    const product = await productService.createProduct(data)
+    const product = await productService.createProduct(data, req.user.id)
     res.status(201).json({ success: true, data: product, message: 'Product created successfully' })
   } catch (err) {
     next(err)
@@ -61,6 +64,9 @@ async function updateProduct(req, res, next) {
     const data = { ...req.body }
     if (req.file) {
       data.image_url = `/uploads/products/${req.file.filename}`
+    } else if (data.image_url) {
+      // Clients may only clear the image (image_url: null); new images must be uploaded
+      delete data.image_url
     }
     const product = await productService.updateProduct(req.params.id, data)
     res.json({ success: true, data: product, message: 'Product updated successfully' })

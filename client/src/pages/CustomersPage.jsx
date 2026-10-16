@@ -26,6 +26,7 @@ export default function CustomersPage() {
   const [meta, setMeta] = useState({ page: 1, total_pages: 1 })
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
+  const [sort, setSort] = useState({ key: 'name', sortable: true, order: 'asc' })
   const [loading, setLoading] = useState(true)
 
   const [modalOpen, setModalOpen] = useState(false)
@@ -37,7 +38,7 @@ export default function CustomersPage() {
   const fetchCustomers = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await customersService.list({ page, search: search || undefined, per_page: 20 })
+      const res = await customersService.list({ page, search: search || undefined, per_page: 20, sort: sort.key, order: sort.order })
       setCustomers(res.data?.data ?? res.data ?? [])
       setMeta(res.data?.meta ?? { page: 1, total_pages: 1 })
     } catch {
@@ -45,7 +46,13 @@ export default function CustomersPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, search])
+  }, [page, search, sort])
+
+  // Sorting happens on the server so it covers every page, not just the visible one
+  function handleSortChange(next) {
+    setSort(next)
+    setPage(1)
+  }
 
   useEffect(() => {
     fetchCustomers()
@@ -118,10 +125,11 @@ export default function CustomersPage() {
 
   const columns = [
     { key: 'name', label: 'Name', render: (v) => <span className="font-medium text-gray-900 dark:text-gray-100">{v}</span> },
-    { key: 'phone', label: 'Phone', render: (v) => v ?? <span className="text-gray-400">—</span> },
-    { key: 'email', label: 'Email', render: (v) => v ?? <span className="text-gray-400">—</span> },
+    { key: 'phone', sortable: true, label: 'Phone', render: (v) => v ?? <span className="text-gray-400">—</span> },
+    { key: 'email', sortable: true, label: 'Email', render: (v) => v ?? <span className="text-gray-400">—</span> },
     {
       key: 'loyalty_points',
+      sortable: true,
       label: 'Loyalty Points',
       render: (v) => (
         <span className="inline-flex items-center gap-1 text-primary-700 font-medium">
@@ -178,7 +186,15 @@ export default function CustomersPage() {
 
         {/* Table */}
         <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm overflow-hidden">
-          <Table columns={columns} data={customers} isLoading={loading} emptyMessage="No customers found." onRowClick={(row) => navigate(`/customers/${row.id}`)} />
+          <Table
+            columns={columns}
+            data={customers}
+            isLoading={loading}
+            sort={sort}
+            onSortChange={handleSortChange}
+            emptyMessage="No customers found."
+            onRowClick={(row) => navigate(`/customers/${row.id}`)}
+          />
         </div>
 
         {/* Pagination */}

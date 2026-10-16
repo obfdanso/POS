@@ -209,6 +209,7 @@ export default function UsersPage() {
   const columns = [
     {
       key: 'full_name',
+      sortable: true,
       label: 'Name',
       render: (v, row) => {
         const displayName = v || ROLE_DISPLAY[row.role]
@@ -228,14 +229,16 @@ export default function UsersPage() {
         )
       },
     },
-    { key: 'email', label: 'Email' },
+    { key: 'email', sortable: true, label: 'Email' },
     {
       key: 'role',
+      sortable: true,
       label: 'Role',
       render: (v) => <Badge variant={ROLE_BADGE[v] ?? 'default'}>{v}</Badge>,
     },
     {
       key: 'is_active',
+      sortable: true,
       label: 'Status',
       render: (v) => (
         <Badge variant={v ? 'success' : 'default'}>{v ? 'Active' : 'Inactive'}</Badge>
@@ -243,6 +246,7 @@ export default function UsersPage() {
     },
     {
       key: 'created_at',
+      sortable: true,
       label: 'Created',
       render: (v) =>
         v

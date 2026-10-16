@@ -8,6 +8,7 @@ import { Pagination } from '../components/Pagination'
 import { Badge } from '../components/Badge'
 import { Modal } from '../components/Modal'
 import { inventoryService } from '../services/inventory'
+import { InventoryHistoryModal } from '../components/InventoryHistoryModal'
 import { formatCurrency } from '../utils/formatCurrency'
 
 const TABS = [
@@ -27,11 +28,13 @@ export default function InventoryPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [meta, setMeta] = useState({ page: 1, total_pages: 1, total: 0 })
   const [page, setPage] = useState(1)
+  const [sort, setSort] = useState({ key: 'name', order: 'asc' })
   const [activeTab, setActiveTab] = useState('all')
   const [stats, setStats] = useState({ total: 0, low: 0, out: 0 })
 
   // Adjust/Restock modal state
   const [adjustTarget, setAdjustTarget] = useState(null)
+  const [historyTarget, setHistoryTarget] = useState(null)
   const [adjustForm, setAdjustForm] = useState({ type: 'RESTOCK', quantity: '', notes: '' })
   const [adjustErrors, setAdjustErrors] = useState({})
   const [isAdjusting, setIsAdjusting] = useState(false)
@@ -40,7 +43,7 @@ export default function InventoryPage() {
     setIsLoading(true)
     try {
       let res
-      const params = { page, per_page: 20 }
+      const params = { page, per_page: 20, sort: sort.key, order: sort.order }
 
       if (activeTab === 'low') {
         res = await inventoryService.lowStock()
@@ -61,7 +64,13 @@ export default function InventoryPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [page, activeTab])
+  }, [page, activeTab, sort])
+
+  // Sorting happens on the server so it covers every page, not just the visible one
+  function handleSortChange(next) {
+    setSort(next)
+    setPage(1)
+  }
 
   // Load stats (total, low, out) — refreshed after every stock change
   const fetchStats = useCallback(() => {
@@ -137,6 +146,7 @@ export default function InventoryPage() {
   const columns = [
     {
       key: 'name',
+      sortable: true,
       label: 'Product',
       render: (val, row) => (
         <div>
@@ -147,11 +157,14 @@ export default function InventoryPage() {
     },
     {
       key: 'category',
+      sortable: true,
+      sortValue: (row) => row.category?.name,
       label: 'Category',
       render: (val) => val?.name ? <Badge variant="default">{val.name}</Badge> : <span className="text-gray-400">—</span>,
     },
     {
       key: 'quantity',
+      sortable: true,
       label: 'Current Stock',
       render: (val, row) => (
         <div className="flex items-center gap-2">
@@ -164,11 +177,13 @@ export default function InventoryPage() {
     },
     {
       key: 'low_stock_threshold',
+      sortable: true,
       label: 'Threshold',
       render: (val) => <span className="text-sm text-gray-600 dark:text-gray-400">{val}</span>,
     },
     {
       key: 'price',
+      sortable: true,
       label: 'Unit Price',
       render: (val) => formatCurrency(val),
     },
@@ -181,9 +196,14 @@ export default function InventoryPage() {
       key: 'id',
       label: 'Actions',
       render: (val, row) => (
-        <Button size="sm" variant="secondary" onClick={() => openAdjustModal(row)}>
-          Adjust Stock
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="secondary" onClick={() => openAdjustModal(row)}>
+            Adjust Stock
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setHistoryTarget(row)}>
+            History
+          </Button>
+        </div>
       ),
     },
   ]
@@ -244,6 +264,7 @@ export default function InventoryPage() {
             columns={columns}
             data={products}
             isLoading={isLoading}
+            {...(activeTab !== 'low' && { sort, onSortChange: handleSortChange })}
             emptyMessage={
               activeTab === 'low'
                 ? 'No low-stock products. All products are well stocked!'
@@ -264,6 +285,8 @@ export default function InventoryPage() {
           </div>
         )}
       </div>
+
+      {historyTarget && <InventoryHistoryModal product={historyTarget} onClose={() => setHistoryTarget(null)} />}
 
       {/* Adjust / Restock modal */}
       <Modal

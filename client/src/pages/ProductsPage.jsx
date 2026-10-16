@@ -25,6 +25,7 @@ export default function ProductsPage() {
   const [categoryFilter, setCategoryFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('active')
   const [page, setPage] = useState(1)
+  const [sort, setSort] = useState({ key: 'name', order: 'asc' })
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [isDeleting, setIsDeleting] = useState(false)
 
@@ -42,6 +43,8 @@ export default function ProductsPage() {
       if (search.trim()) params.search = search.trim()
       if (categoryFilter) params.category_id = categoryFilter
       params.status = statusFilter
+      params.sort = sort.key
+      params.order = sort.order
       const res = await productsService.list(params)
       setProducts(res.data?.data || [])
       setMeta(res.data?.meta || { page: 1, total_pages: 1, total: 0 })
@@ -50,11 +53,17 @@ export default function ProductsPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [page, search, categoryFilter, statusFilter])
+  }, [page, search, categoryFilter, statusFilter, sort])
 
   useEffect(() => {
     fetchProducts()
   }, [fetchProducts])
+
+  // Sorting happens on the server so it covers every page, not just the visible one
+  function handleSortChange(next) {
+    setSort(next)
+    setPage(1)
+  }
 
   // Reset to page 1 when filters change
   useEffect(() => {
@@ -88,6 +97,7 @@ export default function ProductsPage() {
   const columns = [
     {
       key: 'name',
+      sortable: true,
       label: 'Name',
       render: (val, row) => (
         <div>
@@ -98,21 +108,25 @@ export default function ProductsPage() {
     },
     {
       key: 'category',
+      sortable: true,
       label: 'Category',
       render: (val) => val?.name ? <Badge variant="default">{val.name}</Badge> : <span className="text-gray-400">—</span>,
     },
     {
       key: 'price',
+      sortable: true,
       label: 'Price',
       render: (val) => <span className="font-semibold text-gray-900 dark:text-gray-100">{formatCurrency(val)}</span>,
     },
     {
       key: 'cost_price',
+      sortable: true,
       label: 'Cost Price',
       render: (val) => val ? formatCurrency(val) : <span className="text-gray-400">—</span>,
     },
     {
       key: 'quantity',
+      sortable: true,
       label: 'Stock',
       render: (val, row) => {
         const isOut = val === 0
@@ -130,6 +144,7 @@ export default function ProductsPage() {
     },
     {
       key: 'is_active',
+      sortable: true,
       label: 'Status',
       render: (val) => (
         <Badge variant={val ? 'success' : 'default'}>{val ? 'Active' : 'Inactive'}</Badge>
@@ -224,7 +239,14 @@ export default function ProductsPage() {
 
         {/* Table */}
         <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
-          <Table columns={columns} data={products} isLoading={isLoading} emptyMessage="No products found. Try adjusting your search or filters." />
+          <Table
+            columns={columns}
+            data={products}
+            isLoading={isLoading}
+            sort={sort}
+            onSortChange={handleSortChange}
+            emptyMessage="No products found. Try adjusting your search or filters."
+          />
         </div>
 
         {/* Pagination */}

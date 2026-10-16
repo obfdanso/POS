@@ -15,6 +15,7 @@ import {
 import toast from 'react-hot-toast'
 import { DashboardLayout } from '../layouts/DashboardLayout'
 import { Button } from '../components/Button'
+import { Table } from '../components/Table'
 import { reportsService } from '../services/reports'
 import { formatCurrency } from '../utils/formatCurrency'
 import { daysFromToday } from '../utils/date'
@@ -28,6 +29,43 @@ const TABS = [
   { id: 'category', label: 'Category' },
   { id: 'cashier', label: 'Cashier Performance' },
   { id: 'profit', label: 'Profit' },
+]
+
+// Report tables sort in the browser: each report is a single, unpaginated result set
+const money = (v) => <span className="font-medium text-gray-900 dark:text-gray-100">{formatCurrency(v ?? 0)}</span>
+
+const topProductColumns = [
+  { key: 'rank', label: '#', render: (_, row) => row.rank },
+  { key: 'label', label: 'Product', sortable: true },
+  { key: 'quantity', label: 'Qty Sold', sortable: true },
+  { key: 'value', label: 'Revenue', sortable: true, render: money },
+]
+
+const categoryColumns = [
+  { key: 'label', label: 'Category', sortable: true },
+  { key: 'quantity', label: 'Units Sold', sortable: true },
+  { key: 'value', label: 'Revenue', sortable: true, render: money },
+]
+
+const cashierColumns = [
+  { key: 'label', label: 'Cashier', sortable: true },
+  { key: 'transactions', label: 'Transactions', sortable: true },
+  { key: 'value', label: 'Total Revenue', sortable: true, render: money },
+]
+
+const profitColumns = [
+  { key: 'name', label: 'Product', sortable: true },
+  { key: 'revenue', label: 'Revenue', sortable: true, render: money },
+  { key: 'cost', label: 'Cost', sortable: true, render: money },
+  {
+    key: 'profit',
+    label: 'Profit',
+    sortable: true,
+    render: (v) => (
+      <span className={`font-semibold ${v >= 0 ? 'text-success-600' : 'text-danger-600'}`}>{formatCurrency(v ?? 0)}</span>
+    ),
+  },
+  { key: 'margin', label: 'Margin %', sortable: true, render: (v) => (v != null ? `${v.toFixed(1)}%` : '—') },
 ]
 
 function Spinner() {
@@ -89,7 +127,7 @@ export default function ReportsPage() {
           setDailyData(res.data?.data ?? res.data ?? [])
         } else if (tab === 'top-products') {
           const res = await reportsService.topProducts({ ...params, limit: 50 })
-          setTopData(res.data?.data ?? res.data ?? [])
+          setTopData((res.data?.data ?? []).map((p, i) => ({ ...p, rank: i + 1 })))
         } else if (tab === 'category') {
           const res = await reportsService.categoryPerformance(params)
           setCatData(res.data?.data ?? res.data ?? [])
@@ -294,27 +332,7 @@ export default function ReportsPage() {
                 <p className="text-center text-gray-400 py-10">No data available</p>
               ) : (
                 <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-xl shadow-sm overflow-hidden">
-                  <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                    <thead className="bg-gray-50 dark:bg-gray-800">
-                      <tr>
-                        {['#', 'Product', 'Qty Sold', 'Revenue'].map((h) => (
-                          <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            {h}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-800">
-                      {topData.map((p, i) => (
-                        <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-                          <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">{i + 1}</td>
-                          <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{p.name ?? p.label}</td>
-                          <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{p.quantity_sold ?? p.quantity ?? '—'}</td>
-                          <td className="px-4 py-3 text-sm font-semibold text-gray-900 dark:text-gray-100">{formatCurrency(p.revenue ?? p.value ?? 0)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <Table columns={topProductColumns} data={topData} />
                 </div>
               )}
             </div>
@@ -335,25 +353,7 @@ export default function ReportsPage() {
               ) : (
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                   <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-xl shadow-sm overflow-hidden">
-                    <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                      <thead className="bg-gray-50 dark:bg-gray-800">
-                        <tr>
-                          {['Category', 'Revenue'].map((h) => (
-                            <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                              {h}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-800">
-                        {catData.map((c, i) => (
-                          <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-                            <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{c.label}</td>
-                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">{formatCurrency(c.value ?? 0)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                    <Table columns={categoryColumns} data={catData} />
                   </div>
                   <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-xl shadow-sm p-6">
                     <ResponsiveContainer width="100%" height={280}>
@@ -387,26 +387,7 @@ export default function ReportsPage() {
                 <p className="text-center text-gray-400 py-10">No data available</p>
               ) : (
                 <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-xl shadow-sm overflow-hidden">
-                  <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                    <thead className="bg-gray-50 dark:bg-gray-800">
-                      <tr>
-                        {['Cashier', 'Transactions', 'Total Revenue'].map((h) => (
-                          <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            {h}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-800">
-                      {cashierData.map((c, i) => (
-                        <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-                          <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{c.name ?? c.label}</td>
-                          <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{c.transactions ?? 0}</td>
-                          <td className="px-4 py-3 text-sm font-semibold text-gray-900 dark:text-gray-100">{formatCurrency(c.value ?? 0)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <Table columns={cashierColumns} data={cashierData} />
                 </div>
               )}
             </div>
@@ -426,35 +407,7 @@ export default function ReportsPage() {
                 <p className="text-center text-gray-400 py-10">No data available</p>
               ) : (
                 <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-xl shadow-sm overflow-hidden">
-                  <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                    <thead className="bg-gray-50 dark:bg-gray-800">
-                      <tr>
-                        {['Product', 'Revenue', 'Cost', 'Profit', 'Margin %'].map((h) => (
-                          <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            {h}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-800">
-                      {profitData.map((p, i) => {
-                        const margin = p.margin ?? (p.revenue && p.profit != null ? ((p.profit / p.revenue) * 100) : null)
-                        return (
-                          <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-                            <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{p.name ?? p.label}</td>
-                            <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{formatCurrency(p.revenue ?? 0)}</td>
-                            <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{formatCurrency(p.cost ?? 0)}</td>
-                            <td className={`px-4 py-3 text-sm font-semibold ${(p.profit ?? 0) >= 0 ? 'text-success-700' : 'text-danger-700'}`}>
-                              {formatCurrency(p.profit ?? 0)}
-                            </td>
-                            <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
-                              {margin != null ? `${margin.toFixed(1)}%` : '—'}
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
+                  <Table columns={profitColumns} data={profitData} />
                 </div>
               )}
             </div>

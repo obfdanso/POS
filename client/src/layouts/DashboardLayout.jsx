@@ -77,14 +77,14 @@ function NavItem({ to, icon, label, end = false }) {
       to={to}
       end={end}
       className={({ isActive }) =>
-        `flex items-center gap-1.5 px-2.5 h-full text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
+        `flex items-center gap-1.5 px-2 xl:px-2.5 h-full text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
           isActive
             ? 'border-teal-600 text-teal-600 dark:text-teal-400 dark:border-teal-400'
             : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'
         }`
       }
     >
-      <span className="hidden xl:block w-4 h-4 flex-shrink-0">{icon}</span>
+      <span className="hidden 2xl:block w-4 h-4 flex-shrink-0">{icon}</span>
       <span>{label}</span>
     </NavLink>
   )
@@ -205,6 +205,7 @@ export function DashboardLayout({ children, noPad = false }) {
                 <NavItem to="/inventory" icon={icons.inventory} label="Inventory" />
                 <NavItem to="/customers" icon={icons.customers} label="Customers" />
                 <div className="w-px bg-gray-200 dark:bg-gray-700 mx-1 xl:mx-2 my-3 flex-shrink-0" />
+                <NavItem to="/sales" icon={icons.mySales} label="Sales" />
                 <NavItem to="/reports" icon={icons.reports} label="Reports" />
               </>
             )}
@@ -304,6 +305,7 @@ export function DashboardLayout({ children, noPad = false }) {
                 <MobileNavItem to="/inventory" icon={icons.inventory} label="Inventory" onClick={closeMobile} />
                 <MobileNavItem to="/customers" icon={icons.customers} label="Customers" onClick={closeMobile} />
                 <div className="h-px bg-gray-100 dark:bg-gray-800 my-1" />
+                <MobileNavItem to="/sales" icon={icons.mySales} label="Sales" onClick={closeMobile} />
                 <MobileNavItem to="/reports" icon={icons.reports} label="Reports" onClick={closeMobile} />
               </>
             )}

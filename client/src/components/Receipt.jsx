@@ -93,8 +93,9 @@ function Row({ label, value, className = '' }) {
 /**
  * Printable receipt for a sale as returned by the API (with `items` and `payment`).
  * Shown on screen in a modal; "Print" opens an 80mm thermal layout and calls window.print().
+ * `actions` renders extra buttons (e.g. Refund) to the left of Close/Print.
  */
-export function Receipt({ sale, onClose }) {
+export function Receipt({ sale, onClose, actions }) {
   const settings = useSettings()
   const fmt = (v) => formatCurrency(v, settings.currency_symbol || 'GH₵')
 
@@ -171,6 +172,7 @@ export function Receipt({ sale, onClose }) {
       </div>
 
       <div className="flex justify-end gap-3 mt-4">
+        {actions && <div className="mr-auto flex gap-3">{actions}</div>}
         <Button variant="secondary" onClick={onClose}>Close</Button>
         <Button variant="primary" onClick={handlePrint} autoFocus>
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

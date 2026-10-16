@@ -9,6 +9,7 @@ import CustomersPage from './pages/CustomersPage'
 import CustomerDetailPage from './pages/CustomerDetailPage'
 import DashboardPage from './pages/DashboardPage'
 import ReportsPage from './pages/ReportsPage'
+import SalesPage from './pages/SalesPage'
 import UsersPage from './pages/UsersPage'
 import SettingsPage from './pages/SettingsPage'
 import CashierDashboardPage from './pages/CashierDashboardPage'
@@ -179,6 +180,14 @@ export default function App() {
         element={
           <ProtectedRoute roles={['MANAGER', 'ADMIN']}>
             <DashboardPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/sales"
+        element={
+          <ProtectedRoute roles={['MANAGER', 'ADMIN']}>
+            <SalesPage />
           </ProtectedRoute>
         }
       />

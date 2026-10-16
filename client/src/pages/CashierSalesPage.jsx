@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { DashboardLayout } from '../layouts/DashboardLayout'
 import { Modal } from '../components/Modal'
 import api from '../services/api'
@@ -45,17 +45,22 @@ export default function CashierSalesPage() {
   const [selectedSale, setSelectedSale] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
 
+  const latestRequest = useRef(0)
   const fetchSales = useCallback(async () => {
+    // Only the newest request may update the list; an older one can finish later
+    const requestId = ++latestRequest.current
     setLoading(true)
     try {
       const { start_date, end_date } = getDateRange(dateFilter)
       const res = await api.get('/sales', { params: { start_date, end_date, page, per_page: 15 } })
+      if (requestId !== latestRequest.current) return
       setSales(res.data.data || [])
       setMeta(res.data.meta || { page: 1, total_pages: 1, total: 0 })
     } catch {
+      if (requestId !== latestRequest.current) return
       setSales([])
     } finally {
-      setLoading(false)
+      if (requestId === latestRequest.current) setLoading(false)
     }
   }, [dateFilter, page])
 

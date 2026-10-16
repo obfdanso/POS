@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { DashboardLayout } from '../layouts/DashboardLayout'
@@ -35,16 +35,21 @@ export default function CustomersPage() {
   const [errors, setErrors] = useState({})
   const [saving, setSaving] = useState(false)
 
+  const latestRequest = useRef(0)
   const fetchCustomers = useCallback(async () => {
+    // Only the newest request may update the list; an older one can finish later
+    const requestId = ++latestRequest.current
     setLoading(true)
     try {
       const res = await customersService.list({ page, search: search || undefined, per_page: 20, sort: sort.key, order: sort.order })
+      if (requestId !== latestRequest.current) return
       setCustomers(res.data?.data ?? res.data ?? [])
       setMeta(res.data?.meta ?? { page: 1, total_pages: 1 })
     } catch {
+      if (requestId !== latestRequest.current) return
       toast.error('Failed to load customers')
     } finally {
-      setLoading(false)
+      if (requestId === latestRequest.current) setLoading(false)
     }
   }, [page, search, sort])
 

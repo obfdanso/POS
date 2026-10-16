@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import toast from 'react-hot-toast'
 import { DashboardLayout } from '../layouts/DashboardLayout'
 import { Button } from '../components/Button'
@@ -39,7 +39,10 @@ export default function InventoryPage() {
   const [adjustErrors, setAdjustErrors] = useState({})
   const [isAdjusting, setIsAdjusting] = useState(false)
 
+  const latestRequest = useRef(0)
   const fetchProducts = useCallback(async () => {
+    // Only the newest request may update the list; an older one can finish later
+    const requestId = ++latestRequest.current
     setIsLoading(true)
     try {
       let res
@@ -47,22 +50,26 @@ export default function InventoryPage() {
 
       if (activeTab === 'low') {
         res = await inventoryService.lowStock()
+        if (requestId !== latestRequest.current) return
         const data = res.data?.data || []
         setProducts(data)
         setMeta({ page: 1, total_pages: 1, total: data.length })
       } else if (activeTab === 'out') {
         res = await inventoryService.list({ ...params, status: 'out' })
+        if (requestId !== latestRequest.current) return
         setProducts(res.data?.data || [])
         setMeta(res.data?.meta || { page: 1, total_pages: 1, total: 0 })
       } else {
         res = await inventoryService.list(params)
+        if (requestId !== latestRequest.current) return
         setProducts(res.data?.data || [])
         setMeta(res.data?.meta || { page: 1, total_pages: 1, total: 0 })
       }
     } catch {
+      if (requestId !== latestRequest.current) return
       toast.error('Failed to load inventory')
     } finally {
-      setIsLoading(false)
+      if (requestId === latestRequest.current) setIsLoading(false)
     }
   }, [page, activeTab, sort])
 

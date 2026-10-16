@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { DashboardLayout } from '../layouts/DashboardLayout'
@@ -36,7 +36,10 @@ export default function ProductsPage() {
       .catch(() => {})
   }, [])
 
+  const latestRequest = useRef(0)
   const fetchProducts = useCallback(async () => {
+    // Only the newest request may update the list; an older one can finish later
+    const requestId = ++latestRequest.current
     setIsLoading(true)
     try {
       const params = { page, per_page: 20 }
@@ -46,12 +49,14 @@ export default function ProductsPage() {
       params.sort = sort.key
       params.order = sort.order
       const res = await productsService.list(params)
+      if (requestId !== latestRequest.current) return
       setProducts(res.data?.data || [])
       setMeta(res.data?.meta || { page: 1, total_pages: 1, total: 0 })
     } catch {
+      if (requestId !== latestRequest.current) return
       toast.error('Failed to load products')
     } finally {
-      setIsLoading(false)
+      if (requestId === latestRequest.current) setIsLoading(false)
     }
   }, [page, search, categoryFilter, statusFilter, sort])
 

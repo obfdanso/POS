@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
-    "test": "jest --coverage --forceExit",
+    "test": "jest --coverage --forceExit --runInBand",
     "test:watch": "jest --watch",
     "db:migrate": "npx prisma migrate dev",
     "db:seed": "npx prisma db seed",
@@ -48,6 +48,7 @@
   },
   "jest": {
     "testEnvironment": "node",
+    "testPathIgnorePatterns": ["/node_modules/", "/__tests__/helpers.js"],
     "coverageDirectory": "coverage",
     "collectCoverageFrom": [
       "src/**/*.js",

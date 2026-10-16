@@ -45,6 +45,7 @@ Every endpoint except `POST /auth/login` and `POST /auth/refresh` needs an acces
 - **Sorting**: list endpoints marked *sortable* accept `sort=<field>` and `order=asc|desc`. Unknown sort fields return `422`.
 - **Dates**: `start_date` / `end_date` are `YYYY-MM-DD` and inclusive. They're interpreted in the server's local time zone.
 - **Money** is returned as decimal strings, e.g. `"12.5"`. Format it for display on the client.
+- **Audit trail**: refunds, product (de)activation, supplier deletion, settings changes, and user creation, changes, and password resets are recorded in the `AuditLog` table with the user who did them. Stock changes are recorded in `InventoryLog`, and logins in `AuthLog`.
 
 ### Rate limits (per IP)
 
@@ -85,6 +86,8 @@ Update your own profile. **Body (any of):** `full_name`, `email`.
 
 ### POST /auth/change-password
 **Body:** `{ "current_password": "…", "new_password": "at least 6 chars" }`
+
+Signs out every **other** session of this user. The response carries a new `accessToken` and sets a new refresh cookie, so the current device stays signed in.
 
 ---
 
@@ -182,10 +185,13 @@ Processes the whole sale in one database transaction: validate stock, calculate 
 }
 ```
 
-- **Totals:** subtotal = Σ(unit price × qty − item discount). Tax = configured rate × (subtotal − cart discount).
+- **Totals:** subtotal = Σ(unit price × qty − item discount). Tax = configured rate × (subtotal − cart discount). Every step is rounded to 2 dp, and the client's cart uses the same arithmetic.
 - **Discounts:** an item discount can't exceed its line total, and the cart discount can't exceed the subtotal.
+- **Limits:** 1–200 items per sale, 1–100,000 units per line, amounts up to GH₵ 1,000,000.
+- **customer_id**, if given, must exist (`422` otherwise). This is checked before any payment verification.
 - **CASH:** `amount_paid` must cover the total; change is calculated.
-- **MOBILE_MONEY / CARD:** `reference` is verified with Paystack. The charged amount must equal the total **including tax**.
+- **MOBILE_MONEY / CARD:** `reference` is verified with Paystack. The charge must be in GHS and equal the total **including tax**. A reference can pay for **one sale only**: reuse returns `409`.
+- The cost price and the loyalty points awarded are recorded on the sale, so later price changes don't alter profit reports or refunds.
 - **Transaction ID** format: `TXN-YYYYMMDD-NNNN`, numbered per day.
 
 **Response `201`:** the full sale, including `items` (each with its `product`) and `payment`.
@@ -206,7 +212,7 @@ The full sale with `items`, `payment`, cashier, and customer. Cashiers can only 
 Receipt data for reprinting: `{ "store": { "name", "address", "phone" }, "sale": { … } }`.
 
 ### POST /sales/:id/refund — ADMIN, MANAGER
-Full refund. It marks the sale `REFUNDED`, restores stock with `RETURN` inventory logs, and reverses the loyalty points. Refunding an already-refunded sale returns `422`, even if several requests arrive at once.
+Full refund. It marks the sale `REFUNDED`, restores stock with `RETURN` inventory logs, removes exactly the loyalty points that sale awarded (never below zero), and writes an audit record of who refunded it. Refunding an already-refunded sale returns `422`, even if several requests arrive at once. Card and Mobile Money money must be returned through Paystack separately.
 
 ---
 
@@ -227,7 +233,7 @@ The customer plus `purchase_summary`: `{ total_spent, purchase_count, average_pu
 Any of the create fields.
 
 ### GET /customers/:id/purchases
-Paginated purchases, newest first, each with `items_count`, `payment_method`, and `payment_status`.
+Paginated purchases, newest first, each with `items_count`, `payment_method`, and `payment_status`. Cashiers only see the sales they rang up themselves.
 
 Loyalty: 1 point per *loyalty rate* GHS spent (Settings, default 10), awarded on each completed sale.
 
@@ -236,6 +242,8 @@ Loyalty: 1 point per *loyalty rate* GHS spent (Settings, default 10), awarded on
 ## Reports — ADMIN, MANAGER
 
 All reports accept `start_date` and `end_date` (default: the last 30 days). Every figure is calculated with SQL aggregation over completed sales.
+
+**Revenue definitions.** `sales-summary` and `dashboard` revenue is what customers paid: after discounts, including tax. Product, category, and profit revenue is **net sales**: each line's share after the cart discount, excluding tax. Profit cost uses the cost price recorded at the time of sale.
 
 | Endpoint | Returns |
 |---|---|
@@ -270,7 +278,7 @@ Every user, with an `is_locked` flag.
 **Body (any of):** `full_name`, `email`, `role`, `is_active`. Admins can't remove their own admin role or deactivate themselves.
 
 ### POST /users/:id/reset-password
-**Body:** `{ "password": "…" }`. Also unlocks the account.
+**Body:** `{ "password": "…" }`. Also unlocks the account and signs out all of that user's sessions.
 
 ### POST /users/:id/unlock
 Clears the lockout and failed-attempt counter. Recorded in the auth log.

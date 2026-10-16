@@ -28,10 +28,10 @@ A web-based point of sale system for a retail shop, built as a final-year capsto
 - **Users and settings (admin).** Roles, deactivation, password resets, and unlocking accounts. Store details, tax rate, loyalty rate, currency symbol, and receipt footer.
 
 **Built to be correct under real use**
-- Every sale is one database transaction. Stock can't oversell even when two tills sell the last unit at once, and every stock change is logged.
+- Every sale is one database transaction. Stock can't oversell even when two tills sell the last unit at once, a Paystack payment can only pay for one sale, and every stock change is logged.
 - Role-based access is enforced on every endpoint: ADMIN, MANAGER, CASHIER.
 - Passwords use bcrypt (cost 12). Access tokens last 15 minutes; refresh tokens last 7 days, rotate on each use, and live in an httpOnly cookie.
-- Accounts lock after 5 failed logins until an admin unlocks them. Every login, logout and lockout is recorded in an auth log.
+- Accounts lock after 5 failed logins until an admin unlocks them, and changing a password signs out every other device. Logins go to an auth log; refunds, deactivations, deletions and settings or user changes go to an audit log with who made them.
 - All input is validated on the server, including rejecting fields an endpoint doesn't expect. Login is rate-limited, and the database itself refuses negative stock and amounts.
 
 ---
@@ -130,7 +130,7 @@ cd server && npm test     # Jest + Supertest integration tests (uses the databas
 cd client && npm test     # Vitest component and utility tests
 ```
 
-131 backend tests cover every module: auth (lockout, token rotation), sales (payments, discounts, concurrent sales, refunds), inventory, products, customers, suppliers, reports (exact totals), users, and settings. Services have about 88% line coverage. The tests create and delete their own data, run one file at a time, and mock Paystack.
+145 backend tests cover every module: auth (lockout, token rotation), sales (payments, discounts, concurrent sales, refunds), inventory, products, customers, suppliers, reports (exact totals), users, and settings. Services have about 88% line coverage. The tests create and delete their own data, run one file at a time, and mock Paystack.
 
 ---
 

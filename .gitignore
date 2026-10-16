@@ -49,3 +49,7 @@ server/prisma/migrations/*.sql.bak
 # Backup files
 backups/
 *.dump
+
+# Claude Code configuration and project instructions (kept locally, not part of the app)
+.claude/
+CLAUDE.md

@@ -5,7 +5,7 @@ const PREFIX = 'usertest'
 let admin, manager, cashier, originalSettings
 
 beforeAll(async () => {
-  ;[admin, manager, cashier] = await Promise.all([
+  [admin, manager, cashier] = await Promise.all([
     createUserWithToken('ADMIN', PREFIX),
     createUserWithToken('MANAGER', PREFIX),
     createUserWithToken('CASHIER', PREFIX),
@@ -129,6 +129,9 @@ describe('Own profile and password', () => {
       .send({ current_password: 'testpass123', new_password: 'newpass123' })
     expect(ok.status).toBe(200)
     expect((await login(`${PREFIX}_manager`, 'newpass123')).status).toBe(200)
+    // Older sessions are signed out; carry on with the fresh token the endpoint returned
+    expect((await request(app).get('/api/auth/me').set(auth(manager))).status).toBe(401)
+    manager.token = ok.body.data.accessToken
   })
 })
 

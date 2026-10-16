@@ -27,7 +27,7 @@ async function createSale(n, { day, items, status = 'COMPLETED', user }) {
 }
 
 beforeAll(async () => {
-  ;[manager, cashier] = await Promise.all([createUserWithToken('MANAGER', PREFIX), createUserWithToken('CASHIER', PREFIX)])
+  [manager, cashier] = await Promise.all([createUserWithToken('MANAGER', PREFIX), createUserWithToken('CASHIER', PREFIX)])
   catA = await prisma.category.create({ data: { name: 'RepTest Writing' } })
   catB = await prisma.category.create({ data: { name: 'RepTest Paper' } })
   pen = await prisma.product.create({ data: { name: 'RepTest Pen', sku: 'REPTEST-PEN', category_id: catA.id, price: 2, cost_price: 1, quantity: 100 } })

@@ -5,7 +5,7 @@ const PREFIX = 'prodtest'
 let admin, manager, cashier, category, product
 
 beforeAll(async () => {
-  ;[admin, manager, cashier] = await Promise.all([
+  [admin, manager, cashier] = await Promise.all([
     createUserWithToken('ADMIN', PREFIX),
     createUserWithToken('MANAGER', PREFIX),
     createUserWithToken('CASHIER', PREFIX),

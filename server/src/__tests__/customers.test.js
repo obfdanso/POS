@@ -5,7 +5,7 @@ const PREFIX = 'custtest'
 let manager, cashier, customer, category, product
 
 beforeAll(async () => {
-  ;[manager, cashier] = await Promise.all([createUserWithToken('MANAGER', PREFIX), createUserWithToken('CASHIER', PREFIX)])
+  [manager, cashier] = await Promise.all([createUserWithToken('MANAGER', PREFIX), createUserWithToken('CASHIER', PREFIX)])
   customer = await prisma.customer.create({
     data: { name: 'CustTest Ama', phone: '099-000-1001', email: 'custtest.ama@test.local', loyalty_points: 40 },
   })

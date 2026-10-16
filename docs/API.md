@@ -2,22 +2,21 @@
 
 Base URL: `http://localhost:3001/api`
 
-All endpoints (except `/auth/login`) require a valid JWT access token in the `Authorization: Bearer <token>` header.
+Every endpoint except `POST /auth/login` and `POST /auth/refresh` needs an access token:
+`Authorization: Bearer <accessToken>`.
 
 ---
 
-## Standard Response Format
+## Conventions
 
-**Success:**
+### Response format
+
+**Success**
 ```json
-{
-  "success": true,
-  "data": { ... },
-  "message": "Action completed"
-}
+{ "success": true, "data": { ... }, "message": "Product created successfully" }
 ```
 
-**Success with pagination:**
+**Success with pagination**
 ```json
 {
   "success": true,
@@ -26,7 +25,7 @@ All endpoints (except `/auth/login`) require a valid JWT access token in the `Au
 }
 ```
 
-**Error:**
+**Error**
 ```json
 {
   "success": false,
@@ -37,259 +36,259 @@ All endpoints (except `/auth/login`) require a valid JWT access token in the `Au
   }
 }
 ```
+`details` lists the fields at fault. It's present for validation errors and for conflicts on a single field, such as a duplicate SKU.
+
+### Validation rules that apply everywhere
+
+- **Unexpected body fields are rejected.** A `POST`/`PUT` body may contain only the fields documented for that endpoint. Anything else returns `422` with `details: [{ "field": "<name>", "message": "Unexpected field \"<name>\"" }]`.
+- **Pagination**: `page` (≥ 1, default 1) and `per_page` (1–100, default 20).
+- **Sorting**: list endpoints marked *sortable* accept `sort=<field>` and `order=asc|desc`. Unknown sort fields return `422`.
+- **Dates**: `start_date` / `end_date` are `YYYY-MM-DD` and inclusive. They're interpreted in the server's local time zone.
+- **Money** is returned as decimal strings, e.g. `"12.5"`. Format it for display on the client.
+
+### Rate limits (per IP)
+
+| Endpoint | Limit |
+|---|---|
+| `POST /auth/login` | 10 requests / minute |
+| `POST /auth/refresh` | 60 requests / minute. It runs on every page load, and all tills in a shop usually share one IP |
+| `POST /sales` | 60 requests / minute |
 
 ---
 
 ## Authentication
 
-### POST /api/auth/login
-Authenticate and receive tokens.
+### POST /auth/login
+**Body:** `{ "username": "admin", "password": "admin123" }`. Usernames are case-insensitive.
 
-**Body:**
+**Response `200`**
 ```json
-{ "username": "admin", "password": "admin123" }
+{ "data": { "accessToken": "<jwt>", "user": { "id": "…", "username": "admin", "email": "…", "full_name": "…", "role": "ADMIN" } } }
 ```
+Also sets the refresh token as an `httpOnly`, `SameSite=Strict` cookie (`secure` in production).
 
-**Response:** `200`
-```json
-{
-  "data": {
-    "accessToken": "<jwt>",
-    "user": { "id": "...", "username": "admin", "role": "ADMIN", "full_name": "..." }
-  }
-}
-```
-Refresh token is set as `httpOnly` cookie.
+After 5 failed attempts the account is locked until an admin unlocks it (`POST /users/:id/unlock`). If no admin can log in, run `npm run unlock-user -- <username>` in `server/`.
 
----
+### POST /auth/refresh
+Exchanges the refresh-token cookie for a new access token, and **rotates** the cookie. Each refresh token works once; reusing one returns `401`.
 
-### POST /api/auth/logout
-Invalidate the current refresh token.
+**Response `200`** `{ "data": { "accessToken": "…" } }`
 
-**Auth required:** Yes
+### POST /auth/logout
+Revokes the refresh token and clears the cookie.
 
----
+### GET /auth/me
+The signed-in user's profile.
 
-### POST /api/auth/refresh
-Exchange the refresh token cookie for a new access token.
+### PUT /auth/profile
+Update your own profile. **Body (any of):** `full_name`, `email`.
 
-**Response:** `200` `{ "data": { "accessToken": "..." } }`
-
----
-
-### GET /api/auth/me
-Get the current authenticated user's profile.
-
-**Response:** `200` `{ "data": { "id": "...", "username": "...", "role": "...", ... } }`
+### POST /auth/change-password
+**Body:** `{ "current_password": "…", "new_password": "at least 6 chars" }`
 
 ---
 
 ## Products
 
-### GET /api/products
-List products with pagination, search, and category filter.
+### GET /products — *sortable*
+**Query:** `page`, `per_page`, `search` (matches name, SKU, or barcode), `category_id`, `status` (`active` default, `inactive`, `all`; cashiers always get `active`).
 
-**Query params:** `page`, `per_page` (max 100), `search`, `category_id`
+**Sort fields:** `name` (default), `sku`, `category`, `price`, `cost_price`, `quantity`, `is_active`, `created_at`.
 
-### GET /api/products/:id
-Get a single product by UUID.
+### GET /products/:id
+### GET /products/barcode/:code
+Exact barcode lookup, used by the POS scanner. Inactive products return `404`.
 
-### POST /api/products
-Create a product. **Roles:** ADMIN, MANAGER
+### POST /products — ADMIN, MANAGER
+JSON, or `multipart/form-data` when uploading an `image` (JPG/PNG/WebP, max 5 MB).
 
-**Body:**
-```json
-{
-  "name": "Milo 400g",
-  "sku": "MLO-400",
-  "barcode": "6001255001234",
-  "category_id": "uuid",
-  "price": 12.50,
-  "cost_price": 9.00,
-  "quantity": 50,
-  "low_stock_threshold": 10
-}
-```
+**Body:** `name`, `sku`, `category_id`, `price` (> 0) are required. Optional: `barcode`, `supplier_id`, `cost_price`, `quantity` (opening stock, logged as a `RESTOCK`), `low_stock_threshold`, `is_active`.
 
-### PUT /api/products/:id
-Update a product. **Roles:** ADMIN, MANAGER
+### PUT /products/:id — ADMIN, MANAGER
+Any of the create fields **except `quantity`**: stock only changes through the inventory endpoints, so every change is logged. Send `image_url: null` to remove the image, or upload a new `image`. Changing `is_active` is **ADMIN only**.
 
-### DELETE /api/products/:id
-Soft-delete a product (sets `is_active = false`). **Roles:** ADMIN only
-
-### GET /api/products/barcode/:code
-Lookup a product by barcode — used by barcode scanner on POS screen.
+### DELETE /products/:id — ADMIN
+Soft delete: sets `is_active = false`. Past sales keep their history.
 
 ---
 
 ## Categories
 
-### GET /api/categories
-List all categories.
+### GET /categories
+Every category, with its product count in `_count.products`.
 
-### POST /api/categories
-Create a category. **Roles:** ADMIN, MANAGER
+### POST /categories — ADMIN, MANAGER
+**Body:** `{ "name": "Beverages", "description": "optional" }`
 
-**Body:** `{ "name": "Beverages", "description": "..." }`
+### PUT /categories/:id — ADMIN, MANAGER
+Same body as create.
+
+---
+
+## Suppliers
+
+### GET /suppliers
+**Query:** `page`, `per_page` (default 50), `search`.
+
+### GET /suppliers/:id
+The supplier and its active products.
+
+### POST /suppliers — ADMIN, MANAGER
+### PUT /suppliers/:id — ADMIN, MANAGER
+**Body:** `name` (required), `phone`, `email`, `address`, `website`.
+
+### DELETE /suppliers/:id — ADMIN
+Refused with `409` while active products still reference the supplier.
 
 ---
 
 ## Inventory
 
-### GET /api/inventory
-List all products with stock levels. **Query params:** `page`, `per_page`, `search`, `status` (`out` = out-of-stock only)
+### GET /inventory — *sortable*
+**Query:** `page`, `per_page`, `search` (name or SKU), `status=out` (out of stock only).
 
-### GET /api/inventory/low-stock
-List products at or below their `low_stock_threshold`.
+**Sort fields:** `name` (default), `category`, `quantity`, `low_stock_threshold`, `price`.
 
-### POST /api/inventory/restock
-Add stock to a product. **Roles:** ADMIN, MANAGER
+### GET /inventory/low-stock
+Active products at or below their `low_stock_threshold`, including those at 0. Lowest stock first.
 
+### POST /inventory/restock — ADMIN, MANAGER
 **Body:** `{ "product_id": "uuid", "quantity": 50, "notes": "Supplier delivery" }`
 
-### POST /api/inventory/adjust
-Manual stock adjustment (positive or negative). **Roles:** ADMIN, MANAGER
+### POST /inventory/adjust — ADMIN, MANAGER
+**Body:** `{ "product_id": "uuid", "quantity_change": -3, "notes": "Damaged items" }`. `quantity_change` must be non-zero, and stock can't go below 0.
 
-**Body:** `{ "product_id": "uuid", "quantity_change": -3, "notes": "Damaged items" }`
+Stock changes are applied atomically, so a sale and an adjustment made at the same moment never overwrite each other.
 
-### GET /api/inventory/log/:productId
-View inventory change history for a product. **Query params:** `page`, `per_page`
+### GET /inventory/log/:productId
+Paginated stock history: sales, restocks, adjustments, and returns, newest first.
 
 ---
 
 ## Sales
 
-### POST /api/sales
-Process a complete sale transaction.
+### POST /sales
+Processes the whole sale in one database transaction: validate stock, calculate totals, create the sale, items, and payment, deduct stock, write inventory logs, and award loyalty points.
 
-**Body:**
 ```json
 {
-  "items": [
-    { "product_id": "uuid", "quantity": 2, "discount": 0 }
-  ],
+  "items": [{ "product_id": "uuid", "quantity": 2, "discount": 0 }],
   "customer_id": "uuid or null",
-  "payment_method": "CASH",
-  "amount_paid": 50.00,
-  "discount_amount": 5.00,
-  "notes": "optional",
-  "reference": "MOMO-REF-001"
+  "payment_method": "CASH | MOBILE_MONEY | CARD",
+  "amount_paid": 50.0,
+  "discount_amount": 5.0,
+  "reference": "required for MOBILE_MONEY and CARD",
+  "notes": "optional, max 500 chars"
 }
 ```
 
-**Response:** `201` — complete sale object with items and payment.
+- **Totals:** subtotal = Σ(unit price × qty − item discount). Tax = configured rate × (subtotal − cart discount).
+- **Discounts:** an item discount can't exceed its line total, and the cart discount can't exceed the subtotal.
+- **CASH:** `amount_paid` must cover the total; change is calculated.
+- **MOBILE_MONEY / CARD:** `reference` is verified with Paystack. The charged amount must equal the total **including tax**.
+- **Transaction ID** format: `TXN-YYYYMMDD-NNNN`, numbered per day.
 
-### GET /api/sales
-List sales. **Query params:** `page`, `per_page`, `start_date`, `end_date`
+**Response `201`:** the full sale, including `items` (each with its `product`) and `payment`.
 
-### GET /api/sales/:id
-Get full sale details including items, payment, cashier, and customer.
+### GET /sales — *sortable*
+Cashiers only ever see their own sales.
 
-### GET /api/sales/:id/receipt
-Get receipt data as JSON for re-printing.
+**Query:** `page`, `per_page`, `start_date`, `end_date`, `user_id`, `customer_id`, `payment_status` (`COMPLETED`, `REFUNDED`, `PENDING`), `payment_method`, `search` (transaction ID contains).
 
-**Response:**
-```json
-{
-  "data": {
-    "store": { "name": "...", "address": "...", "phone": "..." },
-    "sale": { ... }
-  }
-}
-```
+**Sort fields:** `created_at` (default, newest first), `transaction_id`, `total_amount`, `payment_method`, `payment_status`, `cashier`, `customer`.
 
-### POST /api/sales/:id/refund
-Process a full refund. Restores stock, creates RETURN inventory log. **Roles:** ADMIN, MANAGER
+Each row includes `user`, `customer`, and `items_count`.
+
+### GET /sales/:id
+The full sale with `items`, `payment`, cashier, and customer. Cashiers can only open their own.
+
+### GET /sales/:id/receipt
+Receipt data for reprinting: `{ "store": { "name", "address", "phone" }, "sale": { … } }`.
+
+### POST /sales/:id/refund — ADMIN, MANAGER
+Full refund. It marks the sale `REFUNDED`, restores stock with `RETURN` inventory logs, and reverses the loyalty points. Refunding an already-refunded sale returns `422`, even if several requests arrive at once.
 
 ---
 
 ## Customers
 
-### GET /api/customers
-List customers. **Query params:** `page`, `per_page`, `search`
+### GET /customers — *sortable*
+**Query:** `page`, `per_page`, `search` (name, phone, or email).
+**Sort fields:** `name` (default), `phone`, `email`, `loyalty_points`, `created_at`.
+Each row includes `total_purchases`: lifetime spend on completed sales.
 
-### POST /api/customers
-Create a customer.
+### GET /customers/:id
+The customer plus `purchase_summary`: `{ total_spent, purchase_count, average_purchase, last_purchase_at }`.
 
-**Body:** `{ "name": "Kwame Asante", "phone": "024-555-0001", "email": "kwame@example.com", "address": "..." }`
+### POST /customers — ADMIN, MANAGER, CASHIER
+**Body:** `name` (required), `phone`, `email`, `address`. Phone and email must be unique.
 
-### GET /api/customers/:id
-Get customer with loyalty points and summary stats.
+### PUT /customers/:id — ADMIN, MANAGER
+Any of the create fields.
 
-### PUT /api/customers/:id
-Update customer details.
+### GET /customers/:id/purchases
+Paginated purchases, newest first, each with `items_count`, `payment_method`, and `payment_status`.
 
-### GET /api/customers/:id/purchases
-Get paginated purchase history for a customer.
+Loyalty: 1 point per *loyalty rate* GHS spent (Settings, default 10), awarded on each completed sale.
 
 ---
 
-## Reports
+## Reports — ADMIN, MANAGER
 
-All report endpoints accept `start_date` and `end_date` query parameters (ISO date format: `YYYY-MM-DD`). **Roles:** ADMIN
+All reports accept `start_date` and `end_date` (default: the last 30 days). Every figure is calculated with SQL aggregation over completed sales.
 
-### GET /api/reports/sales-summary
-Total revenue, transaction count, average transaction value, total items sold.
+| Endpoint | Returns |
+|---|---|
+| `GET /reports/dashboard` | Today's revenue and transaction count, low-stock alert count, all-time top 5 products |
+| `GET /reports/sales-summary` | `total_revenue`, `transaction_count`, `average_sale`, `total_discount`, `total_tax` |
+| `GET /reports/sales-by-day` | `[{ label: "2026-03-01", value, transactions }]`, one entry per day, including days with no sales |
+| `GET /reports/top-products` | `[{ label, sku, value, quantity }]`. **Query:** `limit` (1–100, default 10), `by` (`revenue` or `quantity`) |
+| `GET /reports/category-performance` | `[{ label, value, quantity }]` per category |
+| `GET /reports/cashier-performance` | `[{ label, username, value, transactions }]` per cashier |
+| `GET /reports/inventory-status` | Totals plus up to 20 low-stock and out-of-stock products (no date range) |
+| `GET /reports/profit` | `[{ name, sku, revenue, cost, profit, margin }]` using `cost_price` |
 
-### GET /api/reports/sales-by-day
-Daily sales breakdown. Returns `[{ label: "2026-03-01", value: 450.00 }, ...]`.
-
-### GET /api/reports/top-products
-Top selling products. **Query params:** `limit` (default 10), `by` (`revenue` or `quantity`)
-
-### GET /api/reports/category-performance
-Sales revenue and transaction count per category.
-
-### GET /api/reports/cashier-performance
-Sales per cashier.
-
-### GET /api/reports/inventory-status
-Current stock summary: total products, low stock count, out of stock count.
-
-### GET /api/reports/profit
-Profit report using `cost_price` on products.
+### GET /reports/cashier-stats — any role
+The signed-in user's figures for today, plus their 5 most recent sales.
 
 ---
 
 ## Users
 
-**Roles:** ADMIN only for all user management endpoints.
+### GET /users/staff — ADMIN, MANAGER
+`[{ id, full_name, role }]` for filters such as "sales by cashier".
 
-### GET /api/users
-List users. **Query params:** `page`, `per_page`, `search`
+**Every other user endpoint is ADMIN only.**
 
-### POST /api/users
-Create a user.
+### GET /users
+Every user, with an `is_locked` flag.
 
-**Body:** `{ "username": "jane", "email": "jane@store.com", "password": "pass123", "full_name": "Jane Doe", "role": "CASHIER" }`
+### POST /users
+**Body:** `{ "username", "email", "password" (≥ 6), "full_name", "role": "ADMIN | MANAGER | CASHIER" }`. Usernames are unique regardless of case.
 
-### GET /api/users/:id
-Get a user by ID.
+### PUT /users/:id
+**Body (any of):** `full_name`, `email`, `role`, `is_active`. Admins can't remove their own admin role or deactivate themselves.
 
-### PUT /api/users/:id
-Update user (full_name, email, role, is_active).
+### POST /users/:id/reset-password
+**Body:** `{ "password": "…" }`. Also unlocks the account.
 
-### POST /api/users/:id/unlock
-Unlock a locked account and reset failed login attempts.
+### POST /users/:id/unlock
+Clears the lockout and failed-attempt counter. Recorded in the auth log.
 
 ---
 
 ## Settings
 
-### GET /api/settings
-Get all store settings. **Auth required.**
-
-### PUT /api/settings
-Update settings. **Roles:** ADMIN
-
-**Body (any subset):**
+### GET /settings — any role
+### PUT /settings — ADMIN
+**Body (any of):**
 ```json
 {
   "store_name": "QuickMart POS",
   "store_address": "27 Kwame Nkrumah Ave, Kumasi, Ghana",
-  "store_phone": "030-000-0000",
+  "store_phone": "032-204-1234",
   "currency_symbol": "GH₵",
-  "tax_rate": "0",
+  "tax_rate": "3",
   "loyalty_points_rate": "10",
   "receipt_footer": "Thank you for shopping with us!"
 }
@@ -297,27 +296,24 @@ Update settings. **Roles:** ADMIN
 
 ---
 
-## HTTP Status Codes
+## Health
 
-| Code | Meaning |
-|---|---|
-| 200 | OK |
-| 201 | Created |
-| 400 | Bad Request |
-| 401 | Unauthorized (missing or invalid token) |
-| 403 | Forbidden (insufficient role) |
-| 404 | Not Found |
-| 409 | Conflict (e.g., duplicate SKU) |
-| 422 | Validation Error |
-| 500 | Internal Server Error |
+### GET /health
+`{ "data": { "status": "ok", "timestamp": "…" } }`. No auth required.
 
-## Error Codes
+---
 
-| Code | Description |
-|---|---|
-| `VALIDATION_ERROR` | Input validation failed |
-| `UNAUTHORIZED` | Authentication required or failed |
-| `FORBIDDEN` | Insufficient permissions |
-| `NOT_FOUND` | Resource does not exist |
-| `CONFLICT` | Duplicate unique field |
-| `INTERNAL_ERROR` | Unexpected server error |
+## Status and error codes
+
+| HTTP | Error code | Meaning |
+|---|---|---|
+| 200 / 201 | — | OK / Created |
+| 400 | `BAD_REQUEST` | Body is not valid JSON |
+| 401 | `UNAUTHORIZED` | Missing, invalid, or expired token; bad credentials; locked account |
+| 403 | `FORBIDDEN` | Your role can't do this |
+| 404 | `NOT_FOUND` | No such record or route |
+| 409 | `CONFLICT` | Duplicate unique value (SKU, barcode, phone, …) or a record still in use |
+| 422 | `VALIDATION_ERROR` | Invalid input, unexpected fields, insufficient stock or payment |
+| 429 | `RATE_LIMIT` / `RATE_LIMITED` | Too many requests |
+| 500 | `INTERNAL_ERROR` | Unexpected server error |
+| 503 | `INTERNAL_ERROR` | Paystack verification unavailable |

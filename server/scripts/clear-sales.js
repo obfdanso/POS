@@ -1,11 +1,10 @@
 /**
  * clear-sales.js
  *
- * Deletes all sales-related records from the database in the correct order
- * to satisfy foreign-key constraints, then resets customer loyalty points.
- *
- * Safe to run at any time — products, customers, categories, users, and
- * settings are left completely untouched.
+ * Deletes all sales, sale items, payments, and SALE/RETURN inventory logs in one
+ * transaction, puts the sold stock back so stock levels still match the remaining
+ * inventory history, and resets customer loyalty points (earned from those sales).
+ * Products, customers, categories, users, and settings are otherwise kept.
  *
  * Usage:  npm run clear-sales
  */
@@ -18,28 +17,41 @@ const prisma = new PrismaClient()
 async function clearSales() {
   console.log('=== QuickMart — Clear Sales Data ===\n')
 
-  // 1. Payments (FK → Sale)
-  const { count: payments } = await prisma.payment.deleteMany()
+  const result = await prisma.$transaction(async (tx) => {
+    // 1. Put sold stock back: undo the net effect of every SALE / RETURN log per product,
+    //    so stock levels still match the remaining (restock / adjustment) history
+    const netByProduct = await tx.inventoryLog.groupBy({
+      by: ['product_id'],
+      where: { change_type: { in: ['SALE', 'RETURN'] } },
+      _sum: { quantity_change: true },
+    })
+    let restocked = 0
+    for (const row of netByProduct) {
+      const units = -(row._sum.quantity_change || 0)
+      if (units !== 0) {
+        await tx.product.update({ where: { id: row.product_id }, data: { quantity: { increment: units } } })
+        restocked++
+      }
+    }
+
+    // 2. Delete in foreign-key order
+    const { count: payments } = await tx.payment.deleteMany()
+    const { count: saleItems } = await tx.saleItem.deleteMany()
+    const { count: logs } = await tx.inventoryLog.deleteMany({ where: { change_type: { in: ['SALE', 'RETURN'] } } })
+    const { count: sales } = await tx.sale.deleteMany()
+
+    // 3. Loyalty points were earned from the deleted sales
+    const { count: customers } = await tx.customer.updateMany({ data: { loyalty_points: 0 } })
+
+    return { payments, saleItems, logs, sales, customers, restocked }
+  })
+
+  const { payments, saleItems, logs, sales, customers, restocked } = result
+  console.log(`✓  Restored sold stock for ${restocked} product${restocked !== 1 ? 's' : ''}`)
   console.log(`✓  Deleted ${payments} payment record${payments !== 1 ? 's' : ''}`)
-
-  // 2. SaleItems (FK → Sale, Product)
-  const { count: saleItems } = await prisma.saleItem.deleteMany()
   console.log(`✓  Deleted ${saleItems} sale item record${saleItems !== 1 ? 's' : ''}`)
-
-  // 3. InventoryLogs created by sales or refunds
-  const { count: logs } = await prisma.inventoryLog.deleteMany({
-    where: { change_type: { in: ['SALE', 'RETURN'] } },
-  })
   console.log(`✓  Deleted ${logs} inventory log entr${logs !== 1 ? 'ies' : 'y'} (SALE / RETURN)`)
-
-  // 4. Sales
-  const { count: sales } = await prisma.sale.deleteMany()
   console.log(`✓  Deleted ${sales} sale record${sales !== 1 ? 's' : ''}`)
-
-  // 5. Reset customer loyalty points (they were earned from the deleted sales)
-  const { count: customers } = await prisma.customer.updateMany({
-    data: { loyalty_points: 0 },
-  })
   console.log(`✓  Reset loyalty points to 0 for ${customers} customer${customers !== 1 ? 's' : ''}`)
 
   console.log('\n────────────────────────────────────────')
@@ -51,7 +63,7 @@ async function clearSales() {
   console.log(`  Customers reset      : ${customers}`)
   console.log('────────────────────────────────────────')
   console.log('\n✅  Database is clean.')
-  console.log('    Products, customers, categories, users, and settings are unchanged.')
+  console.log('    Sold stock was put back; products, customers, categories, users, and settings are kept.')
   console.log('    Run "npm run db:seed" if you want to start completely from scratch.\n')
 }
 

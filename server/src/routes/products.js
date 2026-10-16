@@ -48,10 +48,6 @@ const productValidation = [
   body('is_active').optional().isBoolean().withMessage('is_active must be true or false').toBoolean(),
 ]
 
-const categoryValidation = [
-  body('name').notEmpty().trim().withMessage('Category name is required'),
-  body('description').optional({ values: 'null' }).trim().isLength({ max: 255 }).withMessage('Description must be 255 characters or fewer'),
-]
 
 // All routes require authentication
 router.use(authenticate)
@@ -64,10 +60,6 @@ router.post('/', authorize(['ADMIN', 'MANAGER']), upload.single('image'), exactB
 router.put('/:id', authorize(['ADMIN', 'MANAGER']), upload.single('image'), exactBody(updateProductValidation()), validate, productController.updateProduct)
 router.delete('/:id', authorize(['ADMIN']), param('id').isUUID().withMessage('Invalid product ID'), validate, productController.deleteProduct)
 
-// Category routes
-router.get('/categories/list', productController.listCategories)
-router.post('/categories', authorize(['ADMIN', 'MANAGER']), exactBody(categoryValidation), validate, productController.createCategory)
-router.put('/categories/:id', authorize(['ADMIN', 'MANAGER']), param('id').isUUID().withMessage('Invalid category ID'), exactBody(categoryValidation), validate, productController.updateCategory)
 
 function listProductsValidation() {
   return [

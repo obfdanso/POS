@@ -4,6 +4,7 @@ const { authenticate, authorize } = require('../middleware/auth')
 const validate = require('../middleware/validate')
 const exactBody = require('../middleware/exactBody')
 const prisma = require('../utils/prismaClient')
+const { recordAudit } = require('../utils/audit')
 
 const router = express.Router()
 
@@ -59,6 +60,14 @@ router.put('/', authorize(['ADMIN']), exactBody(settingsValidation), validate, a
         })
       )
     )
+    if (updates.length) {
+      await recordAudit({
+        userId: req.user.id,
+        action: 'SETTINGS_UPDATED',
+        entity: 'Settings',
+        details: updates.map(([key, value]) => `${key}=${value}`).join(', '),
+      })
+    }
     const rows = await prisma.settings.findMany()
     const settings = { ...DEFAULT_SETTINGS }
     rows.forEach((r) => { settings[r.key] = r.value })

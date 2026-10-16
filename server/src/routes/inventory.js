@@ -37,7 +37,8 @@ router.post(
   exactBody([
     body('product_id').isUUID().withMessage('Valid product ID required'),
     body('quantity_change')
-      .isInt()
+      .isInt({ min: -100000, max: 100000 })
+      .withMessage('Quantity change must be a whole number between -100000 and 100000')
       .custom((v) => Number(v) !== 0)
       .withMessage('Quantity change must be a non-zero integer')
       .toInt(),
@@ -51,7 +52,7 @@ router.post(
   authorize(['ADMIN', 'MANAGER']),
   exactBody([
     body('product_id').isUUID().withMessage('Valid product ID required'),
-    body('quantity').isInt({ min: 1 }).withMessage('Quantity must be >= 1').toInt(),
+    body('quantity').isInt({ min: 1, max: 100000 }).withMessage('Quantity must be between 1 and 100000').toInt(),
     body('notes').optional().trim().isLength({ max: 500 }).withMessage('Notes must be 500 characters or fewer'),
   ]),
   validate,

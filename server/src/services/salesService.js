@@ -1,6 +1,7 @@
 const prisma = require('../utils/prismaClient')
 const { buildOrderBy } = require('../middleware/sorting')
-const { NotFoundError, ValidationError, AppError } = require('../utils/errors')
+const { NotFoundError, ValidationError, AppError, ConflictError } = require('../utils/errors')
+const { recordAudit } = require('../utils/audit')
 const { verifyPaystackPayment } = require('../utils/paystack')
 const { logger } = require('../middleware/logger')
 const generateTransactionId = require('../utils/generateTransactionId')
@@ -33,6 +34,13 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
     }
   }
 
+  if (customer_id) {
+    const customer = await prisma.customer.findUnique({ where: { id: customer_id }, select: { id: true } })
+    if (!customer) {
+      throw new ValidationError('Customer not found', [{ field: 'customer_id', message: 'Customer does not exist' }])
+    }
+  }
+
   // Step 2: Calculate totals
   const taxRate = await getNumericSetting('tax_rate', 0)
   let subtotal = 0
@@ -52,6 +60,7 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
       product_id: item.product_id,
       quantity: item.quantity,
       unit_price,
+      unit_cost: product.cost_price, // snapshot for profit reporting
       discount: itemDiscount,
       total: lineTotal,
       product_name: product.name, // for receipt
@@ -83,6 +92,12 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
       ])
     }
 
+    // A successful Paystack charge can pay for one sale only
+    const alreadyUsed = await prisma.payment.findUnique({ where: { reference }, select: { id: true } })
+    if (alreadyUsed) {
+      throw new ConflictError('This payment reference has already been used for another sale', 'reference')
+    }
+
     let paystackRes;
     try {
       paystackRes = await verifyPaystackPayment(reference);
@@ -93,6 +108,11 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
     if (!paystackRes || paystackRes.status !== true || paystackRes.data?.status !== 'success') {
       throw new ValidationError('Payment verification failed', [
         { field: 'reference', message: 'Paystack transaction not successful' }
+      ])
+    }
+    if (paystackRes.data.currency && paystackRes.data.currency !== 'GHS') {
+      throw new ValidationError('Payment verification failed', [
+        { field: 'reference', message: `Payment was made in ${paystackRes.data.currency}, not GHS` }
       ])
     }
 
@@ -109,6 +129,10 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
   }
 
   const changeGiven = payment_method === 'CASH' ? parseFloat((amountPaid - totalAmount).toFixed(2)) : 0
+
+  // Loyalty points (1 point per <loyalty rate> GHS); stored on the sale so a refund reverses exactly this
+  const loyaltyRate = customer_id ? await getNumericSetting('loyalty_points_rate', 10) : 0
+  const pointsEarned = customer_id && loyaltyRate > 0 ? Math.floor(totalAmount / loyaltyRate) : 0
 
   // Step 3–6: Execute in a single DB transaction
   const runTx = () => prisma.$transaction(async (tx) => {
@@ -131,6 +155,7 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
         payment_method,
         payment_status: 'COMPLETED',
         notes: notes || null,
+        loyalty_points_earned: pointsEarned,
       },
     })
 
@@ -141,6 +166,7 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
         product_id: si.product_id,
         quantity: si.quantity,
         unit_price: si.unit_price,
+        unit_cost: si.unit_cost,
         discount: si.discount,
         total: si.total,
       })),
@@ -186,31 +212,29 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
       })
     }
 
-    // Award loyalty points if customer is linked (1 point per GHS 10)
-    if (customer_id) {
-      const loyaltyRate = await getNumericSetting('loyalty_points_rate', 10)
-      const pointsEarned = loyaltyRate > 0 ? Math.floor(totalAmount / loyaltyRate) : 0
-      if (pointsEarned > 0) {
-        await tx.customer.update({
-          where: { id: customer_id },
-          data: { loyalty_points: { increment: pointsEarned } },
-        })
-      }
+    if (pointsEarned > 0) {
+      await tx.customer.update({
+        where: { id: customer_id },
+        data: { loyalty_points: { increment: pointsEarned } },
+      })
     }
 
     return newSale
   })
 
+  // Concurrent sales can pick the same daily sequence number; each retry re-counts
+  // today's committed sales and so moves on to a free number
+  const MAX_ATTEMPTS = 5
   let sale
-  try {
-    sale = await runTx()
-  } catch (err) {
-    if (err.code === 'P2002' && err.meta?.target?.toString().includes('transaction_id')) {
-      // Extremely rare collision (two concurrent sales in same millisecond) — retry once.
-      // The retry re-counts today's committed sales, so it will generate a new unique ID.
+  for (let attempt = 1; !sale; attempt++) {
+    try {
       sale = await runTx()
-    } else {
-      throw err
+    } catch (err) {
+      const target = err.code === 'P2002' ? String(err.meta?.target ?? '') : ''
+      if (target.includes('reference')) {
+        throw new ConflictError('This payment reference has already been used for another sale', 'reference')
+      }
+      if (!target.includes('transaction_id') || attempt >= MAX_ATTEMPTS) throw err
     }
   }
 
@@ -318,16 +342,25 @@ async function processRefund(saleId, userId) {
       })
     }
 
-    // Reverse loyalty points
-    if (sale.customer_id) {
-      const loyaltyRate = await getNumericSetting('loyalty_points_rate', 10)
-      const pointsToDeduct = loyaltyRate > 0 ? Math.floor(parseFloat(sale.total_amount) / loyaltyRate) : 0
-      if (pointsToDeduct > 0) {
-        const customer = await tx.customer.findUnique({ where: { id: sale.customer_id } })
-        const newPoints = Math.max(0, customer.loyalty_points - pointsToDeduct)
-        await tx.customer.update({ where: { id: sale.customer_id }, data: { loyalty_points: newPoints } })
-      }
+    // Reverse exactly the points this sale awarded, without going below zero
+    if (sale.customer_id && sale.loyalty_points_earned > 0) {
+      await tx.$executeRaw`
+        UPDATE "Customer"
+        SET loyalty_points = GREATEST(loyalty_points - ${sale.loyalty_points_earned}, 0), updated_at = NOW()
+        WHERE id = ${sale.customer_id}
+      `
     }
+
+    await recordAudit(
+      {
+        userId,
+        action: 'SALE_REFUNDED',
+        entity: 'Sale',
+        entityId: saleId,
+        details: `${sale.transaction_id} refunded (${sale.total_amount} via ${sale.payment_method})`,
+      },
+      tx
+    )
   })
 
   return getSaleById(saleId)

@@ -76,7 +76,7 @@ async function updateProduct(req, res, next) {
 
 async function deleteProduct(req, res, next) {
   try {
-    await productService.softDeleteProduct(req.params.id)
+    await productService.softDeleteProduct(req.params.id, req.user.id)
     res.json({ success: true, data: null, message: 'Product deactivated successfully' })
   } catch (err) {
     next(err)

@@ -121,7 +121,8 @@ async function updateCustomer(id, data) {
   })
 }
 
-async function getCustomerPurchases(id, { page = 1, per_page = 20 } = {}) {
+// Pass userId to restrict the list to one cashier's sales
+async function getCustomerPurchases(id, { page = 1, per_page = 20, userId } = {}) {
   const customer = await prisma.customer.findUnique({ where: { id } })
   if (!customer) throw new NotFoundError('Customer not found')
 
@@ -130,7 +131,7 @@ async function getCustomerPurchases(id, { page = 1, per_page = 20 } = {}) {
 
   const [sales, total] = await Promise.all([
     prisma.sale.findMany({
-      where: { customer_id: id },
+      where: { customer_id: id, ...(userId && { user_id: userId }) },
       skip,
       take,
       orderBy: { created_at: 'desc' },
@@ -139,7 +140,7 @@ async function getCustomerPurchases(id, { page = 1, per_page = 20 } = {}) {
         user: { select: { full_name: true } },
       },
     }),
-    prisma.sale.count({ where: { customer_id: id } }),
+    prisma.sale.count({ where: { customer_id: id, ...(userId && { user_id: userId }) } }),
   ])
 
   return { sales, total, page, per_page: take, total_pages: Math.ceil(total / take) }

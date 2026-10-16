@@ -1,4 +1,6 @@
 const prisma = require('../utils/prismaClient')
+// Product/category/profit revenue is net sales: each line's share of its sale after the cart
+// discount, excluding tax. Profit cost uses the cost price recorded at the time of sale.
 const { ValidationError } = require('../utils/errors')
 const { buildDateRange } = require('../utils/dateRange')
 
@@ -69,7 +71,7 @@ async function getTopProducts({ start_date, end_date, limit = 10, by = 'revenue'
     results = await prisma.$queryRaw`
       SELECT p.id, p.name, p.sku,
         SUM(si.quantity)::int as total_quantity,
-        SUM(si.total)::float as total_revenue
+        ROUND(SUM(si.total * (s.subtotal - s.discount_amount) / NULLIF(s.subtotal, 0)), 2)::float as total_revenue
       FROM "SaleItem" si
       JOIN "Product" p ON p.id = si.product_id
       JOIN "Sale" s ON s.id = si.sale_id
@@ -83,7 +85,7 @@ async function getTopProducts({ start_date, end_date, limit = 10, by = 'revenue'
     results = await prisma.$queryRaw`
       SELECT p.id, p.name, p.sku,
         SUM(si.quantity)::int as total_quantity,
-        SUM(si.total)::float as total_revenue
+        ROUND(SUM(si.total * (s.subtotal - s.discount_amount) / NULLIF(s.subtotal, 0)), 2)::float as total_revenue
       FROM "SaleItem" si
       JOIN "Product" p ON p.id = si.product_id
       JOIN "Sale" s ON s.id = si.sale_id
@@ -110,7 +112,7 @@ async function getCategoryPerformance({ start_date, end_date }) {
       c.id,
       c.name as label,
       SUM(si.quantity)::int as total_quantity,
-      SUM(si.total)::float as value
+      ROUND(SUM(si.total * (s.subtotal - s.discount_amount) / NULLIF(s.subtotal, 0)), 2)::float as value
     FROM "SaleItem" si
     JOIN "Product" p ON p.id = si.product_id
     JOIN "Category" c ON c.id = p.category_id
@@ -192,9 +194,9 @@ async function getProfitReport({ start_date, end_date }) {
       p.id,
       p.name,
       p.sku,
-      SUM(si.total)::float as revenue,
-      SUM(si.quantity * COALESCE(p.cost_price, 0))::float as cost,
-      SUM(si.total - si.quantity * COALESCE(p.cost_price, 0))::float as profit
+      ROUND(SUM(si.total * (s.subtotal - s.discount_amount) / NULLIF(s.subtotal, 0)), 2)::float as revenue,
+      SUM(si.quantity * COALESCE(si.unit_cost, p.cost_price, 0))::float as cost,
+      ROUND(SUM((si.total * (s.subtotal - s.discount_amount) / NULLIF(s.subtotal, 0)) - (si.quantity * COALESCE(si.unit_cost, p.cost_price, 0))), 2)::float as profit
     FROM "SaleItem" si
     JOIN "Product" p ON p.id = si.product_id
     JOIN "Sale" s ON s.id = si.sale_id
@@ -234,12 +236,12 @@ async function getDashboardSummary() {
     // Includes out-of-stock items, matching GET /inventory/low-stock
     prisma.$queryRaw`SELECT COUNT(*)::int as cnt FROM "Product" WHERE is_active = true AND quantity <= low_stock_threshold`,
     prisma.$queryRaw`
-      SELECT p.name, SUM(si.total)::float as revenue, SUM(si.quantity)::int as quantity
+      SELECT p.name, ROUND(SUM(si.total * (s.subtotal - s.discount_amount) / NULLIF(s.subtotal, 0)), 2)::float as revenue, SUM(si.quantity)::int as quantity
       FROM "SaleItem" si
       JOIN "Product" p ON p.id = si.product_id
       JOIN "Sale" s ON s.id = si.sale_id
       WHERE s.payment_status = 'COMPLETED'
-      GROUP BY p.name
+      GROUP BY p.id, p.name
       ORDER BY revenue DESC
       LIMIT 5
     `,

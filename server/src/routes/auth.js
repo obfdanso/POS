@@ -43,7 +43,7 @@ const refreshLimiter = rateLimit({
 })
 
 const loginValidation = [
-  body('username').notEmpty().trim().withMessage('Username is required'),
+  body('username').trim().notEmpty().withMessage('Username is required'),
   body('password').notEmpty().withMessage('Password is required'),
 ]
 
@@ -53,7 +53,7 @@ const changePasswordValidation = [
 ]
 
 const profileValidation = [
-  body('full_name').optional().trim().isLength({ max: 100 }).withMessage('Full name must be under 100 characters'),
+  body('full_name').optional().trim().notEmpty().withMessage('Full name cannot be empty').isLength({ max: 100 }).withMessage('Full name must be under 100 characters'),
   body('email').optional().isEmail().normalizeEmail().withMessage('Valid email is required'),
 ]
 

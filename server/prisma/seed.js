@@ -101,6 +101,8 @@ async function seedSales({ products, customers, staff, admin, taxRate, loyaltyRa
     const customer = rand() < 0.5 ? pick(customers) : null
     const cashierUser = pick(staff)
     const refunded = i === REFUNDED_INDEX
+    // Points actually awarded (the refunded sale's points were reversed, so it keeps 0)
+    const pointsEarned = customer && !refunded && loyaltyRate > 0 ? Math.floor(total / loyaltyRate) : 0
 
     const sale = await prisma.sale.create({
       data: {
@@ -113,12 +115,14 @@ async function seedSales({ products, customers, staff, admin, taxRate, loyaltyRa
         total_amount: total,
         payment_method: method,
         payment_status: refunded ? 'REFUNDED' : 'COMPLETED',
+        loyalty_points_earned: pointsEarned,
         created_at: createdAt,
         sale_items: {
           create: lines.map((l) => ({
             product_id: l.product.id,
             quantity: l.quantity,
             unit_price: l.unitPrice,
+            unit_cost: l.product.cost_price,
             discount: 0,
             total: l.total,
             created_at: createdAt,
@@ -171,10 +175,10 @@ async function seedSales({ products, customers, staff, admin, taxRate, loyaltyRa
           },
         })
       }
-    } else if (customer && loyaltyRate > 0) {
+    } else if (pointsEarned > 0) {
       await prisma.customer.update({
         where: { id: customer.id },
-        data: { loyalty_points: { increment: Math.floor(total / loyaltyRate) } },
+        data: { loyalty_points: { increment: pointsEarned } },
       })
     }
 
@@ -195,6 +199,7 @@ async function main() {
   console.log('Seeding database...')
 
   // Clean up existing data (in reverse FK order)
+  await prisma.auditLog.deleteMany()
   await prisma.authLog.deleteMany()
   await prisma.inventoryLog.deleteMany()
   await prisma.payment.deleteMany()

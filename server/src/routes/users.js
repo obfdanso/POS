@@ -5,6 +5,7 @@ const validate = require('../middleware/validate')
 const exactBody = require('../middleware/exactBody')
 const prisma = require('../utils/prismaClient')
 const bcrypt = require('bcrypt')
+const { recordAudit } = require('../utils/audit')
 const { NotFoundError, ConflictError, ValidationError } = require('../utils/errors')
 
 const router = express.Router()
@@ -49,10 +50,10 @@ router.get('/', async (req, res, next) => {
 router.post(
   '/',
   exactBody([
-    body('username').notEmpty().trim().withMessage('Username is required'),
+    body('username').trim().notEmpty().withMessage('Username is required'),
     body('email').isEmail().withMessage('Valid email required'),
     body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
-    body('full_name').notEmpty().trim().withMessage('Full name is required'),
+    body('full_name').trim().notEmpty().withMessage('Full name is required'),
     body('role').isIn(['ADMIN', 'MANAGER', 'CASHIER']).withMessage('Valid role required'),
   ]),
   validate,
@@ -72,6 +73,7 @@ router.post(
         data: { username, email, password_hash, full_name, role },
         select: { id: true, username: true, email: true, full_name: true, role: true, is_active: true, created_at: true },
       })
+      await recordAudit({ userId: req.user.id, action: 'USER_CREATED', entity: 'User', entityId: user.id, details: `${user.username} (${user.role})` })
       res.status(201).json({ success: true, data: user, message: 'User created successfully' })
     } catch (err) {
       next(err)
@@ -86,7 +88,7 @@ router.put(
     param('id').isUUID(),
     ...exactBody([
       body('role').optional().isIn(['ADMIN', 'MANAGER', 'CASHIER']).withMessage('Valid role required'),
-      body('is_active').optional().isBoolean().withMessage('is_active must be true or false'),
+      body('is_active').optional().isBoolean({ strict: true }).withMessage('is_active must be true or false').toBoolean(),
       body('full_name').optional().trim().notEmpty().withMessage('Full name cannot be empty'),
       body('email').optional().isEmail().withMessage('Valid email required'),
     ]),
@@ -109,6 +111,12 @@ router.put(
         data: { ...(role !== undefined && { role }), ...(is_active !== undefined && { is_active }), ...(full_name && { full_name }), ...(email && { email }) },
         select: { id: true, username: true, email: true, full_name: true, role: true, is_active: true, created_at: true },
       })
+      const changes = Object.entries({ role, is_active, full_name, email })
+        .filter(([key, value]) => value !== undefined && value !== user[key])
+        .map(([key, value]) => `${key}: ${user[key]} → ${value}`)
+      if (changes.length) {
+        await recordAudit({ userId: req.user.id, action: 'USER_UPDATED', entity: 'User', entityId: user.id, details: `${user.username}: ${changes.join(', ')}` })
+      }
       res.json({ success: true, data: updated, message: 'User updated successfully' })
     } catch (err) {
       next(err)
@@ -126,8 +134,12 @@ router.post(
       const user = await prisma.user.findUnique({ where: { id: req.params.id } })
       if (!user) throw new NotFoundError('User not found')
       const password_hash = await bcrypt.hash(req.body.password, 12)
-      // Also unlock account
-      await prisma.user.update({ where: { id: req.params.id }, data: { password_hash, failed_login_attempts: 0, locked_until: null } })
+      // Also unlock the account, and sign out every existing session of that user
+      await prisma.user.update({
+        where: { id: req.params.id },
+        data: { password_hash, failed_login_attempts: 0, locked_until: null, tokens_valid_after: new Date() },
+      })
+      await recordAudit({ userId: req.user.id, action: 'PASSWORD_RESET', entity: 'User', entityId: user.id, details: user.username })
       res.json({ success: true, message: 'Password reset successfully' })
     } catch (err) {
       next(err)

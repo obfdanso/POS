@@ -23,15 +23,15 @@ const salesRateLimit = rateLimit({
 })
 
 const saleValidation = [
-  body('items').isArray({ min: 1 }).withMessage('At least one item is required'),
+  body('items').isArray({ min: 1, max: 200 }).withMessage('A sale needs between 1 and 200 items'),
   body('items.*.product_id').isUUID().withMessage('Each item must have a valid product ID'),
-  body('items.*.quantity').isInt({ min: 1 }).withMessage('Each item quantity must be >= 1'),
-  body('items.*.discount').optional().isFloat({ min: 0 }).withMessage('Item discount must be >= 0'),
+  body('items.*.quantity').isInt({ min: 1, max: 100000 }).withMessage('Each item quantity must be between 1 and 100000').toInt(),
+  body('items.*.discount').optional().isFloat({ min: 0, max: 1000000 }).withMessage('Item discount must be >= 0').toFloat(),
   body('payment_method')
     .isIn(['CASH', 'MOBILE_MONEY', 'CARD'])
     .withMessage('Payment method must be CASH, MOBILE_MONEY, or CARD'),
-  body('amount_paid').isFloat({ min: 0 }).withMessage('Amount paid must be >= 0'),
-  body('discount_amount').optional().isFloat({ min: 0 }).withMessage('Discount must be >= 0'),
+  body('amount_paid').isFloat({ min: 0, max: 1000000 }).withMessage('Amount paid must be between 0 and 1000000').toFloat(),
+  body('discount_amount').optional().isFloat({ min: 0, max: 1000000 }).withMessage('Discount must be >= 0').toFloat(),
   body('customer_id').optional({ nullable: true }).isUUID().withMessage('Customer ID must be a valid UUID'),
   body('reference')
     .if(body('payment_method').isIn(['MOBILE_MONEY', 'CARD']))

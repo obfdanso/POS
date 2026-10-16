@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken')
 const prisma = require('../utils/prismaClient')
 const { UnauthorizedError, ForbiddenError } = require('../utils/errors')
+const { issuedBeforeCutoff } = require('../services/authService')
 
 async function authenticate(req, res, next) {
   try {
@@ -21,12 +22,17 @@ async function authenticate(req, res, next) {
         full_name: true,
         role: true,
         is_active: true,
+        tokens_valid_after: true,
       },
     })
 
     if (!user || !user.is_active) {
       throw new UnauthorizedError('User not found or inactive')
     }
+    if (issuedBeforeCutoff(payload, user)) {
+      throw new UnauthorizedError('Session ended. Please sign in again.')
+    }
+    delete user.tokens_valid_after
 
     req.user = user
     next()

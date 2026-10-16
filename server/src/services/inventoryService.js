@@ -59,7 +59,7 @@ async function getLowStockCount() {
 
 async function getLowStock() {
   const rows = await prisma.$queryRaw`
-    SELECT p.id, p.name, p.sku, p.quantity, p.low_stock_threshold,
+    SELECT p.id, p.name, p.sku, p.quantity, p.low_stock_threshold, p.price,
            json_build_object('id', c.id, 'name', c.name) as category
     FROM "Product" p
     JOIN "Category" c ON c.id = p.category_id

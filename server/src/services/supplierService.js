@@ -73,7 +73,7 @@ async function updateSupplier(id, { name, phone, email, address, website }) {
   })
 }
 
-async function deleteSupplier(id) {
+async function deleteSupplier(id, userId) {
   const supplier = await prisma.supplier.findUnique({
     where: { id },
     include: { _count: { select: { products: { where: { is_active: true } } } } },
@@ -84,7 +84,12 @@ async function deleteSupplier(id) {
       `Cannot delete supplier "${supplier.name}" — it is linked to ${supplier._count.products} active product(s). Reassign products first.`
     )
   }
-  await prisma.supplier.delete({ where: { id } })
+  await prisma.$transaction([
+    prisma.supplier.delete({ where: { id } }),
+    prisma.auditLog.create({
+      data: { user_id: userId, action: 'SUPPLIER_DELETED', entity: 'Supplier', entity_id: id, details: supplier.name },
+    }),
+  ])
   return true
 }
 

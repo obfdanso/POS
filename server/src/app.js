@@ -21,6 +21,12 @@ const supplierRoutes = require('./routes/suppliers')
 
 const app = express()
 
+// Behind a reverse proxy (nginx, Caddy, …) set TRUST_PROXY=1 so req.ip is the client's
+// address, not the proxy's; rate limits and the auth log depend on it
+if (process.env.TRUST_PROXY) {
+  app.set('trust proxy', Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY)
+}
+
 // Security headers
 app.use(helmet())
 

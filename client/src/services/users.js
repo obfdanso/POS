@@ -2,6 +2,7 @@ import api from './api'
 
 export const usersService = {
   list: (params) => api.get('/users', { params }),
+  staff: () => api.get('/users/staff'),
   get: (id) => api.get(`/users/${id}`),
   create: (data) => api.post('/users', data),
   update: (id, data) => api.put(`/users/${id}`, data),

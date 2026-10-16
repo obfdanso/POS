@@ -130,7 +130,7 @@ cd server && npm test     # Jest + Supertest integration tests (uses the databas
 cd client && npm test     # Vitest component and utility tests
 ```
 
-The backend tests cover authentication, account lockout and token rotation; sales (cash, mobile money, discounts, concurrent sales, refunds); inventory (restock, adjustments, concurrency); and request validation. They create and delete their own data, and mock Paystack.
+131 backend tests cover every module: auth (lockout, token rotation), sales (payments, discounts, concurrent sales, refunds), inventory, products, customers, suppliers, reports (exact totals), users, and settings. Services have about 88% line coverage. The tests create and delete their own data, run one file at a time, and mock Paystack.
 
 ---
 

@@ -23,12 +23,15 @@ async function listSales(req, res, next) {
   try {
     const page = parseInt(req.query.page) || 1
     const per_page = parseInt(req.query.per_page) || 20
-    const { start_date, end_date, customer_id, payment_status, search } = req.query
+    const { start_date, end_date, customer_id, payment_status, payment_method, search } = req.query
 
     // Cashiers can only see their own sales
     const user_id = req.user.role === 'CASHIER' ? req.user.id : req.query.user_id
 
-    const result = await salesService.listSales({ page, per_page, start_date, end_date, user_id, customer_id, payment_status, search })
+    const result = await salesService.listSales({
+      page, per_page, start_date, end_date, user_id, customer_id, payment_status, payment_method, search,
+      sort: req.query.sort, order: req.query.order,
+    })
     const sales = result.sales.map(({ _count, ...s }) => ({ ...s, items_count: _count?.sale_items ?? 0 }))
     res.json({
       success: true,

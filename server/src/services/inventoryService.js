@@ -1,7 +1,16 @@
 const prisma = require('../utils/prismaClient')
+const { buildOrderBy } = require('../middleware/sorting')
 const { NotFoundError, ValidationError } = require('../utils/errors')
 
-async function listInventory({ page = 1, per_page = 20, search, status } = {}) {
+const INVENTORY_SORTS = {
+  name: (dir) => ({ name: dir }),
+  category: (dir) => [{ category: { name: dir } }, { name: 'asc' }],
+  quantity: (dir) => ({ quantity: dir }),
+  low_stock_threshold: (dir) => ({ low_stock_threshold: dir }),
+  price: (dir) => ({ price: dir }),
+}
+
+async function listInventory({ page = 1, per_page = 20, search, status, sort, order } = {}) {
   const skip = (page - 1) * per_page
   const take = Math.min(per_page, 100)
 
@@ -31,7 +40,7 @@ async function listInventory({ page = 1, per_page = 20, search, status } = {}) {
         category: { select: { id: true, name: true } },
         updated_at: true,
       },
-      orderBy: { name: 'asc' },
+      orderBy: buildOrderBy({ sort, order }, INVENTORY_SORTS, { name: 'asc' }),
     }),
     prisma.product.count({ where }),
   ])
@@ -131,6 +140,7 @@ async function getInventoryLog(productId, { page = 1, per_page = 20 } = {}) {
 }
 
 module.exports = {
+  INVENTORY_SORTS,
   listInventory,
   getLowStock,
   getLowStockCount,

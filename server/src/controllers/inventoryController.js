@@ -6,7 +6,7 @@ async function listInventory(req, res, next) {
     const per_page = parseInt(req.query.per_page) || 20
     const { search, status } = req.query
 
-    const result = await inventoryService.listInventory({ page, per_page, search, status })
+    const result = await inventoryService.listInventory({ page, per_page, search, status, sort: req.query.sort, order: req.query.order })
 
     res.json({
       success: true,

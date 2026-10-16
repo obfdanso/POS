@@ -1,7 +1,16 @@
 const prisma = require('../utils/prismaClient')
+const { buildOrderBy } = require('../middleware/sorting')
 const { NotFoundError, ConflictError } = require('../utils/errors')
 
-async function listCustomers({ page = 1, per_page = 20, search } = {}) {
+const CUSTOMER_SORTS = {
+  name: (dir) => ({ name: dir }),
+  phone: (dir) => ({ phone: { sort: dir, nulls: 'last' } }),
+  email: (dir) => ({ email: { sort: dir, nulls: 'last' } }),
+  loyalty_points: (dir) => ({ loyalty_points: dir }),
+  created_at: (dir) => ({ created_at: dir }),
+}
+
+async function listCustomers({ page = 1, per_page = 20, search, sort, order } = {}) {
   const skip = (page - 1) * per_page
   const take = Math.min(per_page, 100)
 
@@ -19,7 +28,7 @@ async function listCustomers({ page = 1, per_page = 20, search } = {}) {
       where,
       skip,
       take,
-      orderBy: { name: 'asc' },
+      orderBy: buildOrderBy({ sort, order }, CUSTOMER_SORTS, { name: 'asc' }),
       include: { _count: { select: { sales: true } } },
     }),
     prisma.customer.count({ where }),
@@ -136,4 +145,4 @@ async function getCustomerPurchases(id, { page = 1, per_page = 20 } = {}) {
   return { sales, total, page, per_page: take, total_pages: Math.ceil(total / take) }
 }
 
-module.exports = { listCustomers, getCustomerById, createCustomer, updateCustomer, getCustomerPurchases }
+module.exports = { CUSTOMER_SORTS, listCustomers, getCustomerById, createCustomer, updateCustomer, getCustomerPurchases }

@@ -4,6 +4,9 @@ const rateLimit = require('express-rate-limit')
 const salesController = require('../controllers/salesController')
 const { authenticate, authorize } = require('../middleware/auth')
 const validate = require('../middleware/validate')
+const exactBody = require('../middleware/exactBody')
+const { sortRules } = require('../middleware/sorting')
+const { SALE_SORTS } = require('../services/salesService')
 
 const router = express.Router()
 
@@ -38,7 +41,7 @@ const saleValidation = [
   body('notes').optional().trim().isLength({ max: 500 }).withMessage('Notes must be 500 characters or fewer'),
 ]
 
-router.post('/', salesRateLimit, saleValidation, validate, salesController.createSale)
+router.post('/', salesRateLimit, exactBody(saleValidation), validate, salesController.createSale)
 const listSalesValidation = [
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be >= 1'),
   query('per_page').optional().isInt({ min: 1, max: 100 }).withMessage('Per page must be 1-100'),
@@ -47,7 +50,9 @@ const listSalesValidation = [
   query('user_id').optional().isUUID().withMessage('Invalid user ID'),
   query('customer_id').optional().isUUID().withMessage('Invalid customer ID'),
   query('payment_status').optional().isIn(['COMPLETED', 'REFUNDED', 'PENDING']).withMessage('Invalid payment status'),
+  query('payment_method').optional().isIn(['CASH', 'MOBILE_MONEY', 'CARD']).withMessage('Invalid payment method'),
   query('search').optional().trim().isLength({ max: 50 }),
+  ...sortRules(Object.keys(SALE_SORTS)),
 ]
 
 router.get('/', listSalesValidation, validate, salesController.listSales)

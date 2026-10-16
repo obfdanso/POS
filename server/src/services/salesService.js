@@ -1,4 +1,5 @@
 const prisma = require('../utils/prismaClient')
+const { buildOrderBy } = require('../middleware/sorting')
 const { NotFoundError, ValidationError, AppError } = require('../utils/errors')
 const { verifyPaystackPayment } = require('../utils/paystack')
 const { logger } = require('../middleware/logger')
@@ -235,7 +236,17 @@ async function getSaleById(id) {
   return sale
 }
 
-async function listSales({ page = 1, per_page = 20, start_date, end_date, user_id, customer_id, payment_status, search } = {}) {
+const SALE_SORTS = {
+  created_at: (dir) => ({ created_at: dir }),
+  transaction_id: (dir) => ({ transaction_id: dir }),
+  total_amount: (dir) => ({ total_amount: dir }),
+  payment_method: (dir) => [{ payment_method: dir }, { created_at: 'desc' }],
+  payment_status: (dir) => [{ payment_status: dir }, { created_at: 'desc' }],
+  cashier: (dir) => [{ user: { full_name: dir } }, { created_at: 'desc' }],
+  customer: (dir) => [{ customer: { name: dir } }, { created_at: 'desc' }],
+}
+
+async function listSales({ page = 1, per_page = 20, start_date, end_date, user_id, customer_id, payment_status, payment_method, search, sort, order } = {}) {
   const skip = (page - 1) * per_page
   const take = Math.min(per_page, 100)
 
@@ -244,6 +255,7 @@ async function listSales({ page = 1, per_page = 20, start_date, end_date, user_i
   if (user_id) where.user_id = user_id
   if (customer_id) where.customer_id = customer_id
   if (payment_status) where.payment_status = payment_status
+  if (payment_method) where.payment_method = payment_method
   if (search) where.transaction_id = { contains: search.trim(), mode: 'insensitive' }
 
   const [sales, total] = await Promise.all([
@@ -256,7 +268,7 @@ async function listSales({ page = 1, per_page = 20, start_date, end_date, user_i
         customer: { select: { id: true, name: true } },
         _count: { select: { sale_items: true } },
       },
-      orderBy: { created_at: 'desc' },
+      orderBy: buildOrderBy({ sort, order }, SALE_SORTS, { created_at: 'desc' }),
     }),
     prisma.sale.count({ where }),
   ])
@@ -354,4 +366,4 @@ async function getNumericSetting(key, defaultValue) {
   return isNaN(val) ? defaultValue : val
 }
 
-module.exports = { createSale, getSaleById, listSales, processRefund, getReceiptData }
+module.exports = { SALE_SORTS, createSale, getSaleById, listSales, processRefund, getReceiptData }

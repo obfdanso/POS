@@ -4,6 +4,7 @@ const rateLimit = require('express-rate-limit')
 const authController = require('../controllers/authController')
 const { authenticate } = require('../middleware/auth')
 const validate = require('../middleware/validate')
+const exactBody = require('../middleware/exactBody')
 
 const router = express.Router()
 
@@ -56,11 +57,11 @@ const profileValidation = [
   body('email').optional().isEmail().normalizeEmail().withMessage('Valid email is required'),
 ]
 
-router.post('/login', authLimiter, loginValidation, validate, authController.login)
+router.post('/login', authLimiter, exactBody(loginValidation), validate, authController.login)
 router.post('/logout', authenticate, authController.logout)
 router.post('/refresh', refreshLimiter, authController.refresh)
 router.get('/me', authenticate, authController.getMe)
-router.post('/change-password', authenticate, changePasswordValidation, validate, authController.changePassword)
-router.put('/profile', authenticate, profileValidation, validate, authController.updateProfile)
+router.post('/change-password', authenticate, exactBody(changePasswordValidation), validate, authController.changePassword)
+router.put('/profile', authenticate, exactBody(profileValidation), validate, authController.updateProfile)
 
 module.exports = router

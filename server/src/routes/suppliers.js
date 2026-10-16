@@ -3,6 +3,7 @@ const { body, param } = require('express-validator')
 const supplierController = require('../controllers/supplierController')
 const { authenticate, authorize } = require('../middleware/auth')
 const validate = require('../middleware/validate')
+const exactBody = require('../middleware/exactBody')
 const paginationRules = require('../middleware/pagination')
 
 const router = express.Router()
@@ -24,8 +25,8 @@ router.get('/', paginationRules, validate, supplierController.listSuppliers)
 router.get('/:id', idRule, validate, supplierController.getSupplier)
 
 // Only ADMIN and MANAGER can create/update/delete
-router.post('/', authorize(['ADMIN', 'MANAGER']), supplierValidation, validate, supplierController.createSupplier)
-router.put('/:id', authorize(['ADMIN', 'MANAGER']), idRule, supplierValidation, validate, supplierController.updateSupplier)
+router.post('/', authorize(['ADMIN', 'MANAGER']), exactBody(supplierValidation), validate, supplierController.createSupplier)
+router.put('/:id', authorize(['ADMIN', 'MANAGER']), idRule, exactBody(supplierValidation), validate, supplierController.updateSupplier)
 router.delete('/:id', authorize(['ADMIN']), idRule, validate, supplierController.deleteSupplier)
 
 module.exports = router

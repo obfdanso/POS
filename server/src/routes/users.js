@@ -2,6 +2,7 @@ const express = require('express')
 const { body, param } = require('express-validator')
 const { authenticate, authorize } = require('../middleware/auth')
 const validate = require('../middleware/validate')
+const exactBody = require('../middleware/exactBody')
 const prisma = require('../utils/prismaClient')
 const bcrypt = require('bcrypt')
 const { NotFoundError, ConflictError, ValidationError } = require('../utils/errors')
@@ -9,6 +10,21 @@ const { NotFoundError, ConflictError, ValidationError } = require('../utils/erro
 const router = express.Router()
 
 router.use(authenticate)
+
+// Minimal staff directory (names only) so managers can filter sales by cashier
+router.get('/staff', authorize(['ADMIN', 'MANAGER']), async (req, res, next) => {
+  try {
+    const staff = await prisma.user.findMany({
+      select: { id: true, full_name: true, role: true },
+      orderBy: { full_name: 'asc' },
+    })
+    res.json({ success: true, data: staff })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// Everything below is user management, which is ADMIN-only
 router.use(authorize(['ADMIN']))
 
 // List all users
@@ -32,13 +48,13 @@ router.get('/', async (req, res, next) => {
 // Create user
 router.post(
   '/',
-  [
+  exactBody([
     body('username').notEmpty().trim().withMessage('Username is required'),
     body('email').isEmail().withMessage('Valid email required'),
     body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
     body('full_name').notEmpty().trim().withMessage('Full name is required'),
     body('role').isIn(['ADMIN', 'MANAGER', 'CASHIER']).withMessage('Valid role required'),
-  ],
+  ]),
   validate,
   async (req, res, next) => {
     try {
@@ -68,10 +84,12 @@ router.put(
   '/:id',
   [
     param('id').isUUID(),
-    body('role').optional().isIn(['ADMIN', 'MANAGER', 'CASHIER']),
-    body('is_active').optional().isBoolean(),
-    body('full_name').optional().notEmpty().trim(),
-    body('email').optional().isEmail(),
+    ...exactBody([
+      body('role').optional().isIn(['ADMIN', 'MANAGER', 'CASHIER']).withMessage('Valid role required'),
+      body('is_active').optional().isBoolean().withMessage('is_active must be true or false'),
+      body('full_name').optional().trim().notEmpty().withMessage('Full name cannot be empty'),
+      body('email').optional().isEmail().withMessage('Valid email required'),
+    ]),
   ],
   validate,
   async (req, res, next) => {
@@ -101,7 +119,7 @@ router.put(
 // Reset password
 router.post(
   '/:id/reset-password',
-  [param('id').isUUID(), body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters')],
+  [param('id').isUUID(), ...exactBody([body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters')])],
   validate,
   async (req, res, next) => {
     try {

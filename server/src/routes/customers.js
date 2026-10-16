@@ -3,7 +3,10 @@ const { body, param, query } = require('express-validator')
 const customerController = require('../controllers/customerController')
 const { authenticate, authorize } = require('../middleware/auth')
 const validate = require('../middleware/validate')
+const exactBody = require('../middleware/exactBody')
 const paginationRules = require('../middleware/pagination')
+const { sortRules } = require('../middleware/sorting')
+const { CUSTOMER_SORTS } = require('../services/customerService')
 
 const router = express.Router()
 
@@ -24,16 +27,16 @@ function customerValidation({ nameRequired }) {
 
 router.get(
   '/',
-  [...paginationRules, query('search').optional().trim()],
+  [...paginationRules, ...sortRules(Object.keys(CUSTOMER_SORTS)), query('search').optional().trim()],
   validate,
   customerController.listCustomers
 )
 router.get('/:id', authorize(['ADMIN', 'MANAGER', 'CASHIER']), param('id').isUUID().withMessage('Invalid customer ID'), validate, customerController.getCustomer)
-router.post('/', authorize(['ADMIN', 'MANAGER', 'CASHIER']), customerValidation({ nameRequired: true }), validate, customerController.createCustomer)
+router.post('/', authorize(['ADMIN', 'MANAGER', 'CASHIER']), exactBody(customerValidation({ nameRequired: true })), validate, customerController.createCustomer)
 router.put(
   '/:id',
   authorize(['ADMIN', 'MANAGER']),
-  [param('id').isUUID().withMessage('Invalid customer ID'), ...customerValidation({ nameRequired: false })],
+  [param('id').isUUID().withMessage('Invalid customer ID'), ...exactBody(customerValidation({ nameRequired: false }))],
   validate,
   customerController.updateCustomer
 )

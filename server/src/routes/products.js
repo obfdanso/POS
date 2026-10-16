@@ -6,6 +6,9 @@ const fs = require('fs')
 const productController = require('../controllers/productController')
 const { authenticate, authorize } = require('../middleware/auth')
 const validate = require('../middleware/validate')
+const exactBody = require('../middleware/exactBody')
+const { sortRules } = require('../middleware/sorting')
+const { PRODUCT_SORTS } = require('../services/productService')
 const { ValidationError } = require('../utils/errors')
 
 const router = express.Router()
@@ -35,6 +38,7 @@ const upload = multer({
 const productValidation = [
   body('name').notEmpty().trim().withMessage('Name is required'),
   body('sku').notEmpty().trim().withMessage('SKU is required'),
+  body('barcode').optional({ values: 'falsy' }).trim().isLength({ max: 32 }).withMessage('Barcode must be 32 characters or fewer'),
   body('category_id').notEmpty().isUUID().withMessage('Valid category ID is required'),
   body('supplier_id').optional({ nullable: true, checkFalsy: true }).isUUID().withMessage('Valid supplier ID required'),
   body('price').isFloat({ min: 0.01 }).withMessage('Price must be greater than 0').toFloat(),
@@ -46,6 +50,7 @@ const productValidation = [
 
 const categoryValidation = [
   body('name').notEmpty().trim().withMessage('Category name is required'),
+  body('description').optional({ values: 'null' }).trim().isLength({ max: 255 }).withMessage('Description must be 255 characters or fewer'),
 ]
 
 // All routes require authentication
@@ -55,14 +60,14 @@ router.use(authenticate)
 router.get('/', listProductsValidation(), validate, productController.listProducts)
 router.get('/barcode/:code', productController.getProductByBarcode)
 router.get('/:id', param('id').isUUID().withMessage('Invalid product ID'), validate, productController.getProduct)
-router.post('/', authorize(['ADMIN', 'MANAGER']), upload.single('image'), productValidation, validate, productController.createProduct)
-router.put('/:id', authorize(['ADMIN', 'MANAGER']), upload.single('image'), updateProductValidation(), validate, productController.updateProduct)
+router.post('/', authorize(['ADMIN', 'MANAGER']), upload.single('image'), exactBody(productValidation), validate, productController.createProduct)
+router.put('/:id', authorize(['ADMIN', 'MANAGER']), upload.single('image'), exactBody(updateProductValidation()), validate, productController.updateProduct)
 router.delete('/:id', authorize(['ADMIN']), param('id').isUUID().withMessage('Invalid product ID'), validate, productController.deleteProduct)
 
 // Category routes
 router.get('/categories/list', productController.listCategories)
-router.post('/categories', authorize(['ADMIN', 'MANAGER']), categoryValidation, validate, productController.createCategory)
-router.put('/categories/:id', authorize(['ADMIN', 'MANAGER']), param('id').isUUID().withMessage('Invalid category ID'), categoryValidation, validate, productController.updateCategory)
+router.post('/categories', authorize(['ADMIN', 'MANAGER']), exactBody(categoryValidation), validate, productController.createCategory)
+router.put('/categories/:id', authorize(['ADMIN', 'MANAGER']), param('id').isUUID().withMessage('Invalid category ID'), exactBody(categoryValidation), validate, productController.updateCategory)
 
 function listProductsValidation() {
   return [
@@ -70,6 +75,7 @@ function listProductsValidation() {
     query('per_page').optional().isInt({ min: 1, max: 100 }).withMessage('Per page must be 1-100'),
     query('category_id').optional().isUUID().withMessage('Invalid category ID'),
     query('status').optional().isIn(['active', 'inactive', 'all']).withMessage('Status must be active, inactive, or all'),
+    ...sortRules(Object.keys(PRODUCT_SORTS)),
   ]
 }
 
@@ -79,6 +85,9 @@ function updateProductValidation() {
     body('supplier_id').optional({ nullable: true, checkFalsy: true }).isUUID().withMessage('Valid supplier ID required'),
     body('name').optional().trim().notEmpty().withMessage('Name cannot be empty'),
     body('sku').optional().trim().notEmpty().withMessage('SKU cannot be empty'),
+    body('barcode').optional({ values: 'falsy' }).trim().isLength({ max: 32 }).withMessage('Barcode must be 32 characters or fewer'),
+    // Images are replaced by uploading a file; the body may only clear one
+    body('image_url').optional({ values: 'null' }).custom(() => false).withMessage('image_url can only be set to null'),
     body('category_id').optional().isUUID().withMessage('Valid category ID is required'),
     body('price').optional().isFloat({ min: 0.01 }).withMessage('Price must be > 0').toFloat(),
     body('cost_price').optional({ values: 'falsy' }).isFloat({ min: 0 }).withMessage('Cost price must be >= 0').toFloat(),

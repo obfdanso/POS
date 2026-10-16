@@ -1,8 +1,20 @@
 const prisma = require('../utils/prismaClient')
+const { buildOrderBy } = require('../middleware/sorting')
 const { NotFoundError, ConflictError, ForbiddenError } = require('../utils/errors')
 
 // status: 'active' (default), 'inactive', or 'all'
-async function listProducts({ page = 1, per_page = 20, search, category_id, status = 'active' } = {}) {
+const PRODUCT_SORTS = {
+  name: (dir) => ({ name: dir }),
+  sku: (dir) => ({ sku: dir }),
+  category: (dir) => [{ category: { name: dir } }, { name: 'asc' }],
+  price: (dir) => ({ price: dir }),
+  cost_price: (dir) => ({ cost_price: { sort: dir, nulls: 'last' } }),
+  quantity: (dir) => ({ quantity: dir }),
+  is_active: (dir) => ({ is_active: dir }),
+  created_at: (dir) => ({ created_at: dir }),
+}
+
+async function listProducts({ page = 1, per_page = 20, search, category_id, status = 'active', sort, order } = {}) {
   const skip = (page - 1) * per_page
   const take = Math.min(per_page, 100)
 
@@ -27,7 +39,7 @@ async function listProducts({ page = 1, per_page = 20, search, category_id, stat
         category: { select: { id: true, name: true } },
         supplier: { select: { id: true, name: true } },
       },
-      orderBy: { name: 'asc' },
+      orderBy: buildOrderBy({ sort, order }, PRODUCT_SORTS, { name: 'asc' }),
     }),
     prisma.product.count({ where }),
   ])
@@ -207,6 +219,7 @@ async function updateCategory(id, data) {
 }
 
 module.exports = {
+  PRODUCT_SORTS,
   listProducts,
   getProductById,
   getProductByBarcode,

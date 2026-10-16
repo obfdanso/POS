@@ -537,3 +537,28 @@ describe('PUT /api/products/:id — activation is admin-only', () => {
     expect(res.body.data.low_stock_threshold).toBe(12)
   })
 })
+
+describe('Request hardening', () => {
+  it('rejects fields an endpoint does not accept', async () => {
+    const res = await request(app)
+      .post('/api/customers')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ name: 'Field Check', loyalty_points: 5000 })
+    expect(res.status).toBe(422)
+    expect(res.body.error.details).toEqual([{ field: 'loyalty_points', message: 'Unexpected field "loyalty_points"' }])
+  })
+
+  it('rejects unknown sort fields', async () => {
+    const res = await request(app).get('/api/sales?sort=password').set('Authorization', `Bearer ${managerToken}`)
+    expect(res.status).toBe(422)
+  })
+
+  it('sorts sales by total, highest first', async () => {
+    const res = await request(app)
+      .get('/api/sales?sort=total_amount&order=desc&per_page=50')
+      .set('Authorization', `Bearer ${managerToken}`)
+    expect(res.status).toBe(200)
+    const totals = res.body.data.map((s) => parseFloat(s.total_amount))
+    expect(totals).toEqual([...totals].sort((a, b) => b - a))
+  })
+})

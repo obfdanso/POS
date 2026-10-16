@@ -5,7 +5,7 @@ async function listCustomers(req, res, next) {
     const page = parseInt(req.query.page) || 1
     const per_page = parseInt(req.query.per_page) || 20
     const { search } = req.query
-    const result = await customerService.listCustomers({ page, per_page, search })
+    const result = await customerService.listCustomers({ page, per_page, search, sort: req.query.sort, order: req.query.order })
     res.json({
       success: true,
       data: result.customers,

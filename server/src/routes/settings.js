@@ -2,6 +2,7 @@ const express = require('express')
 const { body } = require('express-validator')
 const { authenticate, authorize } = require('../middleware/auth')
 const validate = require('../middleware/validate')
+const exactBody = require('../middleware/exactBody')
 const prisma = require('../utils/prismaClient')
 
 const router = express.Router()
@@ -45,7 +46,7 @@ router.get('/', async (req, res, next) => {
   }
 })
 
-router.put('/', authorize(['ADMIN']), settingsValidation, validate, async (req, res, next) => {
+router.put('/', authorize(['ADMIN']), exactBody(settingsValidation), validate, async (req, res, next) => {
   try {
     const allowed = Object.keys(DEFAULT_SETTINGS)
     const updates = Object.entries(req.body).filter(([k]) => allowed.includes(k))

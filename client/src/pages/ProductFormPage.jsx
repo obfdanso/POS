@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import { DashboardLayout } from '../layouts/DashboardLayout'
 import { Button } from '../components/Button'
 import { Input } from '../components/Input'
+import { Modal } from '../components/Modal'
 import { productsService } from '../services/products'
 import { useSettings } from '../context/SettingsContext'
 import api from '../services/api'
@@ -20,6 +21,10 @@ export default function ProductFormPage() {
   const canToggleActive = user?.role === 'ADMIN'
 
   const [categories, setCategories] = useState([])
+  // null when closed; { name, description } while the New category dialog is open
+  const [newCategory, setNewCategory] = useState(null)
+  const [newCategoryError, setNewCategoryError] = useState('')
+  const [isCreatingCategory, setIsCreatingCategory] = useState(false)
   const [suppliers, setSuppliers] = useState([])
   const [isLoadingProduct, setIsLoadingProduct] = useState(isEditing)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -76,6 +81,27 @@ export default function ProductFormPage() {
       .catch(() => { toast.error('Failed to load product'); navigate('/products') })
       .finally(() => setIsLoadingProduct(false))
   }, [id, isEditing, navigate])
+
+  async function handleCreateCategory(e) {
+    e.preventDefault()
+    if (!newCategory.name.trim()) { setNewCategoryError('Category name is required'); return }
+    setIsCreatingCategory(true)
+    try {
+      const res = await productsService.createCategory({
+        name: newCategory.name.trim(),
+        description: newCategory.description.trim() || null,
+      })
+      const created = res.data.data
+      setCategories((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)))
+      setField('category_id', created.id)
+      setNewCategory(null)
+      toast.success(`Category "${created.name}" created`)
+    } catch (err) {
+      setNewCategoryError(getFieldErrors(err).name ?? getErrorMessage(err, 'Failed to create category'))
+    } finally {
+      setIsCreatingCategory(false)
+    }
+  }
 
   function setField(key, value) {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -236,8 +262,18 @@ export default function ProductFormPage() {
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">Category *</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label htmlFor="product-category" className="text-sm font-medium text-gray-700 dark:text-gray-300">Category *</label>
+                  <button
+                    type="button"
+                    onClick={() => { setNewCategory({ name: '', description: '' }); setNewCategoryError('') }}
+                    className="text-xs font-medium text-primary-600 hover:text-primary-700"
+                  >
+                    + New category
+                  </button>
+                </div>
                 <select
+                  id="product-category"
                   value={form.category_id}
                   onChange={(e) => setField('category_id', e.target.value)}
                   className={`block w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition bg-white dark:bg-gray-800 dark:text-gray-100 dark:border-gray-700
@@ -413,6 +449,31 @@ export default function ProductFormPage() {
           </div>
         </form>
       </div>
+
+      <Modal isOpen={newCategory !== null} onClose={() => setNewCategory(null)} title="New category" size="sm">
+        {newCategory && (
+          <form onSubmit={handleCreateCategory} className="space-y-4" noValidate>
+            <Input
+              label="Name *"
+              value={newCategory.name}
+              onChange={(e) => { setNewCategory((c) => ({ ...c, name: e.target.value })); setNewCategoryError('') }}
+              error={newCategoryError}
+              placeholder="e.g. Frozen Foods"
+              autoFocus
+            />
+            <Input
+              label="Description"
+              value={newCategory.description}
+              onChange={(e) => setNewCategory((c) => ({ ...c, description: e.target.value }))}
+              placeholder="Optional"
+            />
+            <div className="flex justify-end gap-3">
+              <Button type="button" variant="secondary" onClick={() => setNewCategory(null)} disabled={isCreatingCategory}>Cancel</Button>
+              <Button type="submit" isLoading={isCreatingCategory}>Create category</Button>
+            </div>
+          </form>
+        )}
+      </Modal>
     </DashboardLayout>
   )
 }

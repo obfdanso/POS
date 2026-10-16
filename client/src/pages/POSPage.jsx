@@ -5,6 +5,7 @@ import { productsService } from '../services/products'
 import { salesService } from '../services/sales'
 import { customersService } from '../services/customers'
 import { formatCurrency } from '../utils/formatCurrency'
+import { lineTotal, round2 } from '../utils/saleTotals'
 import { Button } from '../components/Button'
 import { Input } from '../components/Input'
 import { Modal } from '../components/Modal'
@@ -234,7 +235,7 @@ function CustomerModal({ isOpen, onClose, onSelect }) {
 
 // ─── Cart Item Row ─────────────────────────────────────────────────────────────
 function CartItem({ item, fmt, onUpdate, onRemove, onDiscountChange }) {
-  const lineGross = item.price * item.quantity
+  const lineGross = round2(parseFloat(item.price) * item.quantity)
   const clampQty = (q) => Math.min(Math.max(q, 1), item.quantity_available)
   return (
     <div className="py-2.5 border-b border-gray-100 dark:border-gray-800 last:border-0">
@@ -302,7 +303,7 @@ function CartItem({ item, fmt, onUpdate, onRemove, onDiscountChange }) {
 
         {/* Line total */}
         <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 min-w-[70px] text-right">
-          {fmt(lineGross - (item.discount || 0))}
+          {fmt(lineTotal(item.price, item.quantity, item.discount))}
         </p>
       </div>
     </div>
@@ -410,29 +411,33 @@ export default function POSPage() {
         e.preventDefault()
         if (items.length > 0 && !anyModalOpen) setShowClearConfirm(true)
       }
-      // Enter = confirm the active action (clear-cart confirmation dialog)
-      if (e.key === 'Enter' && showClearConfirm) {
-        e.preventDefault()
-        clearCart()
-        setShowClearConfirm(false)
-        toast.success('Cart cleared')
-        searchRef.current?.focus()
-      }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [items.length, anyModalOpen, showClearConfirm, clearCart])
+  }, [items.length, anyModalOpen])
 
   // Barcode scanner detection when focus is outside any input: rapid keystrokes ending with Enter.
   // (When the search box is focused, its own Enter handler resolves the code.)
+  // Registered once; current state is read through refs so the buffer's reset timer survives re-renders.
+  const addByCodeRef = useRef(addByCode)
+  addByCodeRef.current = addByCode
+  const scanBlockedRef = useRef(false)
+  // A scan may start the next sale while the receipt is still showing; other dialogs block scans
+  scanBlockedRef.current = showPaymentModal || showCustomerModal || showClearConfirm
+  const receiptOpenRef = useRef(false)
+  receiptOpenRef.current = showReceiptModal
+
   useEffect(() => {
     function onKeyDown(e) {
-      if (isTypingTarget(e.target) || anyModalOpen) return
+      if (isTypingTarget(e.target) || scanBlockedRef.current) return
       if (e.key === 'Enter' && barcodeBufferRef.current.length >= 6) {
+        // The Enter belongs to the scan, so it must not also activate the focused button
+        e.preventDefault()
         const barcode = barcodeBufferRef.current
         barcodeBufferRef.current = ''
         clearTimeout(barcodeTimerRef.current)
-        addByCode(barcode)
+        if (receiptOpenRef.current) setShowReceiptModal(false)
+        addByCodeRef.current(barcode)
         return
       }
       if (e.key.length === 1) {
@@ -443,7 +448,7 @@ export default function POSPage() {
     }
     document.addEventListener('keydown', onKeyDown)
     return () => { document.removeEventListener('keydown', onKeyDown); clearTimeout(barcodeTimerRef.current) }
-  }, [addByCode, anyModalOpen])
+  }, [])
 
   // Product grid: debounced search, or browse by category when the search box is empty
   useEffect(() => {
@@ -475,7 +480,11 @@ export default function POSPage() {
     if (e.key !== 'Enter') return
     e.preventDefault()
     const code = searchQuery
-    if (await addByCode(code)) setSearchQuery('')
+    if (!code.trim()) return
+    setSearchQuery('')
+    const added = await addByCode(code)
+    // Put an unrecognised code back so it can be corrected, unless the cashier has moved on
+    if (!added) setSearchQuery((current) => current || code)
   }
 
   async function handlePaymentConfirm({ payment_method, amount_paid, reference }) {
@@ -858,6 +867,7 @@ export default function POSPage() {
             className="flex-1"
             onClick={() => { clearCart(); setShowClearConfirm(false); toast.success('Cart cleared'); searchRef.current?.focus() }}
             title="Enter"
+            autoFocus
           >
             Clear Cart (Enter)
           </Button>

@@ -32,6 +32,7 @@
 | `is_active` | Boolean | Default `true`. Inactive users can't log in |
 | `failed_login_attempts` | Int | Default 0 |
 | `locked_until` | DateTime? | `NULL` = not locked (see *Account lockout*) |
+| `tokens_valid_after` | DateTime? | Sessions issued earlier are rejected. Set on password change or reset |
 
 ### Category
 | Column | Type | Notes |
@@ -87,6 +88,7 @@
 | `payment_method` | PaymentMethod | |
 | `payment_status` | PaymentStatus | Default `COMPLETED`, `REFUNDED` after a refund |
 | `notes` | String? | |
+| `loyalty_points_earned` | Int | Points awarded for this sale, so a refund reverses exactly that |
 
 All amounts have `CHECK >= 0`. Indexed on `transaction_id` and `created_at`.
 
@@ -98,6 +100,7 @@ All amounts have `CHECK >= 0`. Indexed on `transaction_id` and `created_at`.
 | `product_id` | UUID FK | → Product, `ON DELETE RESTRICT` |
 | `quantity` | Int | `CHECK > 0` |
 | `unit_price` | Decimal(10,2) | Price **at the time of sale** |
+| `unit_cost` | Decimal(10,2)? | Cost price at the time of sale (used by the profit report) |
 | `discount` | Decimal(10,2) | Line discount, default 0 |
 | `total` | Decimal(10,2) | unit_price × quantity − discount |
 
@@ -109,7 +112,7 @@ All amounts have `CHECK >= 0`. Indexed on `transaction_id` and `created_at`.
 | `method` | PaymentMethod | |
 | `amount_paid` | Decimal(10,2) | `CHECK >= 0` |
 | `change_given` | Decimal(10,2) | Cash only, default 0, `CHECK >= 0` |
-| `reference` | String? | Paystack reference for mobile money and card |
+| `reference` | String? | Paystack reference for mobile money and card. **Unique**, so one payment can't pay for two sales |
 
 ### InventoryLog
 One row for every stock change.
@@ -132,6 +135,17 @@ One row for every stock change.
 | `event_type` | String | `LOGIN_SUCCESS`, `LOGIN_FAILED`, `LOGIN_BLOCKED`, `ACCOUNT_LOCKED`, `ACCOUNT_UNLOCKED`, `LOGOUT`, `TOKEN_REFRESH` |
 | `ip_address`, `user_agent`, `details` | String? | |
 
+### AuditLog
+Who performed destructive or sensitive operations.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | |
+| `user_id` | UUID FK? | → User who acted, `ON DELETE SET NULL` |
+| `action` | String | `SALE_REFUNDED`, `PRODUCT_DEACTIVATED`, `PRODUCT_REACTIVATED`, `SUPPLIER_DELETED`, `SETTINGS_UPDATED`, `USER_CREATED`, `USER_UPDATED`, `PASSWORD_RESET` |
+| `entity` / `entity_id` | String / String? | What was changed, e.g. `Sale` + its id. Indexed |
+| `details` | String? | Human-readable summary, e.g. `TXN-20261016-0002 refunded (27.81 via CASH)` |
+
 ### Settings
 Key–value store, edited on the Settings page.
 
@@ -148,11 +162,12 @@ Key–value store, edited on the Settings page.
 ## Design decisions
 
 - **Soft-deleted products.** Deactivating sets `is_active = false`. `SaleItem.product_id` is `ON DELETE RESTRICT`, so a product with sales history can never be removed.
-- **Historical prices.** `SaleItem.unit_price` records the price when the sale happened, so later price changes don't rewrite old sales or reports.
+- **Historical prices.** `SaleItem.unit_price` and `unit_cost` record the price and cost when the sale happened, and `Sale.loyalty_points_earned` the points awarded, so later changes don't rewrite old sales, profit reports, or refunds.
 - **Atomic sales.** The sale, its items, the payment, stock deductions, inventory logs, and loyalty points are all written in one `prisma.$transaction`. Any failure rolls back everything.
 - **No overselling.** Stock is decremented with a conditional update (`WHERE quantity >= n`) inside the transaction, so two tills selling the last unit at the same moment can't both succeed. The `CHECK (quantity >= 0)` constraint is a final safety net.
 - **Safe refunds.** A refund flips the status with a conditional update, so even simultaneous refund requests restore stock exactly once.
-- **Account lockout.** The 5th consecutive failed login locks the account until an admin unlocks it (`POST /api/users/:id/unlock`, or resetting the password). If no admin can log in, run `npm run unlock-user -- <username>` on the server.
+- **Sign out everywhere.** Changing or resetting a password sets `User.tokens_valid_after`. Every access and refresh token issued before it stops working.
+- **Account lockout.** Failed attempts are counted with an atomic increment, so parallel guesses can't outrun the lock. The 5th consecutive failed login locks the account until an admin unlocks it (`POST /api/users/:id/unlock`, or resetting the password). If no admin can log in, run `npm run unlock-user -- <username>` on the server.
 - **Report queries** use SQL aggregation (`SUM`, `COUNT`, `GROUP BY`). The daily report uses `generate_series`, so days without sales appear as zero.
 
 ---

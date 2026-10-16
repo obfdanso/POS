@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { DashboardLayout } from '../layouts/DashboardLayout'
 import { useAuth } from '../hooks/useAuth'
 import toast from 'react-hot-toast'
-import api from '../services/api'
+import api, { setAccessToken } from '../services/api'
 
 // ─── Sub-components (mirrors SettingsPage style) ──────────────────────────────
 
@@ -101,9 +101,9 @@ export default function CashierProfilePage() {
 
   function validateProfile() {
     const errs = {}
-    if (profileForm.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(profileForm.email)) {
-      errs.email = 'Invalid email address'
-    }
+    if (!profileForm.full_name.trim()) errs.full_name = 'Full name is required'
+    if (!profileForm.email.trim()) errs.email = 'Email is required'
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(profileForm.email.trim())) errs.email = 'Invalid email address'
     return errs
   }
 
@@ -150,11 +150,13 @@ export default function CashierProfilePage() {
     setPwErrors({})
     setSavingPw(true)
     try {
-      await api.post('/auth/change-password', {
+      const res = await api.post('/auth/change-password', {
         current_password: pwForm.current_password,
         new_password: pwForm.new_password,
       })
-      toast.success('Password changed successfully')
+      // Every other session is signed out; this one continues with the fresh token
+      setAccessToken(res.data.data.accessToken)
+      toast.success('Password changed. Other devices have been signed out.')
       setPwForm({ current_password: '', new_password: '', confirm_password: '' })
     } catch (err) {
       toast.error(err.response?.data?.error?.message || 'Failed to change password')

@@ -188,14 +188,13 @@ describe('Auth', () => {
     await deleteTestUsers(`${PREFIX}3`)
   })
 
-  it('changing the password signs out other sessions but keeps this one', async () => {
+  it('changing the password signs out other sessions, even ones from the same second, but keeps this one', async () => {
     const victim = await createUserWithToken('CASHIER', `${PREFIX}4`)
     const otherDevice = await request(app).post('/api/auth/login').send({ username: `${PREFIX}4_cashier`, password: 'testpass123' })
     const otherCookie = otherDevice.headers['set-cookie']
     const otherAccess = otherDevice.body.data.accessToken
 
-    // Tokens carry one-second timestamps; make sure the change happens in a later second
-    await new Promise((r) => setTimeout(r, 1100))
+    // No delay: a session issued in the same second as the change must still be signed out
     const change = await request(app).post('/api/auth/change-password').set(auth(victim))
       .send({ current_password: 'testpass123', new_password: 'brandnew123' })
     expect(change.status).toBe(200)

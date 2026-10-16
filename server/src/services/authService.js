@@ -35,15 +35,18 @@ async function logAuthEvent(userId, eventType, ipAddress, userAgent, details) {
 /**
  * True when a token was issued before the user's session cut-off (set on password change/reset),
  * i.e. it belongs to a session that has been signed out everywhere.
- * JWT `iat` has one-second resolution, so tokens from the same second as the cut-off stay valid.
+ * Uses the millisecond `iat_ms` claim: JWT `iat` is whole seconds, and a one-second grace window
+ * would let a session that refreshes in a loop keep a token from the cut-off second and survive.
+ * Tokens without `iat_ms` (issued before this check existed) fall back to the start of their `iat` second.
  */
 function issuedBeforeCutoff(payload, user) {
   if (!user.tokens_valid_after) return false
-  return payload.iat < Math.floor(user.tokens_valid_after.getTime() / 1000)
+  const issuedAtMs = typeof payload.iat_ms === 'number' ? payload.iat_ms : payload.iat * 1000
+  return issuedAtMs < user.tokens_valid_after.getTime()
 }
 
 function generateAccessToken(userId, role) {
-  return jwt.sign({ userId, role }, process.env.JWT_ACCESS_SECRET, {
+  return jwt.sign({ userId, role, iat_ms: Date.now() }, process.env.JWT_ACCESS_SECRET, {
     expiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
   })
 }
@@ -51,7 +54,7 @@ function generateAccessToken(userId, role) {
 function generateRefreshToken(userId) {
   // A unique jwtid keeps rotated tokens distinct even when issued within the same second;
   // otherwise the "new" token equals the one just revoked and the session is lost
-  return jwt.sign({ userId }, process.env.JWT_REFRESH_SECRET, {
+  return jwt.sign({ userId, iat_ms: Date.now() }, process.env.JWT_REFRESH_SECRET, {
     expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
     jwtid: crypto.randomUUID(),
   })

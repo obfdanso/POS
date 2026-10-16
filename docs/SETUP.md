@@ -1,6 +1,6 @@
-# Setup Guide — QuickMart POS System
+# Setup Guide — QuickMart POS
 
-This guide covers everything needed to get the POS system running from scratch on a development machine.
+How to get the system running from scratch on a development machine, and what to change for production.
 
 ---
 
@@ -9,118 +9,82 @@ This guide covers everything needed to get the POS system running from scratch o
 | Requirement | Version | Notes |
 |---|---|---|
 | Node.js | 20+ | [nodejs.org](https://nodejs.org) |
-| npm | 10+ | Bundled with Node.js |
-| PostgreSQL | 15+ | [postgresql.org](https://www.postgresql.org) |
-| Git | Any | For cloning the repository |
-
-### Verify your environment
+| npm | 10+ | Comes with Node.js |
+| PostgreSQL | 15+ | [postgresql.org](https://www.postgresql.org). `pg_dump`/`pg_restore` must be on your PATH for backups |
+| Git | any | |
 
 ```bash
-node --version   # should be v20.x or higher
-npm --version    # should be v10.x or higher
-psql --version   # should be 15.x or higher
+node --version   # v20 or higher
+npm --version    # 10 or higher
+psql --version   # 15 or higher
 ```
 
 ---
 
-## 1. Clone the Repository
+## 1. Clone
 
 ```bash
 git clone <repo-url>
 cd pos-system
 ```
 
----
+## 2. Create the database
 
-## 2. Database Setup
-
-### Create the PostgreSQL database
+The simplest option is to use the `postgres` superuser and point `DATABASE_URL` at it:
 
 ```bash
-# Connect to PostgreSQL as the default superuser
-psql -U postgres
+createdb -U postgres pos_db
+```
 
-# Inside psql, create the database and a dedicated user
+To use a dedicated user instead, PostgreSQL 15+ needs two extra grants: one for the `public` schema, and `CREATEDB` for the temporary shadow database `prisma migrate dev` creates.
+
+```sql
+-- psql -U postgres
 CREATE DATABASE pos_db;
-CREATE USER pos_user WITH ENCRYPTED PASSWORD 'your_password_here';
+CREATE USER pos_user WITH ENCRYPTED PASSWORD 'choose-a-password';
+ALTER USER pos_user CREATEDB;
 GRANT ALL PRIVILEGES ON DATABASE pos_db TO pos_user;
-\q
+\c pos_db
+GRANT ALL ON SCHEMA public TO pos_user;
 ```
 
-Or use a single command if you have `createdb` in your PATH:
-
-```bash
-createdb pos_db
-```
-
----
-
-## 3. Backend Setup
+## 3. Backend
 
 ```bash
 cd server
 npm install
-```
-
-### Configure environment variables
-
-```bash
 cp .env.example .env
 ```
 
-Open `.env` and fill in your values:
+Edit `.env`. Every variable is described in [`server/.env.example`](../server/.env.example):
 
-```env
-# Database — replace with your credentials
-DATABASE_URL="postgresql://pos_user:your_password_here@localhost:5432/pos_db"
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | yes | `postgresql://USER:PASSWORD@localhost:5432/pos_db` |
+| `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` | yes | Two **different** 256-bit random strings (see below) |
+| `JWT_ACCESS_EXPIRES_IN` / `JWT_REFRESH_EXPIRES_IN` | no | Default `15m` / `7d` |
+| `PORT` | no | Default `3001` |
+| `NODE_ENV` | no | `development` or `production` |
+| `CORS_ORIGIN` | no | Frontend URL. Default `http://localhost:5173` |
+| `PAYSTACK_SECRET_KEY` | for card / MoMo | Paystack secret key (`sk_test_…` while testing) |
+| `TRUST_PROXY` | behind a proxy | Set to `1` behind nginx/Caddy so client IPs are correct |
 
-# JWT Secrets — generate strong random strings (see below)
-JWT_ACCESS_SECRET="replace-with-256-bit-random-string"
-JWT_REFRESH_SECRET="replace-with-different-256-bit-random-string"
-JWT_ACCESS_EXPIRES_IN="15m"
-JWT_REFRESH_EXPIRES_IN="7d"
-
-# Server
-PORT=3001
-NODE_ENV="development"
-
-# CORS — must match your frontend URL
-CORS_ORIGIN="http://localhost:5173"
-
-# Cookie domain
-COOKIE_DOMAIN="localhost"
-```
-
-**Generate secure JWT secrets:**
+Generate each JWT secret with:
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-Run this command twice — once for `JWT_ACCESS_SECRET` and once for `JWT_REFRESH_SECRET`.
+Store details, tax rate, loyalty rate, and currency symbol aren't environment variables. Admins set them on the **Settings** page.
 
-### Run database migrations
-
-```bash
-npx prisma migrate dev --name init
-```
-
-This creates all tables, indexes, and relationships defined in `prisma/schema.prisma`.
-
-### Seed the database
+Apply the migrations, then load the sample data:
 
 ```bash
-npx prisma db seed
+npx prisma migrate deploy   # applies every migration in prisma/migrations
+npx prisma db seed          # WIPES all tables, then loads sample data
 ```
 
-This populates the database with:
-- 3 users (one per role)
-- 6 categories
-- 50+ products with realistic prices and barcodes
-- 10 customers with Ghanaian names
-- 20 sample sales spread over the past 30 days
-
-**Default login credentials after seeding:**
+The seed creates 3 users, 6 categories, 25 suppliers, 52 products, 10 customers, and 20 sales from the last 30 days. See [DATABASE.md](DATABASE.md#seed-data).
 
 | Role | Username | Password |
 |---|---|---|
@@ -128,61 +92,81 @@ This populates the database with:
 | Manager | `manager` | `manager123` |
 | Cashier | `cashier` | `cashier123` |
 
-### Start the backend server
+Start the API:
 
 ```bash
 npm run dev
+curl http://localhost:3001/api/health   # {"success":true,"data":{"status":"ok",…}}
 ```
 
-The API will be available at `http://localhost:3001`. Check the health endpoint:
-
-```bash
-curl http://localhost:3001/api/health
-# {"success":true,"data":{"status":"ok",...}}
-```
-
----
-
-## 4. Frontend Setup
+## 4. Frontend
 
 ```bash
 cd ../client
 npm install
-npm run dev
+npm run dev     # http://localhost:5173
 ```
 
-The frontend will be available at `http://localhost:5173`.
+The Vite dev server proxies `/api`, `/uploads`, and `/product-images` to the backend on port 3001, so the browser only ever talks to port 5173.
+
+**Card and mobile money (optional).** Copy `client/.env.example` to `client/.env.local` and set `VITE_PAYSTACK_PUBLIC_KEY` (`pk_test_…`). It must come from the same Paystack account as `PAYSTACK_SECRET_KEY`. Restart `npm run dev` afterwards. Cash sales work without it.
+
+## 5. Check it works
+
+1. Open http://localhost:5173 and log in as `admin` / `admin123`.
+2. The dashboard shows today's revenue from the two seeded sales.
+3. Open **New Sale**, type `BEV-001`, press **Enter**, then **F2**, choose **Exact**, and press **Enter**. A receipt appears.
 
 ---
 
-## 5. Verify the Setup
+## Scripts
 
-1. Open `http://localhost:5173` in your browser.
-2. You will be redirected to `/login`.
-3. Log in with `admin` / `admin123`.
-4. You should land on the Dashboard with today's KPIs and charts populated from seed data.
+### Backend (`server/`)
+
+| Command | What it does |
+|---|---|
+| `npm run dev` | API with auto-restart (nodemon) |
+| `npm start` | API without auto-restart |
+| `npm test` | Jest + Supertest with coverage (see *Tests* below) |
+| `npm run lint` | ESLint |
+| `npm run db:migrate` | `prisma migrate dev`: create and apply a migration after editing `schema.prisma` |
+| `npm run db:seed` | Wipe and reload sample data |
+| `npm run db:studio` | Prisma Studio, a visual database browser |
+| `npm run db:backup` | `pg_dump` to `server/backups/pos_backup_<timestamp>.dump` |
+| `npm run db:restore -- --file <path>` | Restore a `.dump` or `.sql` backup (overwrites current data) |
+| `npm run unlock-user -- <username>` | Unlock an account from the server console, for when every admin is locked out |
+| `npm run clear-sales` | Delete all sales, payments, and sale inventory logs, put the sold stock back, and reset loyalty points |
+| `npm run import-images` | Copy `product-images/<SKU>.jpg` into uploads and link them to products |
+
+### Frontend (`client/`)
+
+| Command | What it does |
+|---|---|
+| `npm run dev` | Vite dev server on :5173 |
+| `npm run build` | Production build into `dist/` |
+| `npm run preview` | Serve the production build locally |
+| `npm test` | Vitest component tests |
+| `npm run lint` | ESLint |
+
+### Tests
+
+Backend tests are integration tests against the database in `server/.env`:
+
+- They create their own users, products, and customers, and delete them afterwards.
+- While they run, they set the tax rate to 0% and the loyalty rate to 10, and restore your values at the end.
+- Paystack is mocked, so no keys are needed.
+
+Avoid running them while someone is ringing up real sales on the same database.
 
 ---
 
-## Production Deployment Notes
+## Production notes
 
-### Environment differences
+- Set `NODE_ENV=production`. Refresh cookies become `secure` (HTTPS required), logs switch to JSON, and error responses stop including internal messages.
+- Set `CORS_ORIGIN` to the real frontend URL, and `TRUST_PROXY=1` behind a reverse proxy.
+- Build the frontend with `npm run build` and serve `client/dist/` as static files.
 
-Set `NODE_ENV=production` in the server's `.env`. This affects:
-- Cookie `secure` flag (requires HTTPS)
-- Morgan logging format
-- Error response verbosity (stack traces hidden)
-
-### Frontend build
-
-```bash
-cd client
-npm run build
-```
-
-The built assets are output to `client/dist/`. Serve them with Nginx, Caddy, or any static file server. Point the reverse proxy to the Express API for `/api/*` routes.
-
-### Example Nginx config snippet
+Example nginx config:
 
 ```nginx
 server {
@@ -192,12 +176,10 @@ server {
     root /path/to/client/dist;
     index index.html;
 
-    # Serve frontend SPA
     location / {
-        try_files $uri $uri/ /index.html;
+        try_files $uri $uri/ /index.html;   # single-page app routing
     }
 
-    # Proxy API requests to Express
     location /api/ {
         proxy_pass http://localhost:3001;
         proxy_set_header Host $host;
@@ -205,155 +187,63 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 
-    # Serve uploaded product images
-    location /uploads/ {
-        alias /path/to/server/uploads/;
-    }
+    location /uploads/        { proxy_pass http://localhost:3001; }
+    location /product-images/ { proxy_pass http://localhost:3001; }
 }
-```
-
----
-
-## Available Scripts
-
-### Backend (`server/`)
-
-| Script | Command | Description |
-|---|---|---|
-| Start (dev) | `npm run dev` | Start with nodemon (auto-restart) |
-| Start (prod) | `npm start` | Start without nodemon |
-| Run tests | `npm test` | Jest + Supertest with coverage |
-| Watch tests | `npm run test:watch` | Re-run on file change |
-| Migrations | `npm run db:migrate` | Run pending Prisma migrations |
-| Seed data | `npm run db:seed` | Populate database with sample data |
-| Studio | `npm run db:studio` | Open Prisma visual DB browser |
-| Backup | `npm run db:backup` | Create timestamped PostgreSQL dump |
-| Lint | `npm run lint` | ESLint check |
-
-### Frontend (`client/`)
-
-| Script | Command | Description |
-|---|---|---|
-| Dev server | `npm run dev` | Vite dev server at :5173 |
-| Build | `npm run build` | Production build to `dist/` |
-| Preview | `npm run preview` | Serve the production build locally |
-| Run tests | `npm test` | Vitest component tests |
-| Lint | `npm run lint` | ESLint check |
-
----
-
-## Database Backup & Restore
-
-### Create a backup
-
-```bash
-cd server
-npm run db:backup
-# Output: server/backups/pos_backup_2026-03-19T10-30-00.dump
-```
-
-### Restore a backup
-
-```bash
-pg_restore -d pos_db --clean --if-exists server/backups/pos_backup_2026-03-19T10-30-00.dump
 ```
 
 ---
 
 ## Troubleshooting
 
-### `Error: connect ECONNREFUSED 127.0.0.1:5432`
+**`ECONNREFUSED 127.0.0.1:5432` / `P1001: Can't reach database server`.** PostgreSQL isn't running, or `DATABASE_URL` is wrong.
+- Windows: run `Start-Service postgresql-x64-18` in an **admin** PowerShell. To start it automatically with Windows: `Set-Service postgresql-x64-18 -StartupType Automatic`.
+- macOS: `brew services start postgresql@15`. Linux: `sudo systemctl start postgresql`.
 
-PostgreSQL is not running. Start it:
+**`permission denied for schema public` during migrate.** Run the `GRANT ALL ON SCHEMA public` step from section 2.
 
-```bash
-# macOS (Homebrew)
-brew services start postgresql@15
+**Prisma says the schema is out of sync.** Run `npx prisma migrate deploy`.
 
-# Ubuntu/Debian
-sudo systemctl start postgresql
+**`EPERM: operation not permitted, rename … query_engine-windows.dll.node`.** Prisma is regenerating its client while the API server has the file open. Stop `npm run dev`, run `npx prisma generate`, then start it again.
 
-# Windows
-# Start "PostgreSQL" from Services (services.msc)
-```
+**Logged out after a few page reloads, or a `429` from `/api/auth/refresh`.** More than 60 refreshes per minute are coming from one IP. Behind a proxy, set `TRUST_PROXY=1`.
 
-### `Error: Invalid `prisma.user.findMany()` invocation`
+**An account is locked.** An admin can unlock it on the Users page. If no admin can log in: `npm run unlock-user -- admin`.
 
-The database schema is out of sync. Run:
+**CORS errors.** `CORS_ORIGIN` must exactly match the browser's URL, including the port, with no trailing slash.
 
-```bash
-npx prisma migrate dev
-```
+**`JsonWebTokenError: invalid signature`.** The JWT secrets changed after tokens were issued. Clear cookies and log in again.
 
-### `Error: P1001: Can't reach database server`
-
-Check that `DATABASE_URL` in `.env` has the correct username, password, host, port, and database name.
-
-### CORS errors in the browser
-
-Verify that `CORS_ORIGIN` in `server/.env` exactly matches the URL shown in your browser (including port). No trailing slash.
-
-### JWT errors (`JsonWebTokenError: invalid signature`)
-
-The `JWT_ACCESS_SECRET` or `JWT_REFRESH_SECRET` in `.env` has changed since tokens were issued. Clear browser cookies and log in again.
-
-### Prisma Studio shows no data after seeding
-
-Check the seeder output for errors:
-
-```bash
-cd server
-npx prisma db seed
-```
-
-If the seed fails midway, the transaction is rolled back. Fix the error and re-run.
+**The seed fails partway.** The seed doesn't use one transaction, so fix the error and run `npx prisma db seed` again; it starts by wiping every table.
 
 ---
 
-## Project Structure
+## Project structure
 
 ```
 pos-system/
-├── client/                    # React 18 + Vite frontend
+├── client/                     React 19 + Vite + Tailwind
+│   └── src/
+│       ├── components/         Button, Input, Modal, Table (sortable), Badge, Pagination,
+│       │                       Receipt (80mm print), InventoryHistoryModal, ErrorBoundary
+│       ├── pages/              Login, POS, Dashboard, Sales, Products, ProductForm, Inventory,
+│       │                       Customers, CustomerDetail, Reports, Users, Settings, Cashier*
+│       ├── layouts/            AuthLayout, DashboardLayout
+│       ├── context/            AuthContext, CartContext, SettingsContext
+│       ├── hooks/              useAuth
+│       ├── services/           Axios client (token refresh) + one file per API module
+│       └── utils/              formatCurrency, date, apiErrors
+├── server/                     Node.js + Express
 │   ├── src/
-│   │   ├── components/        # Button, Input, Modal, Table, Badge, Pagination
-│   │   ├── pages/             # LoginPage, POSPage, ProductsPage, InventoryPage, ...
-│   │   ├── layouts/           # AuthLayout, DashboardLayout
-│   │   ├── hooks/             # useAuth
-│   │   ├── context/           # AuthContext, CartContext, SettingsContext
-│   │   ├── services/          # Axios API clients per module
-│   │   ├── utils/             # formatCurrency
-│   │   └── App.jsx
-│   ├── tailwind.config.js
-│   └── package.json
-│
-├── server/                    # Node.js 20 + Express backend
-│   ├── src/
-│   │   ├── routes/            # auth, products, inventory, sales, customers, reports, users, settings
-│   │   ├── controllers/       # One controller file per module
-│   │   ├── services/          # Business logic per module
-│   │   ├── middleware/        # authenticate, authorize, validate, errorHandler, logger
-│   │   └── utils/             # prismaClient, generateTransactionId, errors
-│   ├── prisma/
-│   │   ├── schema.prisma      # All models, enums, relations, indexes
-│   │   ├── migrations/        # Auto-generated migration files
-│   │   └── seed.js            # Sample data seeder
-│   ├── scripts/
-│   │   └── backup.js          # Database backup script
-│   ├── .env.example
-│   └── package.json
-│
-└── docs/
-    ├── API.md                 # Full API endpoint reference
-    ├── DATABASE.md            # Schema and data model documentation
-    └── SETUP.md               # This file
+│   │   ├── routes/             auth, products, categories, suppliers, inventory, sales,
+│   │   │                       customers, reports, users, settings
+│   │   ├── controllers/        Request handlers, one per module
+│   │   ├── services/           Business logic, one per module
+│   │   ├── middleware/         auth, validate, exactBody, pagination, sorting, errorHandler, logger
+│   │   ├── utils/              prismaClient, errors, generateTransactionId, dateRange, paystack
+│   │   └── __tests__/          Jest + Supertest integration tests
+│   ├── prisma/                 schema.prisma, migrations/, seed.js
+│   ├── scripts/                backup, restore, unlock-user, clear-sales, import-product-images
+│   └── product-images/         Seed product photos, served at /product-images
+└── docs/                       API.md, DATABASE.md, SETUP.md, screenshots/
 ```
-
----
-
-## Further Reading
-
-- [API Reference](API.md) — All endpoints, request/response shapes, and error codes
-- [Database Schema](DATABASE.md) — Table definitions, relationships, and design decisions
-- [Prisma Documentation](https://www.prisma.io/docs) — ORM reference
-- [Tailwind CSS](https://tailwindcss.com/docs) — Utility class reference

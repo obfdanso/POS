@@ -11,7 +11,7 @@ const router = express.Router()
 router.use(authenticate)
 
 const supplierValidation = [
-  body('name').notEmpty().trim().isLength({ max: 150 }).withMessage('Supplier name is required (max 150 chars)'),
+  body('name').trim().notEmpty().isLength({ max: 150 }).withMessage('Supplier name is required (max 150 chars)'),
   body('phone').optional({ checkFalsy: true }).trim().isLength({ max: 30 }).withMessage('Phone too long'),
   body('email').optional({ checkFalsy: true }).isEmail().normalizeEmail().withMessage('Valid email required'),
   body('address').optional({ checkFalsy: true }).trim().isLength({ max: 255 }).withMessage('Address too long'),

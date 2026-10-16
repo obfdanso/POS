@@ -36,15 +36,15 @@ const upload = multer({
 })
 
 const productValidation = [
-  body('name').notEmpty().trim().withMessage('Name is required'),
-  body('sku').notEmpty().trim().withMessage('SKU is required'),
+  body('name').trim().notEmpty().withMessage('Name is required'),
+  body('sku').trim().notEmpty().withMessage('SKU is required'),
   body('barcode').optional({ values: 'falsy' }).trim().isLength({ max: 32 }).withMessage('Barcode must be 32 characters or fewer'),
   body('category_id').notEmpty().isUUID().withMessage('Valid category ID is required'),
   body('supplier_id').optional({ nullable: true, checkFalsy: true }).isUUID().withMessage('Valid supplier ID required'),
-  body('price').isFloat({ min: 0.01 }).withMessage('Price must be greater than 0').toFloat(),
-  body('cost_price').optional({ values: 'falsy' }).isFloat({ min: 0 }).withMessage('Cost price must be >= 0').toFloat(),
-  body('quantity').optional().isInt({ min: 0 }).withMessage('Quantity must be >= 0').toInt(),
-  body('low_stock_threshold').optional().isInt({ min: 0 }).withMessage('Threshold must be >= 0').toInt(),
+  body('price').isFloat({ min: 0.01, max: 1000000 }).withMessage('Price must be greater than 0').toFloat(),
+  body('cost_price').optional({ values: 'falsy' }).isFloat({ min: 0, max: 1000000 }).withMessage('Cost price must be between 0 and 1000000').toFloat(),
+  body('quantity').optional().isInt({ min: 0, max: 1000000 }).withMessage('Quantity must be between 0 and 1,000,000').toInt(),
+  body('low_stock_threshold').optional().isInt({ min: 0, max: 1000000 }).withMessage('Threshold must be between 0 and 1,000,000').toInt(),
   body('is_active').optional().isBoolean().withMessage('is_active must be true or false').toBoolean(),
 ]
 
@@ -81,10 +81,10 @@ function updateProductValidation() {
     // Images are replaced by uploading a file; the body may only clear one
     body('image_url').optional({ values: 'null' }).custom(() => false).withMessage('image_url can only be set to null'),
     body('category_id').optional().isUUID().withMessage('Valid category ID is required'),
-    body('price').optional().isFloat({ min: 0.01 }).withMessage('Price must be > 0').toFloat(),
-    body('cost_price').optional({ values: 'falsy' }).isFloat({ min: 0 }).withMessage('Cost price must be >= 0').toFloat(),
-    body('quantity').optional().isInt({ min: 0 }).withMessage('Quantity must be >= 0').toInt(),
-    body('low_stock_threshold').optional().isInt({ min: 0 }).withMessage('Threshold must be >= 0').toInt(),
+    body('price').optional().isFloat({ min: 0.01, max: 1000000 }).withMessage('Price must be > 0').toFloat(),
+    body('cost_price').optional({ values: 'falsy' }).isFloat({ min: 0, max: 1000000 }).withMessage('Cost price must be between 0 and 1000000').toFloat(),
+    body('quantity').optional().isInt({ min: 0, max: 1000000 }).withMessage('Quantity must be between 0 and 1,000,000').toInt(),
+    body('low_stock_threshold').optional().isInt({ min: 0, max: 1000000 }).withMessage('Threshold must be between 0 and 1,000,000').toInt(),
     body('is_active').optional().isBoolean().withMessage('is_active must be true or false').toBoolean(),
   ]
 }

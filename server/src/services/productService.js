@@ -1,6 +1,7 @@
 const prisma = require('../utils/prismaClient')
 const { buildOrderBy } = require('../middleware/sorting')
-const { NotFoundError, ConflictError, ForbiddenError } = require('../utils/errors')
+const { recordAudit } = require('../utils/audit')
+const { NotFoundError, ConflictError, ForbiddenError, ValidationError } = require('../utils/errors')
 
 // status: 'active' (default), 'inactive', or 'all'
 const PRODUCT_SORTS = {
@@ -72,6 +73,12 @@ async function getProductByBarcode(barcode) {
   return product
 }
 
+async function assertSupplierExists(supplierId) {
+  if (!supplierId) return
+  const supplier = await prisma.supplier.findUnique({ where: { id: supplierId }, select: { id: true } })
+  if (!supplier) throw new ValidationError('Supplier not found', [{ field: 'supplier_id', message: 'Supplier does not exist' }])
+}
+
 async function createProduct(data, userId) {
   // Check uniqueness
   const [existingSku, existingBarcode] = await Promise.all([
@@ -82,9 +89,10 @@ async function createProduct(data, userId) {
   if (existingSku) throw new ConflictError('SKU already exists', 'sku')
   if (existingBarcode) throw new ConflictError('Barcode already exists', 'barcode')
 
-  // Check category exists
+  // Check category and supplier exist
   const category = await prisma.category.findUnique({ where: { id: data.category_id } })
   if (!category) throw new NotFoundError('Category not found')
+  await assertSupplierExists(data.supplier_id)
 
   const quantity = data.quantity ?? 0
 
@@ -150,6 +158,7 @@ async function updateProduct(id, data, user) {
     const category = await prisma.category.findUnique({ where: { id: data.category_id } })
     if (!category) throw new NotFoundError('Category not found')
   }
+  await assertSupplierExists(data.supplier_id)
 
   const product = await prisma.product.update({
     where: { id },
@@ -172,14 +181,29 @@ async function updateProduct(id, data, user) {
     },
   })
 
+  if (data.is_active !== undefined && data.is_active !== existing.is_active) {
+    await recordAudit({
+      userId: user?.id,
+      action: data.is_active ? 'PRODUCT_REACTIVATED' : 'PRODUCT_DEACTIVATED',
+      entity: 'Product',
+      entityId: id,
+      details: `${existing.name} (${existing.sku})`,
+    })
+  }
+
   return product
 }
 
-async function softDeleteProduct(id) {
+async function softDeleteProduct(id, userId) {
   const existing = await prisma.product.findUnique({ where: { id } })
   if (!existing) throw new NotFoundError('Product not found')
 
-  await prisma.product.update({ where: { id }, data: { is_active: false } })
+  await prisma.$transaction([
+    prisma.product.update({ where: { id }, data: { is_active: false } }),
+    prisma.auditLog.create({
+      data: { user_id: userId, action: 'PRODUCT_DEACTIVATED', entity: 'Product', entity_id: id, details: `${existing.name} (${existing.sku})` },
+    }),
+  ])
 }
 
 // ---- Categories ----

@@ -10,7 +10,7 @@ const router = express.Router()
 router.use(authenticate)
 
 const categoryValidation = [
-  body('name').notEmpty().trim().withMessage('Category name is required'),
+  body('name').trim().notEmpty().withMessage('Category name is required'),
   body('description').optional({ values: 'null' }).trim().isLength({ max: 255 }).withMessage('Description must be 255 characters or fewer'),
 ]
 

@@ -45,7 +45,7 @@ async function updateSupplier(req, res, next) {
 
 async function deleteSupplier(req, res, next) {
   try {
-    await supplierService.deleteSupplier(req.params.id)
+    await supplierService.deleteSupplier(req.params.id, req.user.id)
     res.status(200).json({ success: true, message: 'Supplier deleted successfully' })
   } catch (err) {
     next(err)

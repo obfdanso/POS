@@ -84,8 +84,14 @@ async function getMe(req, res, next) {
 async function changePassword(req, res, next) {
   try {
     const { current_password, new_password } = req.body
-    await authService.changePassword(req.user.id, current_password, new_password)
-    res.status(200).json({ success: true, message: 'Password changed successfully' })
+    const tokens = await authService.changePassword(req.user.id, current_password, new_password, req.cookies?.refreshToken)
+    // Other devices are signed out; this one continues with new tokens
+    res.cookie('refreshToken', tokens.refreshToken, COOKIE_OPTIONS)
+    res.status(200).json({
+      success: true,
+      data: { accessToken: tokens.accessToken },
+      message: 'Password changed successfully. Other devices have been signed out.',
+    })
   } catch (err) {
     next(err)
   }

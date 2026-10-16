@@ -47,7 +47,12 @@ async function getCustomerPurchases(req, res, next) {
   try {
     const page = parseInt(req.query.page) || 1
     const per_page = parseInt(req.query.per_page) || 20
-    const result = await customerService.getCustomerPurchases(req.params.id, { page, per_page })
+    const result = await customerService.getCustomerPurchases(req.params.id, {
+      page,
+      per_page,
+      // Cashiers can only view their own sales
+      userId: req.user.role === 'CASHIER' ? req.user.id : undefined,
+    })
     const sales = result.sales.map((s) => ({
       ...s,
       items_count: s._count?.sale_items ?? 0,

@@ -32,6 +32,16 @@ async function logAuthEvent(userId, eventType, ipAddress, userAgent, details) {
   })
 }
 
+/**
+ * True when a token was issued before the user's session cut-off (set on password change/reset),
+ * i.e. it belongs to a session that has been signed out everywhere.
+ * JWT `iat` has one-second resolution, so tokens from the same second as the cut-off stay valid.
+ */
+function issuedBeforeCutoff(payload, user) {
+  if (!user.tokens_valid_after) return false
+  return payload.iat < Math.floor(user.tokens_valid_after.getTime() / 1000)
+}
+
 function generateAccessToken(userId, role) {
   return jwt.sign({ userId, role }, process.env.JWT_ACCESS_SECRET, {
     expiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
@@ -68,16 +78,18 @@ async function login(username, password, ipAddress, userAgent) {
   const passwordValid = await bcrypt.compare(password, user.password_hash)
 
   if (!passwordValid) {
-    const newFailCount = user.failed_login_attempts + 1
-    const updateData = { failed_login_attempts: newFailCount }
+    // Atomic increment: parallel wrong guesses each count, so the lock can't be outrun
+    const { failed_login_attempts: failCount } = await prisma.user.update({
+      where: { id: user.id },
+      data: { failed_login_attempts: { increment: 1 } },
+      select: { failed_login_attempts: true },
+    })
 
-    if (newFailCount >= MAX_FAILED_ATTEMPTS) {
-      updateData.locked_until = LOCKED_UNTIL_ADMIN_UNLOCK
-      await prisma.user.update({ where: { id: user.id }, data: updateData })
-      await logAuthEvent(user.id, 'ACCOUNT_LOCKED', ipAddress, userAgent, `Locked after ${newFailCount} failed attempts`)
+    if (failCount >= MAX_FAILED_ATTEMPTS) {
+      await prisma.user.update({ where: { id: user.id }, data: { locked_until: LOCKED_UNTIL_ADMIN_UNLOCK } })
+      await logAuthEvent(user.id, 'ACCOUNT_LOCKED', ipAddress, userAgent, `Locked after ${failCount} failed attempts`)
     } else {
-      await prisma.user.update({ where: { id: user.id }, data: updateData })
-      await logAuthEvent(user.id, 'LOGIN_FAILED', ipAddress, userAgent, `Failed attempt ${newFailCount}`)
+      await logAuthEvent(user.id, 'LOGIN_FAILED', ipAddress, userAgent, `Failed attempt ${failCount}`)
     }
 
     throw new UnauthorizedError('Invalid credentials')
@@ -137,11 +149,14 @@ async function refreshToken(tokenFromCookie) {
 
   const user = await prisma.user.findUnique({
     where: { id: payload.userId },
-    select: { id: true, role: true, is_active: true },
+    select: { id: true, role: true, is_active: true, tokens_valid_after: true },
   })
 
   if (!user || !user.is_active) {
     throw new UnauthorizedError('User not found or inactive')
+  }
+  if (issuedBeforeCutoff(payload, user)) {
+    throw new UnauthorizedError('Session ended. Please sign in again.')
   }
 
   // Rotate: revoke the old token and issue a fresh one
@@ -175,7 +190,7 @@ async function getMe(userId) {
   return user
 }
 
-async function changePassword(userId, currentPassword, newPassword) {
+async function changePassword(userId, currentPassword, newPassword, currentRefreshToken) {
   const user = await prisma.user.findUnique({ where: { id: userId } })
   if (!user) throw new NotFoundError('User not found')
 
@@ -183,8 +198,13 @@ async function changePassword(userId, currentPassword, newPassword) {
   if (!valid) throw new UnauthorizedError('Current password is incorrect')
 
   const password_hash = await bcrypt.hash(newPassword, 12)
-  await prisma.user.update({ where: { id: userId }, data: { password_hash } })
-  return true
+  // Sign out every existing session, then hand this device fresh tokens so it stays signed in
+  await prisma.user.update({ where: { id: userId }, data: { password_hash, tokens_valid_after: new Date() } })
+  revokeToken(currentRefreshToken)
+  return {
+    accessToken: generateAccessToken(user.id, user.role),
+    refreshToken: generateRefreshToken(user.id),
+  }
 }
 
 async function updateProfile(userId, { full_name, email }) {
@@ -212,4 +232,4 @@ async function updateProfile(userId, { full_name, email }) {
   return user
 }
 
-module.exports = { login, logout, refreshToken, getMe, changePassword, updateProfile }
+module.exports = { login, logout, refreshToken, getMe, changePassword, updateProfile, issuedBeforeCutoff }

@@ -44,6 +44,27 @@ function errorHandler(err, req, res, _next) {
     })
   }
 
+  // A referenced record (customer, supplier, category, …) doesn't exist
+  if (err.code === 'P2003') {
+    const field = String(err.meta?.field_name ?? '').replace(/^.*_(\w+_id)_fkey.*$/, '$1') || undefined
+    return res.status(422).json({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'A referenced record does not exist',
+        ...(field && { details: [{ field, message: 'Referenced record does not exist' }] }),
+      },
+    })
+  }
+
+  // A number too large for its database column
+  if (err.code === 'P2020' || err.code === '22003') {
+    return res.status(422).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'A value is out of range' },
+    })
+  }
+
   if (err.code === 'P2025') {
     return res.status(404).json({
       success: false,

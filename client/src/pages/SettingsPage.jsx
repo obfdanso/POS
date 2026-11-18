@@ -109,6 +109,12 @@ const StoreIcon = (
   </svg>
 )
 
+const DrawerIcon = (
+  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+  </svg>
+)
+
 const TaxIcon = (
   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" />
@@ -140,6 +146,7 @@ export default function SettingsPage() {
     tax_rate: '0',
     loyalty_points_rate: '10',
     receipt_footer: 'Thank you for your business!',
+    require_open_shift: 'false',
   })
 
   const [taxEnabled, setTaxEnabled] = useState(false)
@@ -389,6 +396,24 @@ export default function SettingsPage() {
                   </div>
                 </FieldRow>
               </ToggleRow>
+            )}
+          </SectionCard>
+
+          {/* ── Cash Drawer ───────────────────────────────── */}
+          <SectionCard
+            icon={DrawerIcon}
+            title="Cash Drawer"
+            description="Track each cashier's drawer from opening float to closing count."
+          >
+            {isLoading ? (
+              <SkeletonRow />
+            ) : (
+              <ToggleRow
+                label="Require an Open Shift to Sell"
+                hint="Cashiers must open a shift and count their float before the POS lets them charge. Closing it compares their count with the takings."
+                checked={settings.require_open_shift === 'true'}
+                onChange={(on) => handleChange('require_open_shift', on ? 'true' : 'false')}
+              />
             )}
           </SectionCard>
 

@@ -16,20 +16,22 @@ A web-based point of sale system for a retail shop, built as a final-year capsto
 - Search by name, SKU, or barcode. A scanned or typed barcode plus **Enter** adds the product straight to the cart.
 - Browse products by category. Stock badges warn when an item is running low.
 - Cart with per-item and cart-wide discounts, tax (configurable), and an optional customer for loyalty points. Walk-in sales need no customer.
+- **Loyalty redemption.** Customers can spend their points as money off at the till (the point value is set by an admin). Returned goods give the points back.
 - Payment by cash (with one-tap "Exact" and rounded-up amount buttons, and change calculation), Mobile Money, or card. Mobile Money and card payments go through Paystack and are verified on the server.
 - An 80mm thermal receipt is printed with `window.print()`.
+- **Installable app.** QuickMart can be installed from the browser on a tablet or desktop and opens in its own window. Its screens load even when the connection drops, and a banner warns that nothing can be saved until it's back.
 - Keyboard shortcuts: **F1** search, **F2** pay, **F4** clear cart, **Enter** add / confirm.
 - **Cash drawer shifts.** Cashiers open a shift with a counted float and close it by counting the drawer. The system works out the expected cash (float + cash sales − cash refunds) and records whether the drawer was over or short. Admins can make an open shift required before selling.
 
 **Back office**
 - **Dashboard.** Today's revenue, today's transaction count, low-stock alerts, a 7-day revenue chart, top products, and sales by category.
-- **Sales.** Filter by date, status, payment method, cashier, or transaction ID. Reprint any receipt, and return some or all of a sale: choose items and quantities, decide whether each goes back on the shelf or was damaged, and give a reason. Each item is refunded at its share of what the customer paid, and stock and loyalty points are adjusted.
+- **Sales.** Filter by date, status, payment method, cashier, or transaction ID. Reprint any receipt, and return some or all of a sale: choose items and quantities, decide whether each goes back on the shelf or was damaged, and give a reason. Each item is refunded at its share of what the customer paid, and stock and loyalty points are adjusted. Every return can be printed as a refund slip for the customer to sign.
 - **Shifts.** Every drawer session with its float, takings by payment method, expected and counted cash, and the over/short result. Managers can close a shift a cashier left open.
 - **Products.** Create, edit, image upload, categories, suppliers, and soft delete/reactivate (admin).
 - **Inventory.** Stock levels, low and out-of-stock views, restock and adjustments, plus each product's full stock history.
 - **Customers.** Loyalty points, lifetime spend, and purchase history.
 - **Reports.** Sales summary, daily sales, top products, category, cashier performance, and profit. All support date ranges and CSV export.
-- **Users and settings (admin).** Roles, deactivation, password resets, and unlocking accounts. Store details, tax rate, loyalty rate, currency symbol, and receipt footer.
+- **Users and settings (admin).** Roles, deactivation, password resets, and unlocking accounts. Store details, tax rate, loyalty rate and point value, currency symbol, and receipt footer.
 
 **Built to be correct under real use**
 - Every sale is one database transaction. Stock can't oversell even when two tills sell the last unit at once, a Paystack payment can only pay for one sale, and every stock change is logged.
@@ -147,7 +149,7 @@ cd server && npm test     # Jest + Supertest integration tests (uses the databas
 cd client && npm test     # Vitest component and utility tests
 ```
 
-177 backend tests cover every module: auth (lockout, token rotation), sales (payments, discounts, concurrent sales), partial returns, cash drawer shifts, inventory, products, customers, suppliers, reports (exact totals), users, and settings. Services have about 90% line coverage. The tests create and delete their own data, run one file at a time, and mock Paystack.
+185 backend tests cover every module: auth (lockout, token rotation), sales (payments, discounts, concurrent sales), loyalty redemption, partial returns, cash drawer shifts, inventory, products, customers, suppliers, reports (exact totals), users, and settings. Services have about 90% line coverage. The tests create and delete their own data, run one file at a time, and mock Paystack.
 
 GitHub Actions runs the server tests against a fresh PostgreSQL database, plus both linters, the client tests and a production build, on every push and pull request (`.github/workflows/ci.yml`).
 

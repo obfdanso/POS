@@ -176,6 +176,9 @@ model Sale {
   created_at              DateTime      @default(now())
   updated_at              DateTime      @updatedAt
 
+  // Set by the till for each sale (also ones queued offline) so a resend never records it twice
+  client_ref String? @unique
+
   // The cash drawer shift the sale was rung up in
   shift_id String?
 

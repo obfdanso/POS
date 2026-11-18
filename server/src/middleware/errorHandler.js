@@ -24,6 +24,14 @@ function errorHandler(err, req, res, _next) {
     })
   }
 
+  // Other body-parser client errors (e.g. body too large, unsupported charset)
+  if (err.expose && err.status >= 400 && err.status < 500 && !err.isOperational) {
+    return res.status(err.status).json({
+      success: false,
+      error: { code: err.status === 413 ? 'PAYLOAD_TOO_LARGE' : 'BAD_REQUEST', message: err.message },
+    })
+  }
+
   // Upload errors (e.g. file too large)
   if (err instanceof multer.MulterError) {
     const message = err.code === 'LIMIT_FILE_SIZE' ? 'Image must be 5 MB or smaller' : err.message

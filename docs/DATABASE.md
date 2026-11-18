@@ -92,6 +92,9 @@
 | `loyalty_points_earned` | Int | Points awarded for this sale, so a refund reverses exactly that |
 | `refunded_amount` | Decimal(10,2) | Running total of refunds, default 0. `CHECK` between 0 and `total_amount`. Reports subtract it |
 | `loyalty_points_reversed` | Int | Points taken back by returns so far, default 0 |
+| `loyalty_points_redeemed` | Int | Points the customer spent on this sale, default 0 |
+| `points_discount` | Decimal(10,2) | Value of those points. Included in `discount_amount`, so reports already net it out. `CHECK` between 0 and `discount_amount` |
+| `loyalty_points_restored` | Int | Redeemed points given back by returns so far. `CHECK` between 0 and `loyalty_points_redeemed` |
 | `shift_id` | UUID FK? | → Shift it was rung up in, `ON DELETE SET NULL`. Indexed |
 
 All amounts have `CHECK >= 0`. Indexed on `transaction_id` and `created_at`.
@@ -206,6 +209,7 @@ Key–value store, edited on the Settings page.
 | `store_name`, `store_address`, `store_phone` | Printed on receipts |
 | `tax_rate` | Percentage applied to every sale |
 | `loyalty_points_rate` | GHS spent per loyalty point (0 turns loyalty off) |
+| `loyalty_point_value` | Money off per point redeemed at checkout (0 turns redemption off; the seed uses 0.10) |
 | `currency_symbol` | Shown before every amount, e.g. `GH₵` |
 | `receipt_footer` | Last line of the receipt |
 | `require_open_shift` | `true` makes cashiers open a shift before selling (default `false`) |

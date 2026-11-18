@@ -7,14 +7,14 @@ const { buildDateRange } = require('../utils/dateRange')
 // Defaults to the last 30 days (including today) when dates are omitted
 function dateRange(start_date, end_date) {
   const range = buildDateRange(start_date, end_date)
-  if (!range.gte) {
-    range.gte = new Date()
-    range.gte.setDate(range.gte.getDate() - 29)
-    range.gte.setHours(0, 0, 0, 0)
-  }
   if (!range.lte) {
     range.lte = new Date()
     range.lte.setHours(23, 59, 59, 999)
+  }
+  if (!range.gte) {
+    range.gte = new Date(range.lte)
+    range.gte.setDate(range.gte.getDate() - 29)
+    range.gte.setHours(0, 0, 0, 0)
   }
 
   if (range.gte > range.lte) {

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Button } from './Button'
 import { EmailReceiptForm } from './EmailReceiptForm'
+import { SmsReceiptForm } from './SmsReceiptForm'
 import { useSettings } from '../context/SettingsContext'
 import { formatCurrency } from '../utils/formatCurrency'
 import { escapeHtml, printDocument, RECEIPT_STYLES } from '../utils/print'
@@ -102,7 +103,8 @@ function Row({ label, value, className = '' }) {
 export function Receipt({ sale, onClose, actions }) {
   const settings = useSettings()
   const fmt = (v) => formatCurrency(v, settings.currency_symbol || 'GH₵')
-  const [isEmailing, setIsEmailing] = useState(false)
+  // 'email' or 'sms' while that form is open
+  const [sending, setSending] = useState(null)
 
   if (!sale) return null
 
@@ -185,13 +187,22 @@ export function Receipt({ sale, onClose, actions }) {
         </div>
       </div>
 
-      {isEmailing && <EmailReceiptForm sale={sale} onSent={() => setIsEmailing(false)} onCancel={() => setIsEmailing(false)} />}
+      {sending === 'email' && <EmailReceiptForm sale={sale} onSent={() => setSending(null)} onCancel={() => setSending(null)} />}
+      {sending === 'sms' && <SmsReceiptForm sale={sale} onSent={() => setSending(null)} onCancel={() => setSending(null)} />}
 
       <div className="flex flex-wrap justify-end gap-3 mt-4">
         {actions && <div className="mr-auto flex gap-3">{actions}</div>}
         <Button variant="secondary" onClick={onClose}>Close</Button>
-        {!isEmailing && (
-          <Button variant="secondary" onClick={() => setIsEmailing(true)}>
+        {!sending && (
+          <Button variant="secondary" onClick={() => setSending('sms')}>
+            <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.86 9.86 0 01-4-.83L3 20l1.4-3.72A7.6 7.6 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            </svg>
+            Text
+          </Button>
+        )}
+        {!sending && (
+          <Button variant="secondary" onClick={() => setSending('email')}>
             <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
             </svg>

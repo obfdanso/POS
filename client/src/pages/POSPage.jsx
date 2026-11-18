@@ -10,7 +10,7 @@ import { OpenShiftModal, CloseShiftModal } from '../components/ShiftModals'
 import { formatCurrency } from '../utils/formatCurrency'
 import { lineTotal, round2, calculateTotals, maxRedeemablePoints, applyPromotions, bestPromotion } from '../utils/saleTotals'
 import { splitCash } from '../utils/payments'
-import { isNetworkError, queueSale, queuedSales, removeQueued, syncQueuedSales } from '../utils/offlineQueue'
+import { isNetworkError, newClientRef, queueSale, queuedSales, removeQueued, syncQueuedSales } from '../utils/offlineQueue'
 import { Button } from '../components/Button'
 import { Input } from '../components/Input'
 import { Modal } from '../components/Modal'
@@ -502,6 +502,7 @@ export default function POSPage() {
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   // Cash sales saved on this device while the server couldn't be reached
   const [offlineSales, setOfflineSales] = useState([])
+  const isSyncing = useRef(false)
   // The product whose sizes or flavours are being offered, or null
   const [choosingVariant, setChoosingVariant] = useState(null)
   const [showReceiptModal, setShowReceiptModal] = useState(false)
@@ -537,6 +538,11 @@ export default function POSPage() {
   }, [loadShift])
 
   async function startCloseShift() {
+    // Their cash is in this drawer, so they must reach the server before the count
+    if (offlineSales.some((e) => !e.error)) {
+      toast.error('Send the sales saved offline before closing the shift')
+      return
+    }
     // Fresh totals, so the expected cash includes every sale up to now
     const shift = await loadShift()
     if (shift) setClosingShift(shift)
@@ -748,25 +754,35 @@ export default function POSPage() {
 
   // Sends sales queued offline; runs when the till opens and whenever the connection comes back
   const syncOffline = useCallback(async () => {
-    if (!user?.id) return
-    if (queuedSales(user.id).some((e) => !e.error)) {
-      const { synced, refused } = await syncQueuedSales(user.id, (payload) => salesService.create(payload))
-      if (synced) toast.success(`${synced} sale${synced === 1 ? '' : 's'} saved offline sent to the server`)
-      if (refused) toast.error(`${refused} offline sale${refused === 1 ? ' was' : 's were'} refused; see the note above the products`, { duration: 8000 })
+    // One run at a time, or the same sales would be sent (and counted) twice
+    if (!user?.id || isSyncing.current) return
+    isSyncing.current = true
+    try {
+      if (queuedSales(user.id).some((e) => !e.error)) {
+        const { synced, refused } = await syncQueuedSales(user.id, (payload) => salesService.create(payload))
+        if (synced) toast.success(`${synced} sale${synced === 1 ? '' : 's'} saved offline sent to the server`)
+        if (refused) toast.error(`${refused} offline sale${refused === 1 ? ' was' : 's were'} refused; see the note above the products`, { duration: 8000 })
+      }
+    } finally {
+      isSyncing.current = false
+      setOfflineSales(queuedSales(user.id))
     }
-    setOfflineSales(queuedSales(user.id))
   }, [user?.id])
 
+  // Also retry every minute: the server can be down while the device still has a connection
   useEffect(() => {
     syncOffline()
     window.addEventListener('online', syncOffline)
-    return () => window.removeEventListener('online', syncOffline)
-  }, [syncOffline])
+    const timer = setInterval(() => {
+      if (user?.id && queuedSales(user.id).some((e) => !e.error)) syncOffline()
+    }, 60000)
+    return () => { window.removeEventListener('online', syncOffline); clearInterval(timer) }
+  }, [syncOffline, user?.id])
 
   async function handlePaymentConfirm({ payment_method, amount_paid, reference, payments }) {
-    setIsSubmitting(true)
     // One id per sale, so a resend (e.g. from the offline queue) is never recorded twice
-    const client_ref = crypto.randomUUID()
+    const client_ref = newClientRef()
+    setIsSubmitting(true)
     let payload
     try {
       payload = {
@@ -816,7 +832,8 @@ export default function POSPage() {
     } catch (err) {
       // No connection: keep a cash sale on this device and send it later. Card and Mobile Money
       // need Paystack, so they can't be taken offline
-      if (isNetworkError(err) && payment_method === 'CASH' && payload) {
+      // Points can't be checked offline, so a sale spending them must wait for the connection
+      if (isNetworkError(err) && payment_method === 'CASH' && payload && !payload.redeem_points) {
         queueSale(user.id, payload, total)
         setOfflineSales(queuedSales(user.id))
         setShowPaymentModal(false)

@@ -79,6 +79,11 @@ async function assertSupplierExists(supplierId) {
   if (!supplier) throw new ValidationError('Supplier not found', [{ field: 'supplier_id', message: 'Supplier does not exist' }])
 }
 
+// Keeps a cost price of 0 instead of treating it as missing
+function optionalCost(value) {
+  return value === '' || value === null || value === undefined ? null : value
+}
+
 async function createProduct(data, userId) {
   // Check uniqueness
   const [existingSku, existingBarcode] = await Promise.all([
@@ -106,7 +111,7 @@ async function createProduct(data, userId) {
         category_id: data.category_id,
         supplier_id: data.supplier_id || null,
         price: data.price,
-        cost_price: data.cost_price || null,
+        cost_price: optionalCost(data.cost_price),
         quantity,
         low_stock_threshold: data.low_stock_threshold ?? 10,
         image_url: data.image_url || null,
@@ -169,7 +174,7 @@ async function updateProduct(id, data, user) {
       ...(data.category_id !== undefined && { category_id: data.category_id }),
       ...(data.supplier_id !== undefined && { supplier_id: data.supplier_id || null }),
       ...(data.price !== undefined && { price: data.price }),
-      ...(data.cost_price !== undefined && { cost_price: data.cost_price || null }),
+      ...(data.cost_price !== undefined && { cost_price: optionalCost(data.cost_price) }),
       // quantity is intentionally not editable here — stock changes go through inventory so they are logged
       ...(data.low_stock_threshold !== undefined && { low_stock_threshold: data.low_stock_threshold }),
       ...(data.image_url !== undefined && { image_url: data.image_url || null }),

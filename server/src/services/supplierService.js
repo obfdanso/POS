@@ -76,13 +76,17 @@ async function updateSupplier(id, { name, phone, email, address, website }) {
 async function deleteSupplier(id, userId) {
   const supplier = await prisma.supplier.findUnique({
     where: { id },
-    include: { _count: { select: { products: { where: { is_active: true } } } } },
+    include: { _count: { select: { products: { where: { is_active: true } }, purchase_orders: true } } },
   })
   if (!supplier) throw new NotFoundError('Supplier not found')
   if (supplier._count.products > 0) {
     throw new ConflictError(
       `Cannot delete supplier "${supplier.name}" — it is linked to ${supplier._count.products} active product(s). Reassign products first.`
     )
+  }
+  // Purchase orders are a record of what was bought, so a supplier with any is kept
+  if (supplier._count.purchase_orders > 0) {
+    throw new ConflictError(`Cannot delete supplier "${supplier.name}": it has ${supplier._count.purchase_orders} purchase order(s).`)
   }
   await prisma.$transaction([
     prisma.supplier.delete({ where: { id } }),

@@ -17,18 +17,23 @@ function clampDiscounts(state) {
 function cartReducer(state, action) {
   switch (action.type) {
     case 'ADD_ITEM': {
-      const existing = state.items.find((i) => i.product_id === action.payload.product_id)
+      const { payload } = action
+      const existing = state.items.find((i) => i.product_id === payload.product_id)
       if (existing) {
-        return {
+        // Never go past the stock on hand, even if two scans resolve before a re-render
+        if (existing.quantity >= payload.quantity_available) return state
+        // Take the latest price and stock from the product just looked up
+        return clampDiscounts({
           ...state,
           items: state.items.map((i) =>
-            i.product_id === action.payload.product_id
-              ? { ...i, quantity: i.quantity + 1 }
+            i.product_id === payload.product_id
+              ? { ...i, price: payload.price, quantity_available: payload.quantity_available, quantity: i.quantity + 1 }
               : i
           ),
-        }
+        })
       }
-      return { ...state, items: [...state.items, { ...action.payload, quantity: 1, discount: 0 }] }
+      if (payload.quantity_available < 1) return state
+      return { ...state, items: [...state.items, { ...payload, quantity: 1, discount: 0 }] }
     }
     case 'REMOVE_ITEM':
       return clampDiscounts({ ...state, items: state.items.filter((i) => i.product_id !== action.payload) })

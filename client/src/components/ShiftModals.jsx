@@ -38,6 +38,11 @@ export function ShiftSummary({ shift }) {
       <Line label={`Mobile money (${s.by_method.MOBILE_MONEY.count})`} value={formatCurrency(s.by_method.MOBILE_MONEY.total)} className="pt-1.5" />
       <Line label={`Card (${s.by_method.CARD.count})`} value={formatCurrency(s.by_method.CARD.total)} />
       <Line label={`All sales (${s.sales_count})`} value={formatCurrency(s.sales_total)} />
+      {s.split_count > 0 && (
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          {s.split_count} split sale{s.split_count === 1 ? '' : 's'}: each part is counted under its own method above.
+        </p>
+      )}
     </div>
   )
 }

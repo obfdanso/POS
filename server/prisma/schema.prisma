@@ -21,6 +21,7 @@ enum PaymentMethod {
 
 enum PaymentStatus {
   COMPLETED
+  PARTIALLY_REFUNDED
   REFUNDED
   PENDING
 }
@@ -58,6 +59,7 @@ model User {
   audit_logs     AuditLog[]
   shifts         Shift[]        @relation("ShiftCashier")
   closed_shifts  Shift[]        @relation("ShiftClosedBy")
+  refunds        Refund[]
 }
 
 model Category {
@@ -124,21 +126,24 @@ model Customer {
 }
 
 model Sale {
-  id                    String        @id @default(uuid())
-  transaction_id        String        @unique
-  user_id               String
-  customer_id           String?
-  subtotal              Decimal       @db.Decimal(10, 2)
-  discount_amount       Decimal       @default(0) @db.Decimal(10, 2)
-  tax_amount            Decimal       @default(0) @db.Decimal(10, 2)
-  total_amount          Decimal       @db.Decimal(10, 2)
-  payment_method        PaymentMethod
-  payment_status        PaymentStatus @default(COMPLETED)
-  notes                 String?
+  id                      String        @id @default(uuid())
+  transaction_id          String        @unique
+  user_id                 String
+  customer_id             String?
+  subtotal                Decimal       @db.Decimal(10, 2)
+  discount_amount         Decimal       @default(0) @db.Decimal(10, 2)
+  tax_amount              Decimal       @default(0) @db.Decimal(10, 2)
+  total_amount            Decimal       @db.Decimal(10, 2)
+  payment_method          PaymentMethod
+  payment_status          PaymentStatus @default(COMPLETED)
+  notes                   String?
   // Points awarded for this sale, so a refund reverses exactly what was given
-  loyalty_points_earned Int           @default(0)
-  created_at            DateTime      @default(now())
-  updated_at            DateTime      @updatedAt
+  loyalty_points_earned   Int           @default(0)
+  // Running totals of returns against this sale; reports subtract them
+  refunded_amount         Decimal       @default(0) @db.Decimal(10, 2)
+  loyalty_points_reversed Int           @default(0)
+  created_at              DateTime      @default(now())
+  updated_at              DateTime      @updatedAt
 
   // The cash drawer shift the sale was rung up in
   shift_id String?
@@ -148,6 +153,7 @@ model Sale {
   shift      Shift?     @relation(fields: [shift_id], references: [id], onDelete: SetNull)
   sale_items SaleItem[]
   payments   Payment[]
+  refunds    Refund[]
 
   @@index([transaction_id])
   @@index([created_at])
@@ -172,29 +178,73 @@ model Shift {
   created_at    DateTime    @default(now())
   updated_at    DateTime    @updatedAt
 
-  user      User   @relation("ShiftCashier", fields: [user_id], references: [id])
-  closed_by User?  @relation("ShiftClosedBy", fields: [closed_by_id], references: [id])
+  user      User     @relation("ShiftCashier", fields: [user_id], references: [id])
+  closed_by User?    @relation("ShiftClosedBy", fields: [closed_by_id], references: [id])
   sales     Sale[]
+  refunds   Refund[]
 
   @@index([user_id, status])
   @@index([opened_at])
 }
 
 model SaleItem {
-  id         String   @id @default(uuid())
-  sale_id    String
-  product_id String
-  quantity   Int
-  unit_price Decimal  @db.Decimal(10, 2)
+  id                String   @id @default(uuid())
+  sale_id           String
+  product_id        String
+  quantity          Int
+  unit_price        Decimal  @db.Decimal(10, 2)
   // Cost price at the time of sale, so profit reports aren't rewritten when costs change
-  unit_cost  Decimal? @db.Decimal(10, 2)
-  discount   Decimal  @default(0) @db.Decimal(10, 2)
-  total      Decimal  @db.Decimal(10, 2)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  unit_cost         Decimal? @db.Decimal(10, 2)
+  discount          Decimal  @default(0) @db.Decimal(10, 2)
+  total             Decimal  @db.Decimal(10, 2)
+  // Units returned so far (never more than quantity)
+  refunded_quantity Int      @default(0)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
 
-  sale    Sale    @relation(fields: [sale_id], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [product_id], references: [id], onDelete: Restrict)
+  sale         Sale         @relation(fields: [sale_id], references: [id], onDelete: Cascade)
+  product      Product      @relation(fields: [product_id], references: [id], onDelete: Restrict)
+  refund_items RefundItem[]
+}
+
+// One return against a sale: some or all of its items, paid back by the sale's payment method
+model Refund {
+  id         String        @id @default(uuid())
+  sale_id    String
+  user_id    String
+  // The refunding user's open shift; cash refunds come out of that drawer
+  shift_id   String?
+  amount     Decimal       @db.Decimal(10, 2)
+  method     PaymentMethod
+  reason     String
+  created_at DateTime      @default(now())
+  updated_at DateTime      @updatedAt
+
+  sale  Sale         @relation(fields: [sale_id], references: [id], onDelete: Cascade)
+  user  User         @relation(fields: [user_id], references: [id])
+  shift Shift?       @relation(fields: [shift_id], references: [id], onDelete: SetNull)
+  items RefundItem[]
+
+  @@index([sale_id])
+  @@index([shift_id])
+  @@index([created_at])
+}
+
+model RefundItem {
+  id           String   @id @default(uuid())
+  refund_id    String
+  sale_item_id String
+  quantity     Int
+  amount       Decimal  @db.Decimal(10, 2)
+  // false when the goods were damaged and not put back on the shelf
+  restocked    Boolean  @default(true)
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  refund    Refund   @relation(fields: [refund_id], references: [id], onDelete: Cascade)
+  sale_item SaleItem @relation(fields: [sale_item_id], references: [id], onDelete: Cascade)
+
+  @@index([sale_item_id])
 }
 
 model Payment {

@@ -6,6 +6,7 @@ import { AuthProvider } from './context/AuthContext'
 import { CartProvider } from './context/CartContext'
 import { SettingsProvider } from './context/SettingsContext'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { OfflineBanner } from './components/OfflineBanner'
 import App from './App.jsx'
 import './index.css'
 
@@ -18,6 +19,7 @@ createRoot(document.getElementById('root')).render(
             <ErrorBoundary>
               <App />
             </ErrorBoundary>
+            <OfflineBanner />
             <Toaster
               position="top-right"
               toastOptions={{

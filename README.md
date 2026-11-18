@@ -1,5 +1,7 @@
 # QuickMart POS
 
+[![CI](https://github.com/obfdanso/POS/actions/workflows/ci.yml/badge.svg)](https://github.com/obfdanso/POS/actions/workflows/ci.yml)
+
 A web-based point of sale system for a retail shop, built as a final-year capstone project. Cashiers ring up sales from the keyboard or a barcode scanner. Managers run the stock, customers and refunds, and admins see the reports and control users and settings.
 
 **Stack:** React + Vite + Tailwind CSS · Node.js + Express · PostgreSQL + Prisma · JWT auth

@@ -15,6 +15,7 @@
 | `PaymentMethod` | `CASH`, `MOBILE_MONEY`, `CARD` |
 | `PaymentStatus` | `COMPLETED`, `PARTIALLY_REFUNDED`, `REFUNDED`, `PENDING` |
 | `ShiftStatus` | `OPEN`, `CLOSED` |
+| `PurchaseOrderStatus` | `ORDERED`, `PARTIALLY_RECEIVED`, `RECEIVED`, `CANCELLED` |
 | `InventoryChangeType` | `SALE`, `RESTOCK`, `ADJUSTMENT`, `RETURN` |
 
 ---
@@ -111,6 +112,8 @@ All amounts have `CHECK >= 0`. Indexed on `transaction_id` and `created_at`.
 | `discount` | Decimal(10,2) | Line discount, default 0 |
 | `total` | Decimal(10,2) | unit_price × quantity − discount |
 | `refunded_quantity` | Int | Units returned so far, default 0. `CHECK` between 0 and `quantity`. Reports count only `quantity − refunded_quantity` |
+| `promotion_id` | UUID FK? | → Promotion applied automatically, `ON DELETE SET NULL` |
+| `promotion_discount` | Decimal(10,2) | The promotion's part of `discount` (which also holds any cashier discount). `CHECK` between 0 and `discount` |
 
 ### Refund
 One return against a sale.
@@ -150,6 +153,42 @@ A cash drawer session.
 | `opened_at` / `closed_at` | DateTime / DateTime? | |
 | `closed_by_id` | UUID FK? | → User who closed it (a manager can close a cashier's shift) |
 | `notes` | String? | Opening and closing notes |
+
+### PurchaseOrder
+Stock ordered from a supplier.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | |
+| `po_number` | String | Unique, `PO-YYYYMMDD-NNNN` |
+| `supplier_id` | UUID FK | → Supplier, `ON DELETE RESTRICT` (suppliers with orders can't be deleted). Indexed |
+| `created_by_id` | UUID FK | → User who placed it |
+| `status` | PurchaseOrderStatus | Indexed |
+| `total_cost` | Decimal(12,2) | Σ quantity ordered × unit cost, `CHECK >= 0` |
+| `expected_at` / `received_at` | DateTime? | Expected delivery; when the last unit arrived |
+| `notes` | String? | |
+
+### PurchaseOrderItem
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | |
+| `purchase_order_id` | UUID FK | → PurchaseOrder, `ON DELETE CASCADE` |
+| `product_id` | UUID FK | → Product, `ON DELETE RESTRICT`. Unique per order |
+| `quantity_ordered` | Int | `CHECK > 0` |
+| `quantity_received` | Int | Default 0. `CHECK` between 0 and `quantity_ordered` |
+| `unit_cost` | Decimal(10,2) | `CHECK >= 0`. Becomes the product's cost price on receipt (optional) |
+
+### Promotion
+An automatic percentage off.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | |
+| `name` | String | Shown on receipts |
+| `percent_off` | Decimal(5,2) | `CHECK` above 0 and at most 100 |
+| `product_id` / `category_id` | UUID FK? | One product, one category, or neither (whole store); never both (`CHECK`). `ON DELETE CASCADE` |
+| `starts_at` / `ends_at` | DateTime / DateTime? | `CHECK ends_at > starts_at` |
+| `is_active` | Boolean | Default true. Indexed with `starts_at` |
 
 ### Payment
 | Column | Type | Notes |

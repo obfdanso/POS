@@ -18,7 +18,9 @@ async function login(page, role) {
 // The seed requires an open shift to sell; open one if this user has none yet
 async function ensureShiftOpen(page) {
   const banner = page.getByText('Open a shift and count your opening float')
-  await expect(page.getByPlaceholder(/Search by name, SKU/)).toBeVisible()
+  // Wait until the page knows the shift state ("Shift since …" when one is open, otherwise an
+  // "Open shift" button); checking the banner before then would wrongly conclude one is open
+  await expect(page.getByText(/Shift since/).or(page.getByRole('button', { name: 'Open shift' })).first()).toBeVisible()
   if (await banner.isVisible()) {
     await page.getByRole('button', { name: 'Open shift' }).first().click()
     const dialog = page.getByRole('dialog', { name: 'Open shift' })

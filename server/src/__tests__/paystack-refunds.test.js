@@ -158,6 +158,21 @@ describe('Refunds through Paystack', () => {
     expect((await sendToPaystack(card.id, cardRefund.id)).status).toBe(503)
   })
 
+  it('lets a send that was cut off be retried after a while', async () => {
+    process.env.PAYSTACK_AUTO_REFUND = 'false'
+    const { sale } = await cardSale()
+    const refund = (await returnOne(sale)).body.data.refunds[0]
+    // As if the server stopped right after claiming it
+    await prisma.$executeRaw`UPDATE "Refund" SET gateway_status = 'PENDING', updated_at = NOW() - INTERVAL '10 minutes' WHERE id = ${refund.id}`
+    const res = await sendToPaystack(sale.id, refund.id)
+    expect(res.status).toBe(200)
+    expect(res.body.data.refunds[0]).toMatchObject({ gateway_status: 'FAILED', gateway_error: expect.stringMatching(/interrupted/) })
+    expect(paystack.refundPaystackPayment).not.toHaveBeenCalled()
+
+    queued(9006)
+    expect((await sendToPaystack(sale.id, refund.id)).body.data.refunds[0].gateway_status).toBe('PENDING')
+  })
+
   it('only sends a refund once when two requests race', async () => {
     process.env.PAYSTACK_AUTO_REFUND = 'false'
     const { sale } = await cardSale()
@@ -190,6 +205,19 @@ describe('POST /api/paystack/webhook', () => {
 
     await post({ event: 'refund.pending', data: { id: 9100, status: 'pending' } })
     expect((await prisma.refund.findUnique({ where: { id: refund.id } })).gateway_status).toBe('PROCESSED')
+  })
+
+  it('matches events without an id by charge reference and amount, and never hides a failure', async () => {
+    const { sale, reference } = await cardSale()
+    paystack.refundPaystackPayment.mockResolvedValueOnce({ status: true, data: { status: 'pending' } })
+    const refund = (await returnOne(sale)).body.data.refunds[0]
+    expect(refund).toMatchObject({ gateway_status: 'PENDING', gateway_refund_id: null })
+
+    await post({ event: 'refund.failed', data: { transaction_reference: reference, amount: 1000, status: 'failed' } })
+    expect((await prisma.refund.findUnique({ where: { id: refund.id } })).gateway_status).toBe('FAILED')
+    // A late "processing" must not cover up the failure
+    await post({ event: 'refund.processing', data: { transaction_reference: reference, amount: 1000 } })
+    expect((await prisma.refund.findUnique({ where: { id: refund.id } })).gateway_status).toBe('FAILED')
   })
 
   it('rejects events without a valid signature', async () => {

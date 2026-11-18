@@ -75,6 +75,16 @@ describe('Product variants', () => {
     expect(grouped.body.data[0].variants.map((v) => v.id)).not.toContain(extra.id)
   })
 
+  it("keeps a deactivated main product's variants on the till", async () => {
+    await prisma.product.update({ where: { id: main.id }, data: { is_active: false } })
+    try {
+      const grouped = await request(app).get(`/api/products?group_variants=true&category_id=${category.id}`).set(auth(cashier))
+      expect(grouped.body.data.map((p) => p.id)).toEqual([oneLitre.id])
+    } finally {
+      await prisma.product.update({ where: { id: main.id }, data: { is_active: true } })
+    }
+  })
+
   it('sells a variant like any product', async () => {
     const res = await request(app).post('/api/sales').set(auth(cashier)).send({
       items: [{ product_id: oneLitre.id, quantity: 2 }], payment_method: 'CASH', amount_paid: 24,

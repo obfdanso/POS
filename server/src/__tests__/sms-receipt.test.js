@@ -111,6 +111,16 @@ describe('POST /api/sales/:id/sms-receipt', () => {
     expect(sms.sendSms).not.toHaveBeenCalled()
   })
 
+  it('keeps to 3 texts when several are sent at once, and a failed text does not count', async () => {
+    const fresh = (await request(app).post('/api/sales').set(auth(cashier))
+      .send({ items: [{ product_id: product.id, quantity: 1 }], payment_method: 'CASH', amount_paid: 20 })).body.data
+    sms.sendSms.mockRejectedValueOnce(new Error('down'))
+    expect((await textReceipt(fresh.id, { phone: '0201112233' })).status).toBe(502)
+
+    const results = await Promise.all([1, 2, 3, 4].map(() => textReceipt(fresh.id, { phone: '0201112233' })))
+    expect(results.map((r) => r.status).sort()).toEqual([200, 200, 200, 429])
+  })
+
   it("stops cashiers texting other cashiers' receipts", async () => {
     const res = await textReceipt(sale.id, {}, otherCashier)
     expect(res.status).toBe(403)

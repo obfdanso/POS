@@ -157,7 +157,8 @@ export default function ProductFormPage() {
         payload.append('supplier_id', form.supplier_id)
         payload.append('price', form.price)
         payload.append('cost_price', form.cost_price)
-        payload.append('quantity', form.quantity)
+        // Stock is only set on create; later changes go through inventory so they are logged
+        if (!isEditing) payload.append('quantity', form.quantity)
         payload.append('low_stock_threshold', form.low_stock_threshold)
         if (canToggleActive) payload.append('is_active', form.is_active ? 'true' : 'false')
         payload.append('image', imageFile)
@@ -170,7 +171,7 @@ export default function ProductFormPage() {
           supplier_id: form.supplier_id || null,
           price: parseFloat(form.price),
           cost_price: form.cost_price ? parseFloat(form.cost_price) : null,
-          quantity: parseInt(form.quantity),
+          ...(!isEditing && { quantity: parseInt(form.quantity) }),
           low_stock_threshold: parseInt(form.low_stock_threshold),
           ...(canToggleActive && { is_active: form.is_active }),
           ...(isEditing && imageRemoved && { image_url: null }),

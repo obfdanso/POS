@@ -143,12 +143,19 @@ describe('POST /api/products', () => {
 })
 
 describe('PUT /api/products/:id', () => {
-  it('updates fields but never stock quantity', async () => {
+  it('updates fields', async () => {
     const res = await request(app).put(`/api/products/${product.id}`).set(auth(manager))
-      .send({ name: 'ProdTest Alpha Renamed', price: 11, quantity: 999 })
+      .send({ name: 'ProdTest Alpha Renamed', price: 11 })
     expect(res.status).toBe(200)
     expect(res.body.data.name).toBe('ProdTest Alpha Renamed')
     expect(res.body.data.quantity).toBe(5)
+  })
+
+  it('rejects stock quantity, which only changes through inventory', async () => {
+    const res = await request(app).put(`/api/products/${product.id}`).set(auth(manager)).send({ quantity: 999 })
+    expect(res.status).toBe(422)
+    const unchanged = await prisma.product.findUnique({ where: { id: product.id } })
+    expect(unchanged.quantity).toBe(5)
   })
 
   it('clears the image when image_url is null, and rejects setting a URL', async () => {

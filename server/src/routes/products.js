@@ -83,7 +83,7 @@ function updateProductValidation() {
     body('category_id').optional().isUUID().withMessage('Valid category ID is required'),
     body('price').optional().isFloat({ min: 0.01, max: 1000000 }).withMessage('Price must be > 0').toFloat(),
     body('cost_price').optional({ values: 'falsy' }).isFloat({ min: 0, max: 1000000 }).withMessage('Cost price must be between 0 and 1000000').toFloat(),
-    body('quantity').optional().isInt({ min: 0, max: 1000000 }).withMessage('Quantity must be between 0 and 1,000,000').toInt(),
+    // quantity is deliberately absent: stock changes go through /inventory, so sending it is rejected
     body('low_stock_threshold').optional().isInt({ min: 0, max: 1000000 }).withMessage('Threshold must be between 0 and 1,000,000').toInt(),
     body('is_active').optional().isBoolean().withMessage('is_active must be true or false').toBoolean(),
   ]

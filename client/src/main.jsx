@@ -7,8 +7,12 @@ import { CartProvider } from './context/CartContext'
 import { SettingsProvider } from './context/SettingsContext'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { OfflineBanner } from './components/OfflineBanner'
+import { initErrorReporting } from './utils/errorReporting'
 import App from './App.jsx'
 import './index.css'
+
+// Optional: report crashes to Sentry when VITE_SENTRY_DSN is set at build time
+initErrorReporting()
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

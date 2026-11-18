@@ -1,4 +1,5 @@
 import { createContext, useReducer, useEffect } from 'react'
+import { setReportingUser } from '../utils/errorReporting'
 import api, { setAccessToken, clearAccessToken, refreshAccessToken } from '../services/api'
 
 export const AuthContext = createContext(null)
@@ -40,6 +41,13 @@ function authReducer(state, action) {
 
 export function AuthProvider({ children }) {
   const [state, dispatch] = useReducer(authReducer, initialState)
+
+  // Error reports carry only the signed-in user's ID and role
+  const userId = state.user?.id
+  const userRole = state.user?.role
+  useEffect(() => {
+    setReportingUser(userId ? { id: userId, role: userRole } : null)
+  }, [userId, userRole])
 
   // On app load: try silent refresh using the httpOnly cookie
   useEffect(() => {

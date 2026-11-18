@@ -8,6 +8,7 @@ const generateTransactionId = require('../utils/generateTransactionId')
 const { buildDateRange } = require('../utils/dateRange')
 const { isEmailConfigured, sendMail } = require('../utils/mailer')
 const { buildReceiptEmail } = require('../utils/receiptEmail')
+const { activePromotionsFor, bestPromotionFor } = require('./promotionService')
 
 async function createSale({ items, customer_id, payment_method, amount_paid, discount_amount = 0, redeem_points = 0, notes, reference }, user) {
   // Support legacy callers that pass userId as a string
@@ -67,27 +68,40 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
     }
   }
 
-  // Step 2: Calculate totals
+  // Step 2: Calculate totals. Running promotions come off each line first (the biggest one that
+  // applies); a discount the cashier enters comes off what is left
   const taxRate = await getNumericSetting('tax_rate', 0)
+  const promotions = await activePromotionsFor(products)
   let subtotal = 0
   const saleItems = items.map((item) => {
     const product = productMap.get(item.product_id)
     const unit_price = parseFloat(product.price)
-    const itemDiscount = round2(parseFloat(item.discount || 0))
     const lineGross = round2(unit_price * item.quantity)
-    if (itemDiscount > lineGross) {
+    const promotion = bestPromotionFor(product, promotions)
+    const promotionDiscount = promotion ? round2((lineGross * Number(promotion.percent_off)) / 100) : 0
+    const manualDiscount = round2(parseFloat(item.discount || 0))
+    const discountable = round2(lineGross - promotionDiscount)
+    if (manualDiscount > discountable) {
       throw new ValidationError('Invalid discount', [
-        { field: 'items', message: `Discount on "${product.name}" cannot exceed its line total (${lineGross.toFixed(2)})` },
+        {
+          field: 'items',
+          message: promotion
+            ? `Discount on "${product.name}" cannot exceed its line total after the promotion (${discountable.toFixed(2)})`
+            : `Discount on "${product.name}" cannot exceed its line total (${lineGross.toFixed(2)})`,
+        },
       ])
     }
-    const lineTotal = round2(lineGross - itemDiscount)
+    const lineDiscount = round2(promotionDiscount + manualDiscount)
+    const lineTotal = round2(lineGross - lineDiscount)
     subtotal = round2(subtotal + lineTotal)
     return {
       product_id: item.product_id,
       quantity: item.quantity,
       unit_price,
       unit_cost: product.cost_price, // snapshot for profit reporting
-      discount: itemDiscount,
+      discount: lineDiscount,
+      promotion_id: promotion?.id ?? null,
+      promotion_discount: promotionDiscount,
       total: lineTotal,
       product_name: product.name, // for receipt
     }
@@ -231,6 +245,8 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
         unit_price: si.unit_price,
         unit_cost: si.unit_cost,
         discount: si.discount,
+        promotion_id: si.promotion_id,
+        promotion_discount: si.promotion_discount,
         total: si.total,
       })),
     })
@@ -315,6 +331,7 @@ async function getSaleById(id) {
       sale_items: {
         include: {
           product: { select: { id: true, name: true, sku: true } },
+          promotion: { select: { id: true, name: true, percent_off: true } },
         },
       },
       payments: true,

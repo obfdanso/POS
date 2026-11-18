@@ -32,6 +32,19 @@ function normalizePhone(raw, countryCode = process.env.SMS_COUNTRY_CODE || '233'
   return `+${digits}`
 }
 
+/**
+ * Whether texts may go to this number. Texts cost money, so by default only numbers in
+ * SMS_COUNTRY_CODE are allowed; SMS_ALLOWED_COUNTRY_CODES (e.g. "233,234") widens that.
+ */
+function isAllowedDestination(phone) {
+  const allowed = (process.env.SMS_ALLOWED_COUNTRY_CODES || process.env.SMS_COUNTRY_CODE || '233')
+    .split(',')
+    .map((c) => c.trim().replace(/^\+/, ''))
+    .filter(Boolean)
+  const digits = String(phone).replace(/^\+/, '')
+  return allowed.some((code) => digits.startsWith(code))
+}
+
 async function readJson(res) {
   try {
     return await res.json()
@@ -76,4 +89,4 @@ async function sendSms(to, message) {
   throw new Error('SMS is not configured')
 }
 
-module.exports = { isSmsConfigured, normalizePhone, sendSms }
+module.exports = { isSmsConfigured, normalizePhone, isAllowedDestination, sendSms }

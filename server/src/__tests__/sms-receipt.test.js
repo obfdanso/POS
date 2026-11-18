@@ -70,9 +70,33 @@ describe('POST /api/sales/:id/sms-receipt', () => {
   })
 
   it('texts a number typed at the till', async () => {
-    const res = await textReceipt(walkInSale.id, { phone: '+44 7700 900123' })
+    const res = await textReceipt(walkInSale.id, { phone: '020 111 2233' })
     expect(res.status).toBe(200)
-    expect(sms.sendSms.mock.calls[0][0]).toBe('+447700900123')
+    expect(sms.sendSms.mock.calls[0][0]).toBe('+233201112233')
+  })
+
+  it('only texts other countries when they are allowed', async () => {
+    const blocked = await textReceipt(walkInSale.id, { phone: '+44 7700 900123' })
+    expect(blocked.status).toBe(422)
+    expect(blocked.body.error.details[0].message).toMatch(/local numbers/)
+    expect(sms.sendSms).not.toHaveBeenCalled()
+
+    process.env.SMS_ALLOWED_COUNTRY_CODES = '233, 44'
+    try {
+      const res = await textReceipt(walkInSale.id, { phone: '+44 7700 900123' })
+      expect(res.status).toBe(200)
+      expect(sms.sendSms.mock.calls[0][0]).toBe('+447700900123')
+    } finally {
+      delete process.env.SMS_ALLOWED_COUNTRY_CODES
+    }
+  })
+
+  it('texts one receipt at most 3 times', async () => {
+    // walkInSale has been texted twice by the tests above
+    expect((await textReceipt(walkInSale.id, { phone: '0201112233' })).status).toBe(200)
+    const res = await textReceipt(walkInSale.id, { phone: '0201112233' })
+    expect(res.status).toBe(429)
+    expect(res.body.error.code).toBe('SMS_LIMIT')
   })
 
   it('asks for a number for a walk-in sale, and rejects one that is not a phone number', async () => {

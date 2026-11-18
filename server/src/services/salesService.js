@@ -8,7 +8,7 @@ const generateTransactionId = require('../utils/generateTransactionId')
 const { buildDateRange } = require('../utils/dateRange')
 const { isEmailConfigured, sendMail } = require('../utils/mailer')
 const { buildReceiptEmail } = require('../utils/receiptEmail')
-const { isSmsConfigured, normalizePhone, sendSms } = require('../utils/sms')
+const { isSmsConfigured, normalizePhone, isAllowedDestination, sendSms } = require('../utils/sms')
 const { buildReceiptSms } = require('../utils/receiptSms')
 const { activePromotionsFor, bestPromotionFor } = require('./promotionService')
 
@@ -684,6 +684,8 @@ async function emailReceipt(sale, userId, email) {
  * Texts a sale's receipt to `phone`, or to the customer's number on file. SMS must be set up with
  * SMS_PROVIDER and the provider's keys. `sale` is the already-loaded, access-checked sale.
  */
+const MAX_TEXTS_PER_SALE = 3
+
 async function smsReceipt(sale, userId, phone) {
   if (!isSmsConfigured()) {
     throw new AppError("SMS receipts aren't set up on this server. Ask an admin to add the SMS settings.", 503, 'SMS_NOT_CONFIGURED')
@@ -695,6 +697,14 @@ async function smsReceipt(sale, userId, phone) {
   const to = normalizePhone(raw)
   if (!to) {
     throw new ValidationError('Invalid phone number', [{ field: 'phone', message: 'Enter a valid phone number, e.g. 024-123-4567' }])
+  }
+  if (!isAllowedDestination(to)) {
+    throw new ValidationError('Phone number not allowed', [{ field: 'phone', message: 'Receipts can only be texted to local numbers' }])
+  }
+  // Texts cost money, so one sale's receipt can only be texted a few times
+  const alreadySent = await prisma.auditLog.count({ where: { entity_id: sale.id, action: 'RECEIPT_TEXTED' } })
+  if (alreadySent >= MAX_TEXTS_PER_SALE) {
+    throw new AppError(`This receipt has already been texted ${MAX_TEXTS_PER_SALE} times.`, 429, 'SMS_LIMIT')
   }
   const [name, currency] = await Promise.all([getSettingValue('store_name', 'My Store'), getSettingValue('currency_symbol', 'GH₵')])
   try {

@@ -53,13 +53,14 @@ model User {
   created_at            DateTime  @default(now())
   updated_at            DateTime  @updatedAt
 
-  sales          Sale[]
-  inventory_logs InventoryLog[]
-  auth_logs      AuthLog[]
-  audit_logs     AuditLog[]
-  shifts         Shift[]        @relation("ShiftCashier")
-  closed_shifts  Shift[]        @relation("ShiftClosedBy")
-  refunds        Refund[]
+  sales           Sale[]
+  inventory_logs  InventoryLog[]
+  auth_logs       AuthLog[]
+  audit_logs      AuditLog[]
+  shifts          Shift[]         @relation("ShiftCashier")
+  closed_shifts   Shift[]         @relation("ShiftClosedBy")
+  refunds         Refund[]
+  purchase_orders PurchaseOrder[]
 }
 
 model Category {
@@ -82,7 +83,8 @@ model Supplier {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  products Product[]
+  products        Product[]
+  purchase_orders PurchaseOrder[]
 }
 
 model Product {
@@ -101,10 +103,11 @@ model Product {
   created_at          DateTime @default(now())
   updated_at          DateTime @updatedAt
 
-  category       Category       @relation(fields: [category_id], references: [id])
-  supplier       Supplier?      @relation(fields: [supplier_id], references: [id])
-  sale_items     SaleItem[]
-  inventory_logs InventoryLog[]
+  category             Category            @relation(fields: [category_id], references: [id])
+  supplier             Supplier?           @relation(fields: [supplier_id], references: [id])
+  sale_items           SaleItem[]
+  inventory_logs       InventoryLog[]
+  purchase_order_items PurchaseOrderItem[]
 
   @@index([barcode])
   @@index([sku])
@@ -328,4 +331,51 @@ model AuditLog {
 
   @@index([entity, entity_id])
   @@index([created_at])
+}
+
+enum PurchaseOrderStatus {
+  ORDERED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+}
+
+// Stock ordered from a supplier. Receiving goods (all at once or over several deliveries) adds them to stock
+model PurchaseOrder {
+  id            String              @id @default(uuid())
+  po_number     String              @unique
+  supplier_id   String
+  created_by_id String
+  status        PurchaseOrderStatus @default(ORDERED)
+  // Sum of quantity ordered × unit cost
+  total_cost    Decimal             @db.Decimal(12, 2)
+  expected_at   DateTime?
+  received_at   DateTime?
+  notes         String?
+  created_at    DateTime            @default(now())
+  updated_at    DateTime            @updatedAt
+
+  supplier   Supplier            @relation(fields: [supplier_id], references: [id], onDelete: Restrict)
+  created_by User                @relation(fields: [created_by_id], references: [id])
+  items      PurchaseOrderItem[]
+
+  @@index([supplier_id])
+  @@index([status])
+  @@index([created_at])
+}
+
+model PurchaseOrderItem {
+  id                String   @id @default(uuid())
+  purchase_order_id String
+  product_id        String
+  quantity_ordered  Int
+  quantity_received Int      @default(0)
+  unit_cost         Decimal  @db.Decimal(10, 2)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  purchase_order PurchaseOrder @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
+  product        Product       @relation(fields: [product_id], references: [id], onDelete: Restrict)
+
+  @@unique([purchase_order_id, product_id])
 }

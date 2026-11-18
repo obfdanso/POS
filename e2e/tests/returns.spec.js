@@ -30,7 +30,16 @@ test('manager returns one item from a sale and prints the refund slip', async ({
   await expect(after.getByText(/Refunded GH₵/)).toBeVisible()
   await expect(after.getByText(/Dented can/)).toBeVisible()
 
-  // The slip opens in a print window
+  // The slip opens in a print window. Headless Chromium "prints" instantly, and the app then closes
+  // the window, so stub print to keep the slip open long enough to read
+  await page.evaluate(() => {
+    const open = window.open
+    window.open = (...args) => {
+      const win = open(...args)
+      if (win) win.print = () => {}
+      return win
+    }
+  })
   const [slip] = await Promise.all([
     page.waitForEvent('popup'),
     after.getByRole('button', { name: 'Print slip' }).click(),

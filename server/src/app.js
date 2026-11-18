@@ -25,6 +25,7 @@ const supplierRoutes = require('./routes/suppliers')
 const shiftRoutes = require('./routes/shifts')
 const purchaseOrderRoutes = require('./routes/purchaseOrders')
 const promotionRoutes = require('./routes/promotions')
+const paystackRoutes = require('./routes/paystack')
 
 const app = express()
 
@@ -50,7 +51,13 @@ app.use(
 )
 
 // Request parsing
-app.use(express.json({ limit: '1mb' }))
+// Paystack signs the exact bytes it sends, so keep them for its webhook
+app.use(express.json({
+  limit: '1mb',
+  verify: (req, res, buf) => {
+    if (req.originalUrl.startsWith('/api/paystack/webhook')) req.rawBody = buf
+  },
+}))
 app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())
 
@@ -110,6 +117,7 @@ app.use('/api/suppliers', supplierRoutes)
 app.use('/api/shifts', shiftRoutes)
 app.use('/api/purchase-orders', purchaseOrderRoutes)
 app.use('/api/promotions', promotionRoutes)
+app.use('/api/paystack', paystackRoutes)
 
 // 404 handler
 app.use((req, res) => {

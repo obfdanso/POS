@@ -23,7 +23,11 @@ function buildReceiptHtml(sale, settings, fmt) {
         <td style="text-align:center;padding:2px 4px;">${item.quantity}</td>
         <td style="text-align:right;padding:2px 4px;">${fmt(item.unit_price)}</td>
         <td style="text-align:right;padding:2px 0;">${fmt(item.total)}</td>
-      </tr>`).join('')
+      </tr>${parseFloat(item.discount) > 0 ? `
+      <tr>
+        <td colspan="3" style="text-align:left;padding:0 0 2px 8px;">Item discount</td>
+        <td style="text-align:right;padding:0 0 2px 0;">-${fmt(item.discount)}</td>
+      </tr>` : ''}`).join('')
 
   return `<!DOCTYPE html>
 <html>
@@ -142,11 +146,20 @@ export function Receipt({ sale, onClose, actions }) {
             <span className="w-1/5 text-right">Total</span>
           </div>
           {(items || []).map((item) => (
-            <div key={item.id ?? item.product_id} className="flex justify-between py-0.5">
-              <span className="w-2/5 truncate">{item.product?.name || item.name}</span>
-              <span className="w-1/5 text-right">{item.quantity}</span>
-              <span className="w-1/5 text-right">{fmt(item.unit_price)}</span>
-              <span className="w-1/5 text-right">{fmt(item.total)}</span>
+            <div key={item.id ?? item.product_id} className="py-0.5">
+              <div className="flex justify-between">
+                <span className="w-2/5 truncate">{item.product?.name || item.name}</span>
+                <span className="w-1/5 text-right">{item.quantity}</span>
+                <span className="w-1/5 text-right">{fmt(item.unit_price)}</span>
+                <span className="w-1/5 text-right">{fmt(item.total)}</span>
+              </div>
+              {/* The line total is after this discount, so show it to explain the difference */}
+              {parseFloat(item.discount) > 0 && (
+                <div className="flex justify-between pl-2 text-gray-500">
+                  <span>Item discount</span>
+                  <span>-{fmt(item.discount)}</span>
+                </div>
+              )}
             </div>
           ))}
         </div>

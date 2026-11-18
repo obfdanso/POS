@@ -54,7 +54,7 @@ const changePasswordValidation = [
 
 const profileValidation = [
   body('full_name').optional().trim().notEmpty().withMessage('Full name cannot be empty').isLength({ max: 100 }).withMessage('Full name must be under 100 characters'),
-  body('email').optional().isEmail().normalizeEmail().withMessage('Valid email is required'),
+  body('email').optional().isEmail().withMessage('Valid email is required'),
 ]
 
 router.post('/login', authLimiter, exactBody(loginValidation), validate, authController.login)

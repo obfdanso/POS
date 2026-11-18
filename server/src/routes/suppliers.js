@@ -13,7 +13,7 @@ router.use(authenticate)
 const supplierValidation = [
   body('name').trim().notEmpty().isLength({ max: 150 }).withMessage('Supplier name is required (max 150 chars)'),
   body('phone').optional({ checkFalsy: true }).trim().isLength({ max: 30 }).withMessage('Phone too long'),
-  body('email').optional({ checkFalsy: true }).isEmail().normalizeEmail().withMessage('Valid email required'),
+  body('email').optional({ checkFalsy: true }).isEmail().withMessage('Valid email required'),
   body('address').optional({ checkFalsy: true }).trim().isLength({ max: 255 }).withMessage('Address too long'),
   body('website').optional({ checkFalsy: true }).trim().isLength({ max: 255 }).withMessage('Website URL too long'),
 ]

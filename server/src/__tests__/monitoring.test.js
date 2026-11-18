@@ -1,0 +1,28 @@
+require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
+const { app, prisma, request } = require('./helpers')
+const errorHandler = require('../middleware/errorHandler')
+
+afterAll(() => prisma.$disconnect())
+
+describe('Request IDs', () => {
+  it('tags every response with a generated ID', async () => {
+    const res = await request(app).get('/api/health')
+    expect(res.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/)
+    const again = await request(app).get('/api/health')
+    expect(again.headers['x-request-id']).not.toBe(res.headers['x-request-id'])
+  })
+
+  it('reuses a well-formed incoming ID and replaces a malformed one', async () => {
+    const reused = await request(app).get('/api/health').set('X-Request-Id', 'till-3.req_42')
+    expect(reused.headers['x-request-id']).toBe('till-3.req_42')
+    const replaced = await request(app).get('/api/health').set('X-Request-Id', 'bad id "quoted" '.padEnd(80, 'x'))
+    expect(replaced.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/)
+  })
+
+  it('includes the ID in unexpected-error responses so staff can quote it', () => {
+    const res = { status: jest.fn().mockReturnThis(), json: jest.fn() }
+    errorHandler(new Error('boom'), { id: 'req-123' }, res, () => {})
+    expect(res.status).toHaveBeenCalledWith(500)
+    expect(res.json.mock.calls[0][0].error).toMatchObject({ code: 'INTERNAL_ERROR', request_id: 'req-123' })
+  })
+})

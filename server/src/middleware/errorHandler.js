@@ -4,11 +4,12 @@ const { logger } = require('./logger')
 
 // Express recognises error handlers by their four parameters, so `_next` must stay
 function errorHandler(err, req, res, _next) {
-  // Log the error
+  // Log the error with its request ID
+  const tag = req.id ? `[${req.id}] ` : ''
   if (process.env.NODE_ENV === 'development') {
-    logger.error(err.stack || err.message)
+    logger.error(`${tag}${err.stack || err.message}`)
   } else {
-    logger.error(err.message)
+    logger.error(`${tag}${err.message}`)
   }
 
   // Don't keep an uploaded image when the request that brought it failed
@@ -119,7 +120,8 @@ function errorHandler(err, req, res, _next) {
     return res.status(err.statusCode).json(response)
   }
 
-  // Unhandled/programming errors — don't leak details in production
+  // Unhandled/programming errors — don't leak details in production, but keep the stack in the logs
+  if (process.env.NODE_ENV !== 'development' && err.stack) logger.error(`${tag}${err.stack}`)
   res.status(500).json({
     success: false,
     error: {
@@ -128,6 +130,8 @@ function errorHandler(err, req, res, _next) {
         process.env.NODE_ENV === 'development'
           ? err.message
           : 'An unexpected error occurred',
+      // Staff can quote this so the matching log entry is easy to find
+      request_id: req.id,
     },
   })
 }

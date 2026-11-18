@@ -8,6 +8,7 @@ const path = require('path')
 
 const { logger, morganStream } = require('./middleware/logger')
 const errorHandler = require('./middleware/errorHandler')
+const requestId = require('./middleware/requestId')
 const authRoutes = require('./routes/auth')
 const productRoutes = require('./routes/products')
 const categoryRoutes = require('./routes/categories')
@@ -28,6 +29,9 @@ if (process.env.TRUST_PROXY) {
   app.set('trust proxy', Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY)
 }
 
+// Tag every request with an ID first, so every log line and error can be traced back to it
+app.use(requestId)
+
 // Security headers
 app.use(helmet())
 
@@ -36,6 +40,7 @@ app.use(
   cors({
     origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
     credentials: true,
+    exposedHeaders: ['X-Request-Id'],
   })
 )
 
@@ -44,8 +49,13 @@ app.use(express.json({ limit: '1mb' }))
 app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())
 
-// HTTP request logging
-app.use(morgan('combined', { stream: morganStream }))
+// HTTP request logging: request ID, client, method, path, status, size and response time
+morgan.token('id', (req) => req.id)
+app.use(
+  morgan(':id :remote-addr ":method :url HTTP/:http-version" :status :res[content-length] - :response-time ms ":user-agent"', {
+    stream: morganStream,
+  })
+)
 
 // Static files for uploaded product images
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')))

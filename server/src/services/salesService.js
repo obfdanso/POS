@@ -6,6 +6,8 @@ const { verifyPaystackPayment } = require('../utils/paystack')
 const { logger } = require('../middleware/logger')
 const generateTransactionId = require('../utils/generateTransactionId')
 const { buildDateRange } = require('../utils/dateRange')
+const { isEmailConfigured, sendMail } = require('../utils/mailer')
+const { buildReceiptEmail } = require('../utils/receiptEmail')
 
 async function createSale({ items, customer_id, payment_method, amount_paid, discount_amount = 0, redeem_points = 0, notes, reference }, user) {
   // Support legacy callers that pass userId as a string
@@ -309,7 +311,7 @@ async function getSaleById(id) {
     where: { id },
     include: {
       user: { select: { id: true, username: true, full_name: true } },
-      customer: { select: { id: true, name: true, phone: true } },
+      customer: { select: { id: true, name: true, phone: true, email: true } },
       sale_items: {
         include: {
           product: { select: { id: true, name: true, sku: true } },
@@ -570,6 +572,36 @@ function notEnoughPointsError(balance) {
   ])
 }
 
+/**
+ * Emails a sale's receipt to `email`, or to the customer's address on file. Email must be set up
+ * with SMTP_HOST and MAIL_FROM. `sale` is the already-loaded, access-checked sale.
+ */
+async function emailReceipt(sale, userId, email) {
+  if (!isEmailConfigured()) {
+    throw new AppError("Email receipts aren't set up on this server. Ask an admin to add the SMTP settings.", 503, 'EMAIL_NOT_CONFIGURED')
+  }
+  const to = email || sale.customer?.email
+  if (!to) {
+    throw new ValidationError('Email required', [{ field: 'email', message: 'Enter an email address to send the receipt to' }])
+  }
+  const [name, address, phone, currency, footer] = await Promise.all([
+    getSettingValue('store_name', 'My Store'),
+    getSettingValue('store_address', ''),
+    getSettingValue('store_phone', ''),
+    getSettingValue('currency_symbol', 'GH₵'),
+    getSettingValue('receipt_footer', ''),
+  ])
+  const message = buildReceiptEmail(sale, { name, address, phone, currency, footer })
+  try {
+    await sendMail({ to, ...message })
+  } catch (err) {
+    logger.error(`Receipt email for ${sale.transaction_id} failed: ${err.message}`)
+    throw new AppError('The email could not be sent. Check the address and try again.', 502, 'EMAIL_FAILED')
+  }
+  await recordAudit({ userId, action: 'RECEIPT_EMAILED', entity: 'Sale', entityId: sale.id, details: `${sale.transaction_id} to ${to}` })
+  return { to }
+}
+
 // Half-up to 2 decimals; EPSILON stops values like 1.005 (stored as 1.00499…) rounding down
 function round2(n) {
   return Math.round((n + Number.EPSILON) * 100) / 100
@@ -589,4 +621,4 @@ async function getNumericSetting(key, defaultValue) {
   return isNaN(val) ? defaultValue : val
 }
 
-module.exports = { SALE_SORTS, createSale, getSaleById, listSales, processRefund, getReceiptData }
+module.exports = { SALE_SORTS, createSale, getSaleById, listSales, processRefund, getReceiptData, emailReceipt }

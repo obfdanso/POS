@@ -78,4 +78,30 @@ router.post(
   salesController.processRefund
 )
 
+// Each receipt email goes to an outside address, so limit how many one user can send
+const emailRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => req.user.id,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
+  message: { success: false, error: { code: 'RATE_LIMITED', message: 'Too many receipt emails. Wait a minute and try again.' } },
+})
+
+// With no `email`, the receipt goes to the customer's address on file
+router.post(
+  '/:id/email-receipt',
+  authorize(['ADMIN', 'MANAGER', 'CASHIER']),
+  emailRateLimit,
+  param('id').isUUID(),
+  exactBody([
+    body('email').optional().isString().withMessage('Email must be text').trim()
+      .isEmail().withMessage('Enter a valid email address')
+      .isLength({ max: 254 }).withMessage('Email must be 254 characters or fewer'),
+  ]),
+  validate,
+  salesController.emailReceipt
+)
+
 module.exports = router

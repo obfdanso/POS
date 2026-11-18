@@ -79,4 +79,18 @@ async function getReceipt(req, res, next) {
   }
 }
 
-module.exports = { createSale, listSales, getSale, processRefund, getReceipt }
+async function emailReceipt(req, res, next) {
+  try {
+    const sale = await salesService.getSaleById(req.params.id)
+    if (req.user.role === 'CASHIER' && sale.user_id !== req.user.id) {
+      const { ForbiddenError } = require('../utils/errors')
+      throw new ForbiddenError('You can only email receipts for your own sales')
+    }
+    const { to } = await salesService.emailReceipt(sale, req.user.id, req.body?.email)
+    res.json({ success: true, data: { to }, message: `Receipt sent to ${to}` })
+  } catch (err) {
+    next(err)
+  }
+}
+
+module.exports = { createSale, listSales, getSale, processRefund, getReceipt, emailReceipt }

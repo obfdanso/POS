@@ -91,6 +91,7 @@
 | `tax_amount` | Decimal(10,2) | Tax on (subtotal − discount), default 0 |
 | `total_amount` | Decimal(10,2) | subtotal − discount + tax |
 | `payment_method` | PaymentMethod | |
+| `client_ref` | String? | Unique. The till's id for the sale, so a resend is never recorded twice |
 | `payment_status` | PaymentStatus | Default `COMPLETED`; `PARTIALLY_REFUNDED` after a return, `REFUNDED` once every unit is back |
 | `notes` | String? | |
 | `loyalty_points_earned` | Int | Points awarded for this sale, so a refund reverses exactly that |

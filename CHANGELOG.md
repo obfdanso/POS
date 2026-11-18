@@ -5,6 +5,7 @@ Notable changes to QuickMart POS, newest first.
 ## 2026-11-18
 
 ### Added
+- **Offline cash sales.** When the server can't be reached, the till saves cash sales on the device and sends them when the connection returns (or on **Send now**). Each sale carries a `client_ref`, so a resend is never recorded twice; a sale the server refuses (e.g. stock ran out) is shown with the reason.
 - **Product variants.** A product can have sizes or flavours, each a product of its own with its own SKU, barcode, price and stock. Add them from the product's edit page; the till shows one card per product and a picker for its options, and search or a scan finds a variant directly. API: `parent_id`, `variant_name`, `group_variants`.
 - **Refunds through Paystack.** The card or Mobile Money part of a return is sent back automatically through Paystack's refund API once the return is saved. Each refund shows its Paystack status on the sale, with buttons to retry a failed one or check on a pending one, and a signed webhook (`/api/paystack/webhook`) records when Paystack finishes. `PAYSTACK_AUTO_REFUND=false` turns the automatic sending off.
 - **Split payments.** A sale can be paid partly by Mobile Money or card (through Paystack, verified for exactly that part) and the rest in cash, with change from the cash part. Receipts list each part, shift totals count each part under its method, and refunds of split sales pay cash back first (recorded in the new `Refund.cash_amount`).

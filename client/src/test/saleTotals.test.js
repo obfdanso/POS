@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calculateTotals, lineTotal, maxRedeemablePoints } from '../utils/saleTotals'
+import { calculateTotals, lineTotal, maxRedeemablePoints, applyPromotions, bestPromotion } from '../utils/saleTotals'
 
 describe('calculateTotals (must match the server)', () => {
   it('rounds the way the server does', () => {
@@ -53,3 +53,43 @@ describe('maxRedeemablePoints', () => {
     expect(maxRedeemablePoints(50, 0, 120, 0)).toBe(0)
   })
 })
+
+describe('promotions (must match the server)', () => {
+  const promos = [
+    { id: 'drinks', category_id: 'cat-drinks', product_id: null, percent_off: 10 },
+    { id: 'cola', product_id: 'cola', category_id: null, percent_off: 25 },
+    { id: 'store', product_id: null, category_id: null, percent_off: 5 },
+  ]
+
+  it('picks the biggest promotion that applies', () => {
+    expect(bestPromotion({ product_id: 'cola', category_id: 'cat-drinks' }, promos).id).toBe('cola')
+    expect(bestPromotion({ product_id: 'juice', category_id: 'cat-drinks' }, promos).id).toBe('drinks')
+    expect(bestPromotion({ product_id: 'chips', category_id: 'cat-snacks' }, promos).id).toBe('store')
+    expect(bestPromotion({ product_id: 'chips', category_id: 'cat-snacks' }, [])).toBeNull()
+  })
+
+  it('prefers the more specific promotion on a tie', () => {
+    const tie = [{ id: 'store', percent_off: 10 }, { id: 'cat', category_id: 'c', percent_off: 10 }]
+    expect(bestPromotion({ product_id: 'x', category_id: 'c' }, tie).id).toBe('cat')
+  })
+
+  it('takes the promotion off first, then the cashier discount, matching the server', () => {
+    // Same sale as the server test: 2 colas at 10 with a 1.00 discount, and a juice at 7.99
+    const [cola, juice] = applyPromotions(
+      [
+        { product_id: 'cola', category_id: 'cat-drinks', price: 10, quantity: 2, discount: 1 },
+        { product_id: 'juice', category_id: 'cat-drinks', price: '7.99', quantity: 1 },
+      ],
+      promos
+    )
+    expect(cola).toMatchObject({ promotion_discount: 5, discount: 1, line_discount: 6 })
+    expect(juice.promotion_discount).toBe(0.8)
+    expect(calculateTotals([cola, juice], 0, 0).subtotal).toBe(21.19) // 14 + 7.19
+  })
+
+  it('caps the cashier discount at what is left after the promotion', () => {
+    const [line] = applyPromotions([{ product_id: 'cola', price: 10, quantity: 1, discount: 9 }], promos)
+    expect(line).toMatchObject({ promotion_discount: 2.5, discount: 7.5, line_discount: 10 })
+  })
+})
+

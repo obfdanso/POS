@@ -9,14 +9,51 @@ export function lineTotal(price, quantity, discount = 0) {
   return round2(round2(parseFloat(price) * quantity) - round2(discount || 0))
 }
 
+const specificity = (p) => (p.product_id ? 2 : p.category_id ? 1 : 0)
+
 /**
- * @param {{ price: number|string, quantity: number, discount?: number }[]} items
+ * The running promotion for an item: the biggest percentage off that applies to its product, its
+ * category, or the whole store; on a tie the most specific. Same rule as the server's
+ * bestPromotionFor (server/src/services/promotionService.js).
+ * @param {{ product_id: string, category_id?: string }} item
+ * @param {{ product_id?: string|null, category_id?: string|null, percent_off: number }[]} promotions
+ */
+export function bestPromotion(item, promotions = []) {
+  let best = null
+  for (const p of promotions) {
+    const applies = p.product_id ? p.product_id === item.product_id : p.category_id ? p.category_id === item.category_id : true
+    if (!applies) continue
+    const pct = Number(p.percent_off)
+    const bestPct = best ? Number(best.percent_off) : -1
+    if (pct > bestPct || (pct === bestPct && specificity(p) > specificity(best))) best = p
+  }
+  return best
+}
+
+/**
+ * Prices each cart line the way the server will: the promotion comes off first, then the cashier's
+ * discount (`discount`), capped at what is left. Adds `promotion`, `promotion_discount` and
+ * `line_discount` (both together); `discount` stays the cashier's part, which is what the API takes.
+ */
+export function applyPromotions(items, promotions = []) {
+  return items.map((i) => {
+    const gross = round2(parseFloat(i.price) * i.quantity)
+    const promotion = bestPromotion(i, promotions)
+    const promotionDiscount = promotion ? round2((gross * Number(promotion.percent_off)) / 100) : 0
+    const manual = Math.min(round2(i.discount || 0), round2(gross - promotionDiscount))
+    return { ...i, discount: manual, promotion, promotion_discount: promotionDiscount, line_discount: round2(promotionDiscount + manual) }
+  })
+}
+
+/**
+ * @param {{ price: number|string, quantity: number, discount?: number, line_discount?: number }[]} items
+ *   Lines from applyPromotions use `line_discount` (promotion plus cashier discount)
  * @param {number} cartDiscount
  * @param {number} taxRate - percentage, e.g. 3 for 3%
  * @param {number} [pointsDiscount] - value of loyalty points redeemed, applied after the cart discount
  */
 export function calculateTotals(items, cartDiscount, taxRate, pointsDiscount = 0) {
-  const subtotal = items.reduce((sum, i) => round2(sum + lineTotal(i.price, i.quantity, i.discount)), 0)
+  const subtotal = items.reduce((sum, i) => round2(sum + lineTotal(i.price, i.quantity, i.line_discount ?? i.discount)), 0)
   const discount = Math.min(round2(cartDiscount || 0), subtotal)
   const points = Math.min(round2(pointsDiscount || 0), round2(subtotal - discount))
   const taxable = round2(subtotal - round2(discount + points))

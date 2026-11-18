@@ -15,5 +15,8 @@ export function getFieldErrors(err) {
  * @returns {string}
  */
 export function getErrorMessage(err, fallback) {
-  return err?.response?.data?.error?.message ?? fallback
+  const error = err?.response?.data?.error
+  const message = error?.message ?? fallback
+  // Unexpected server errors carry a request ID that matches the server log entry
+  return error?.request_id ? `${message} (ref ${String(error.request_id).slice(0, 8)})` : message
 }

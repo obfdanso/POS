@@ -16,6 +16,9 @@ function formatMethod(method) {
 function buildReceiptHtml(sale, settings, fmt) {
   const esc = escapeHtml
   const { transaction_id, created_at, user, customer, items, subtotal, discount_amount, tax_amount, total_amount, payment_method, payment, payment_status } = sale
+  // discount_amount includes the value of redeemed loyalty points; show the two separately
+  const pointsDiscount = parseFloat(sale.points_discount) || 0
+  const cartDiscount = Math.round((parseFloat(discount_amount) - pointsDiscount) * 100) / 100
 
   const itemsHTML = (items || []).map((item) => `
       <tr>
@@ -72,7 +75,8 @@ function buildReceiptHtml(sale, settings, fmt) {
   </table>
   <div class="dashed"></div>
   <div class="row"><span>Subtotal:</span><span>${fmt(subtotal)}</span></div>
-  ${parseFloat(discount_amount) > 0 ? `<div class="row"><span>Discount:</span><span>-${fmt(discount_amount)}</span></div>` : ''}
+  ${cartDiscount > 0 ? `<div class="row"><span>Discount:</span><span>-${fmt(cartDiscount)}</span></div>` : ''}
+  ${pointsDiscount > 0 ? `<div class="row"><span>Points (${esc(sale.loyalty_points_redeemed)} pts):</span><span>-${fmt(pointsDiscount)}</span></div>` : ''}
   ${parseFloat(tax_amount) > 0 ? `<div class="row"><span>Tax:</span><span>${fmt(tax_amount)}</span></div>` : ''}
   <div class="dashed"></div>
   <div class="row bold" style="font-size:14px;"><span>TOTAL:</span><span>${fmt(total_amount)}</span></div>
@@ -107,6 +111,9 @@ export function Receipt({ sale, onClose, actions }) {
   if (!sale) return null
 
   const { transaction_id, created_at, user, customer, items, subtotal, discount_amount, tax_amount, total_amount, payment_method, payment, payment_status } = sale
+  // discount_amount includes the value of redeemed loyalty points; show the two separately
+  const pointsDiscount = parseFloat(sale.points_discount) || 0
+  const cartDiscount = Math.round((parseFloat(discount_amount) - pointsDiscount) * 100) / 100
 
   function handlePrint() {
     const win = window.open('', '_blank', 'width=420,height=640')
@@ -170,7 +177,8 @@ export function Receipt({ sale, onClose, actions }) {
 
         <div className="border-t border-dashed border-gray-400 pt-2 text-xs space-y-1">
           <Row label="Subtotal:" value={fmt(subtotal)} />
-          {parseFloat(discount_amount) > 0 && <Row label="Discount:" value={`-${fmt(discount_amount)}`} className="text-danger-600" />}
+          {cartDiscount > 0 && <Row label="Discount:" value={`-${fmt(cartDiscount)}`} className="text-danger-600" />}
+          {pointsDiscount > 0 && <Row label={`Points (${sale.loyalty_points_redeemed} pts):`} value={`-${fmt(pointsDiscount)}`} className="text-danger-600" />}
           {parseFloat(tax_amount) > 0 && <Row label="Tax:" value={fmt(tax_amount)} />}
           <Row label="TOTAL:" value={fmt(total_amount)} className="font-bold text-base border-t border-gray-300 pt-1 mt-1" />
           <Row label="Payment:" value={formatMethod(payment_method)} />

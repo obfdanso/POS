@@ -16,6 +16,7 @@
 | `PaymentStatus` | `COMPLETED`, `PARTIALLY_REFUNDED`, `REFUNDED`, `PENDING` |
 | `ShiftStatus` | `OPEN`, `CLOSED` |
 | `PurchaseOrderStatus` | `ORDERED`, `PARTIALLY_RECEIVED`, `RECEIVED`, `CANCELLED` |
+| `GatewayRefundStatus` | `NOT_SENT`, `PENDING`, `PROCESSING`, `PROCESSED`, `FAILED` |
 | `InventoryChangeType` | `SALE`, `RESTOCK`, `ADJUSTMENT`, `RETURN` |
 
 ---
@@ -65,6 +66,8 @@
 | `low_stock_threshold` | Int | Default 10, `CHECK >= 0` |
 | `image_url` | String? | `/uploads/products/…` (uploaded) or `/product-images/…` (seeded) |
 | `is_active` | Boolean | Soft-delete flag |
+| `parent_id` | UUID FK? | → the main Product when this is a variant (size, flavour), `ON DELETE RESTRICT`. One level only. `CHECK` it isn't the product itself. Indexed |
+| `variant_name` | String? | The option's label, e.g. `1.5L`. `CHECK` required for variants. Unique with `parent_id` |
 
 ### Customer
 | Column | Type | Notes |
@@ -127,6 +130,11 @@ One return against a sale.
 | `amount` | Decimal(10,2) | Money paid back, `CHECK >= 0` |
 | `method` | PaymentMethod | The sale's payment method |
 | `cash_amount` | Decimal(10,2) | The part paid back in cash from the drawer: all of a cash refund, cash first on a split sale. `CHECK` between 0 and `amount` |
+| `gateway_status` | GatewayRefundStatus? | The card / Mobile Money part's progress through Paystack. Null for cash refunds |
+| `gateway_amount` | Decimal(10,2)? | That part's amount, `CHECK` above 0 and at most `amount` |
+| `gateway_reference` | String? | The Paystack charge it goes back to (null when it must be sent from the dashboard) |
+| `gateway_refund_id` | String? | Paystack's refund id, unique; matches webhook events |
+| `gateway_error` | String? | Why Paystack refused it, or couldn't be reached |
 | `reason` | String | Why the items came back |
 
 ### RefundItem

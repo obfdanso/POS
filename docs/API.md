@@ -45,7 +45,7 @@ Every endpoint except `POST /auth/login` and `POST /auth/refresh` needs an acces
 - **Sorting**: list endpoints marked *sortable* accept `sort=<field>` and `order=asc|desc`. Unknown sort fields return `422`.
 - **Dates**: `start_date` / `end_date` are `YYYY-MM-DD` and inclusive. They're interpreted in the server's local time zone.
 - **Money** is returned as decimal strings, e.g. `"12.5"`. Format it for display on the client.
-- **Audit trail**: refunds, product (de)activation, supplier deletion, settings changes, and user creation, changes, and password resets are recorded in the `AuditLog` table with the user who did them. Stock changes are recorded in `InventoryLog`, and logins in `AuthLog`.
+- **Audit trail**: refunds (full and partial), shift closes, product (de)activation, supplier deletion, settings changes, and user creation, changes, and password resets are recorded in the `AuditLog` table with the user who did them. Stock changes are recorded in `InventoryLog`, and logins in `AuthLog`.
 
 ### Rate limits (per IP)
 
@@ -192,14 +192,15 @@ Processes the whole sale in one database transaction: validate stock, calculate 
 - **CASH:** `amount_paid` must cover the total; change is calculated.
 - **MOBILE_MONEY / CARD:** `reference` is verified with Paystack. The charge must be in GHS and equal the total **including tax**. A reference can pay for **one sale only**: reuse returns `409`.
 - The cost price and the loyalty points awarded are recorded on the sale, so later price changes don't alter profit reports or refunds.
-- **Transaction ID** format: `TXN-YYYYMMDD-NNNN`, numbered per day.
+- **Transaction ID** format: `TXN-YYYYMMDD-NNNN`, numbered per day after the highest number already issued that day.
+- **Shift:** the sale is linked to the cashier's open shift (`shift_id`). When the `require_open_shift` setting is `"true"`, selling with no open shift returns `422` with a `shift` field error, checked before any payment verification.
 
 **Response `201`:** the full sale, including `items` (each with its `product`) and `payment`.
 
 ### GET /sales — *sortable*
 Cashiers only ever see their own sales.
 
-**Query:** `page`, `per_page`, `start_date`, `end_date`, `user_id`, `customer_id`, `payment_status` (`COMPLETED`, `REFUNDED`, `PENDING`), `payment_method`, `search` (transaction ID contains).
+**Query:** `page`, `per_page`, `start_date`, `end_date`, `user_id`, `customer_id`, `payment_status` (`COMPLETED`, `PARTIALLY_REFUNDED`, `REFUNDED`, `PENDING`), `payment_method`, `search` (transaction ID contains).
 
 **Sort fields:** `created_at` (default, newest first), `transaction_id`, `total_amount`, `payment_method`, `payment_status`, `cashier`, `customer`.
 
@@ -212,7 +213,21 @@ The full sale with `items`, `payment`, cashier, and customer. Cashiers can only 
 Receipt data for reprinting: `{ "store": { "name", "address", "phone" }, "sale": { … } }`.
 
 ### POST /sales/:id/refund — ADMIN, MANAGER
-Full refund. It marks the sale `REFUNDED`, restores stock with `RETURN` inventory logs, removes exactly the loyalty points that sale awarded (never below zero), and writes an audit record of who refunded it. Refunding an already-refunded sale returns `422`, even if several requests arrive at once. Card and Mobile Money money must be returned through Paystack separately.
+Returns some or all of a sale. **Body (all optional):**
+```json
+{
+  "items": [{ "sale_item_id": "uuid", "quantity": 1, "restock": true }],
+  "reason": "Damaged packaging"
+}
+```
+- With no `items`, everything not yet returned is refunded (a full refund, as before).
+- Each returned unit is refunded at its share of what the customer paid: `total_amount × (line total × qty / line quantity) / subtotal`, which spreads the cart discount and tax. The return that brings back the last unit refunds exactly what is left, so the refunds always add up to the sale total.
+- `restock: false` (damaged goods) refunds the money but leaves stock unchanged. Restocked units get `RETURN` inventory logs.
+- The sale becomes `PARTIALLY_REFUNDED`, then `REFUNDED` once every unit is back. `refunded_amount` and each item's `refunded_quantity` keep running totals, and `refunds` lists every return with its items, amount, reason and who processed it.
+- Loyalty points are reduced so the customer keeps only the points for what they kept (never below zero).
+- If the refunding user has an open shift, the refund is linked to it, and cash refunds reduce that drawer's expected cash.
+- `422` when returning more than is left, an item from another sale, the same line twice, or a sale already fully refunded. Simultaneous returns against one sale are processed one at a time.
+- Card and Mobile Money money must be returned through Paystack separately; the system records the refund.
 
 ---
 
@@ -285,6 +300,29 @@ Clears the lockout and failed-attempt counter. Recorded in the auth log.
 
 ---
 
+## Shifts
+
+A shift is one person's session at a till: opened with a counted cash float, closed by counting the drawer. Every role can open and close its own shift; managers and admins can see and close anyone's. A user can have only one open shift.
+
+Every shift response includes a `summary`: `sales_count`, `sales_total`, `by_method` (`CASH`, `MOBILE_MONEY`, `CARD`, each `{ count, total }`), `cash_sales`, `cash_refunds`, and `expected_cash` (opening float + cash sales − cash refunds).
+
+### GET /shifts/current
+The caller's open shift with live totals, or `null`.
+
+### POST /shifts/open
+**Body:** `{ "opening_float": 200, "notes": "optional" }`. `409` if the caller already has an open shift.
+
+### POST /shifts/:id/close
+**Body:** `{ "counted_cash": 225.5, "notes": "optional" }`. Records `expected_cash`, `counted_cash`, `difference` (counted − expected; negative means short), who closed it and when, and writes a `SHIFT_CLOSED` audit record. `422` if already closed; `403` if a cashier tries to close someone else's.
+
+### GET /shifts — *sortable*
+**Query:** `page`, `per_page`, `status` (`OPEN`, `CLOSED`), `user_id`, `start_date`, `end_date` (by opening time), `sort` (`opened_at`, `closed_at`, `difference`, `cashier`), `order`. Cashiers only see their own. Each row includes `sales_count`.
+
+### GET /shifts/:id
+One shift with its `summary`. Cashiers can only view their own (`403`).
+
+---
+
 ## Settings
 
 ### GET /settings — any role
@@ -298,9 +336,11 @@ Clears the lockout and failed-attempt counter. Recorded in the auth log.
   "currency_symbol": "GH₵",
   "tax_rate": "3",
   "loyalty_points_rate": "10",
-  "receipt_footer": "Thank you for shopping with us!"
+  "receipt_footer": "Thank you for shopping with us!",
+  "require_open_shift": "true"
 }
 ```
+`require_open_shift`: `"true"` makes cashiers open a shift before they can sell.
 
 ---
 

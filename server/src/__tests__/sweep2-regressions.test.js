@@ -18,7 +18,7 @@ beforeAll(async () => {
   for (const [key, value] of Object.entries(TEST_SETTINGS)) {
     await prisma.settings.upsert({ where: { key }, update: { value }, create: { key, value } })
   }
-  ;[manager, cashier] = await Promise.all([createUserWithToken('MANAGER', PREFIX), createUserWithToken('CASHIER', PREFIX)])
+  [manager, cashier] = await Promise.all([createUserWithToken('MANAGER', PREFIX), createUserWithToken('CASHIER', PREFIX)])
   category = await prisma.category.create({ data: { name: 'Sweep2Test Category' } })
   product = await prisma.product.create({
     data: { name: 'Sweep2Test Item', sku: 'SWEEP2TEST-1', category_id: category.id, price: 10, cost_price: 6, quantity: 500 },

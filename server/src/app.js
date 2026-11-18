@@ -9,6 +9,7 @@ const path = require('path')
 const { logger, morganStream } = require('./middleware/logger')
 const errorHandler = require('./middleware/errorHandler')
 const requestId = require('./middleware/requestId')
+const prisma = require('./utils/prismaClient')
 const authRoutes = require('./routes/auth')
 const productRoutes = require('./routes/products')
 const categoryRoutes = require('./routes/categories')
@@ -70,6 +71,25 @@ app.get('/api/health', (req, res) => {
     data: { status: 'ok', timestamp: new Date().toISOString() },
     message: 'Server is running',
   })
+})
+
+// Readiness: the API can only serve requests while it can reach the database. Load balancers,
+// Docker and uptime monitors use this; it answers 503 (without error details) when it can't
+app.get('/api/health/ready', async (req, res) => {
+  const started = Date.now()
+  try {
+    await prisma.$queryRaw`SELECT 1`
+    res.status(200).json({
+      success: true,
+      data: { status: 'ready', database: 'ok', database_ms: Date.now() - started, uptime_s: Math.round(process.uptime()) },
+    })
+  } catch (err) {
+    logger.error(`[${req.id}] Readiness check failed: ${err.message}`)
+    res.status(503).json({
+      success: false,
+      error: { code: 'SERVICE_UNAVAILABLE', message: 'Database unreachable' },
+    })
+  }
 })
 
 // API Routes

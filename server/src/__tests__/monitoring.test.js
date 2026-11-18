@@ -26,3 +26,19 @@ describe('Request IDs', () => {
     expect(res.json.mock.calls[0][0].error).toMatchObject({ code: 'INTERNAL_ERROR', request_id: 'req-123' })
   })
 })
+
+describe('GET /api/health/ready', () => {
+  it('reports ready when the database answers', async () => {
+    const res = await request(app).get('/api/health/ready')
+    expect(res.status).toBe(200)
+    expect(res.body.data).toMatchObject({ status: 'ready', database: 'ok' })
+  })
+
+  it('answers 503 when the database is unreachable', async () => {
+    const spy = jest.spyOn(prisma, '$queryRaw').mockRejectedValueOnce(new Error('connection refused'))
+    const res = await request(app).get('/api/health/ready')
+    spy.mockRestore()
+    expect(res.status).toBe(503)
+    expect(res.body.error).toEqual({ code: 'SERVICE_UNAVAILABLE', message: 'Database unreachable' })
+  })
+})

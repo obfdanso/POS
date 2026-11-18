@@ -9,6 +9,7 @@ import { promotionsService } from '../services/promotions'
 import { OpenShiftModal, CloseShiftModal } from '../components/ShiftModals'
 import { formatCurrency } from '../utils/formatCurrency'
 import { lineTotal, round2, calculateTotals, maxRedeemablePoints, applyPromotions, bestPromotion } from '../utils/saleTotals'
+import { splitCash } from '../utils/payments'
 import { Button } from '../components/Button'
 import { Input } from '../components/Input'
 import { Modal } from '../components/Modal'
@@ -36,6 +37,9 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
 
   const [method, setMethod] = useState('CASH')
   const [amountPaid, setAmountPaid] = useState('')
+  // Split payments: the part charged by card or Mobile Money; cash (amountPaid) covers the rest
+  const [splitMethod, setSplitMethod] = useState('MOBILE_MONEY')
+  const [splitAmount, setSplitAmount] = useState('')
   const [errors, setErrors] = useState({})
   const [isChecking, setIsChecking] = useState(false)
   // A Paystack charge that succeeded; kept so a failed sale is retried without charging again
@@ -43,6 +47,7 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
 
   const paid = parseFloat(amountPaid)
   const change = method === 'CASH' && paid >= total ? paid - total : 0
+  const split = method === 'SPLIT' ? splitCash(total, splitAmount, amountPaid) : null
 
   function validate() {
     const errs = {}
@@ -51,6 +56,20 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
     }
     setErrors(errs)
     return Object.keys(errs).length === 0
+  }
+
+  // What to send for a charge Paystack has taken (and, for a split, the cash handed over)
+  function chargePayload(charge) {
+    return charge.split
+      ? {
+          payment_method: 'SPLIT',
+          payments: [
+            { method: 'CASH', amount: charge.split.cash },
+            { method: charge.method, amount: charge.total, reference: charge.reference },
+          ],
+          reference: charge.reference,
+        }
+      : { payment_method: charge.method, amount_paid: charge.total, reference: charge.reference }
   }
 
   async function handleConfirm() {
@@ -62,11 +81,24 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
     }
 
     if (paidCharge) {
-      onConfirm({ payment_method: paidCharge.method, amount_paid: paidCharge.total, reference: paidCharge.reference })
+      onConfirm(chargePayload(paidCharge))
       return
     }
 
-    // CARD or MOBILE_MONEY — open Paystack popup
+    let chargeMethod = method
+    let amount = total
+    let splitInfo = null
+    if (method === 'SPLIT') {
+      if (split.error) {
+        setErrors({ split: split.error })
+        return
+      }
+      chargeMethod = splitMethod
+      amount = round2(parseFloat(splitAmount))
+      splitInfo = { cash: round2(paid) }
+    }
+
+    // CARD or MOBILE_MONEY (all of it, or its part of a split) — open Paystack popup
     const publicKey = import.meta.env.VITE_PAYSTACK_PUBLIC_KEY
     if (!window.PaystackPop || !publicKey) {
       toast.error('Card and Mobile Money payments are not configured. Add VITE_PAYSTACK_PUBLIC_KEY to client/.env')
@@ -80,10 +112,10 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
     const handler = window.PaystackPop.setup({
       key: publicKey,
       email: selectedCustomer?.email || 'guest@quickmart.com',
-      amount: Math.round(total * 100), // Paystack uses pesewas; must equal the server-side sale total
+      amount: Math.round(amount * 100), // Paystack uses pesewas; must equal what the server expects for this part
       currency: 'GHS',
       ref: 'QM-' + Date.now() + '-' + Math.floor(Math.random() * 1000000),
-      channels: method === 'CARD' ? ['card'] : ['mobile_money'],
+      channels: chargeMethod === 'CARD' ? ['card'] : ['mobile_money'],
       metadata: {
         custom_fields: [{ display_name: 'Store', variable_name: 'store', value: store_name || 'QuickMart' }],
       },
@@ -91,8 +123,9 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
         toast.error('Payment was cancelled')
       },
       callback: (response) => {
-        setPaidCharge({ method, total, reference: response.reference })
-        onConfirm({ payment_method: method, amount_paid: total, reference: response.reference })
+        const charge = { method: chargeMethod, total: amount, reference: response.reference, split: splitInfo }
+        setPaidCharge(charge)
+        onConfirm(chargePayload(charge))
       },
     })
     handler.openIframe()
@@ -112,6 +145,7 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
     { value: 'CASH', label: 'Cash' },
     { value: 'MOBILE_MONEY', label: 'Mobile Money' },
     { value: 'CARD', label: 'Card' },
+    { value: 'SPLIT', label: 'Split' },
   ]
 
   return (
@@ -134,7 +168,7 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
         {/* Payment Method */}
         <div>
           <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Payment Method</p>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             {methods.map((m) => (
               <button
                 key={m.value}
@@ -186,6 +220,54 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
                 <span className="font-bold text-success-700">{fmt(change)}</span>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Split: part by card or Mobile Money (through Paystack), the rest in cash */}
+        {method === 'SPLIT' && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="flex flex-col gap-1">
+                <label htmlFor="split-method" className="text-sm font-medium text-gray-700 dark:text-gray-300">Part paid by</label>
+                <select
+                  id="split-method"
+                  value={splitMethod}
+                  onChange={(e) => setSplitMethod(e.target.value)}
+                  disabled={Boolean(paidCharge)}
+                  className="block w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  <option value="MOBILE_MONEY">Mobile Money</option>
+                  <option value="CARD">Card</option>
+                </select>
+              </div>
+              <Input
+                label={`Amount (${sym})`}
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={splitAmount}
+                onChange={(e) => { setSplitAmount(e.target.value); setErrors({}) }}
+                disabled={Boolean(paidCharge)}
+                autoFocus
+              />
+            </div>
+            <Input
+              label={`Cash received (${sym})`}
+              type="number"
+              min="0"
+              step="0.01"
+              value={amountPaid}
+              onChange={(e) => { setAmountPaid(e.target.value); setErrors({}) }}
+              disabled={Boolean(paidCharge)}
+              placeholder={split?.due > 0 ? split.due.toFixed(2) : ''}
+            />
+            {split?.due > 0 && (
+              <div className="flex justify-between items-center rounded-lg border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 px-3 py-2 text-sm">
+                <span className="text-gray-600 dark:text-gray-300">Cash due {fmt(split.due)}</span>
+                {split.change !== undefined && <span className="font-bold text-success-700">Change {fmt(split.change)}</span>}
+              </div>
+            )}
+            {errors.split && <p className="text-xs text-danger-600 dark:text-danger-400">{errors.split}</p>}
           </div>
         )}
 
@@ -616,7 +698,7 @@ export default function POSPage() {
     }
   }
 
-  async function handlePaymentConfirm({ payment_method, amount_paid, reference }) {
+  async function handlePaymentConfirm({ payment_method, amount_paid, reference, payments }) {
     setIsSubmitting(true)
     try {
       const payload = {
@@ -627,10 +709,11 @@ export default function POSPage() {
         })),
         customer_id: customer?.id || null,
         payment_method,
-        amount_paid,
+        // A split payment sends its parts instead of one amount
+        ...(payments ? { payments } : { amount_paid }),
         discount_amount: cartDiscount || 0,
         ...(customer && redeemPoints > 0 ? { redeem_points: redeemPoints } : {}),
-        ...(reference ? { reference } : {}),
+        ...(reference && !payments ? { reference } : {}),
       }
       const res = await salesService.create(payload)
       const sale = res.data?.data

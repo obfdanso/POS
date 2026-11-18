@@ -275,6 +275,13 @@ async function getSaleById(id) {
         },
       },
       payments: true,
+      refunds: {
+        include: {
+          user: { select: { id: true, full_name: true } },
+          items: { select: { sale_item_id: true, quantity: true, amount: true, restocked: true } },
+        },
+        orderBy: { created_at: 'asc' },
+      },
     },
   })
   if (!sale) throw new NotFoundError('Sale not found')
@@ -321,35 +328,118 @@ async function listSales({ page = 1, per_page = 20, start_date, end_date, user_i
   return { sales, total, page, per_page: take, total_pages: Math.ceil(total / take) }
 }
 
-async function processRefund(saleId, userId) {
-  const sale = await getSaleById(saleId)
-
-  if (sale.payment_status === 'REFUNDED') {
-    throw new ValidationError('Sale already refunded', [
-      { field: 'sale_id', message: 'This sale has already been refunded' },
-    ])
-  }
-
+/**
+ * Return some or all of a sale. `items` lists sale lines and quantities to return; leave it out to
+ * return everything not yet returned. Each line is restocked unless `restock: false` (damaged goods).
+ * The money refunded is each returned unit's share of what the customer actually paid (after the
+ * cart discount, including tax); the final return of a sale refunds exactly what is left, so
+ * rounding never makes the refunds add up to more or less than the sale total.
+ */
+async function processRefund(saleId, userId, { items, reason } = {}) {
   await prisma.$transaction(async (tx) => {
-    // Update sale status — conditional so two simultaneous refunds can't both restore stock
-    const { count } = await tx.sale.updateMany({
-      where: { id: saleId, payment_status: { not: 'REFUNDED' } },
-      data: { payment_status: 'REFUNDED' },
+    // Lock the sale so simultaneous returns against it are processed one after the other
+    const locked = await tx.$queryRaw`SELECT id FROM "Sale" WHERE id = ${saleId} FOR UPDATE`
+    if (locked.length === 0) throw new NotFoundError('Sale not found')
+
+    const sale = await tx.sale.findUnique({
+      where: { id: saleId },
+      include: { sale_items: { include: { product: { select: { name: true } } } } },
     })
-    if (count === 0) {
-      throw new ValidationError('Sale already refunded', [
-        { field: 'sale_id', message: 'This sale has already been refunded' },
-      ])
+    if (sale.payment_status === 'REFUNDED') {
+      throw new ValidationError('Sale already refunded', [{ field: 'sale_id', message: 'This sale has already been refunded' }])
+    }
+    if (sale.payment_status === 'PENDING') {
+      throw new ValidationError('Sale not completed', [{ field: 'sale_id', message: 'Only completed sales can be refunded' }])
     }
 
-    // Restore stock and create return inventory logs
-    for (const item of sale.sale_items) {
+    const lines = new Map(sale.sale_items.map((si) => [si.id, si]))
+    const requested =
+      items ??
+      sale.sale_items
+        .filter((si) => si.quantity > si.refunded_quantity)
+        .map((si) => ({ sale_item_id: si.id, quantity: si.quantity - si.refunded_quantity, restock: true }))
+
+    if (requested.length === 0) {
+      throw new ValidationError('Nothing to refund', [{ field: 'items', message: 'Choose at least one item to return' }])
+    }
+    const seen = new Set()
+    for (const item of requested) {
+      const line = lines.get(item.sale_item_id)
+      if (!line) {
+        throw new ValidationError('Item not in this sale', [{ field: 'items', message: 'Each returned item must belong to this sale' }])
+      }
+      if (seen.has(item.sale_item_id)) {
+        throw new ValidationError('Duplicate item', [{ field: 'items', message: `"${line.product.name}" is listed more than once` }])
+      }
+      seen.add(item.sale_item_id)
+      const remaining = line.quantity - line.refunded_quantity
+      if (item.quantity > remaining) {
+        throw new ValidationError('Too many returned', [
+          { field: 'items', message: `Only ${remaining} of "${line.product.name}" can still be returned` },
+        ])
+      }
+    }
+
+    const total = parseFloat(sale.total_amount)
+    const subtotal = parseFloat(sale.subtotal)
+    const alreadyRefunded = parseFloat(sale.refunded_amount)
+    const returnedUnits = requested.reduce((n, i) => n + i.quantity, 0)
+    const unitsLeft = sale.sale_items.reduce((n, si) => n + si.quantity - si.refunded_quantity, 0)
+    const completesSale = returnedUnits === unitsLeft
+
+    const refundItems = requested.map((item) => {
+      const line = lines.get(item.sale_item_id)
+      const lineValue = (parseFloat(line.total) * item.quantity) / line.quantity
+      const amount = subtotal > 0 ? round2((total * lineValue) / subtotal) : 0
+      return { ...item, amount, product_id: line.product_id, restock: item.restock !== false }
+    })
+    // The last return refunds exactly what is left, absorbing any rounding from earlier returns
+    if (completesSale) {
+      const allocated = refundItems.reduce((sum, i) => sum + i.amount, 0)
+      const last = refundItems[refundItems.length - 1]
+      last.amount = Math.max(0, round2(last.amount + (total - alreadyRefunded) - allocated))
+    }
+    // Rounding can never refund more than what is left of what the customer paid
+    const amount = Math.min(round2(refundItems.reduce((sum, i) => sum + i.amount, 0)), round2(total - alreadyRefunded))
+    const refundedAfter = round2(alreadyRefunded + amount)
+
+    for (const item of refundItems) {
+      await tx.saleItem.update({ where: { id: item.sale_item_id }, data: { refunded_quantity: { increment: item.quantity } } })
+    }
+
+    await tx.sale.update({
+      where: { id: saleId },
+      data: { refunded_amount: refundedAfter, payment_status: completesSale ? 'REFUNDED' : 'PARTIALLY_REFUNDED' },
+    })
+
+    const openShift = await tx.shift.findFirst({ where: { user_id: userId, status: 'OPEN' }, select: { id: true } })
+    const refundReason = reason?.trim() || (completesSale && !items ? 'Full refund' : 'Return')
+    await tx.refund.create({
+      data: {
+        sale_id: saleId,
+        user_id: userId,
+        shift_id: openShift?.id ?? null,
+        amount,
+        method: sale.payment_method,
+        reason: refundReason,
+        items: {
+          create: refundItems.map((i) => ({
+            sale_item_id: i.sale_item_id,
+            quantity: i.quantity,
+            amount: i.amount,
+            restocked: i.restock,
+          })),
+        },
+      },
+    })
+
+    // Put returned goods back on the shelf, logging each stock change
+    for (const item of refundItems.filter((i) => i.restock)) {
       const { quantity: newQty } = await tx.product.update({
         where: { id: item.product_id },
         data: { quantity: { increment: item.quantity } },
         select: { quantity: true },
       })
-
       await tx.inventoryLog.create({
         data: {
           product_id: item.product_id,
@@ -358,27 +448,32 @@ async function processRefund(saleId, userId) {
           previous_quantity: newQty - item.quantity,
           new_quantity: newQty,
           user_id: userId,
-          notes: `Refund for sale ${sale.transaction_id}`,
+          notes: `Return for sale ${sale.transaction_id}`,
         },
       })
     }
 
-    // Reverse exactly the points this sale awarded, without going below zero
+    // Keep only the points the customer is still owed for what they kept, never going below zero
     if (sale.customer_id && sale.loyalty_points_earned > 0) {
-      await tx.$executeRaw`
-        UPDATE "Customer"
-        SET loyalty_points = GREATEST(loyalty_points - ${sale.loyalty_points_earned}, 0), updated_at = NOW()
-        WHERE id = ${sale.customer_id}
-      `
+      const pointsKept = total > 0 ? Math.floor((sale.loyalty_points_earned * (total - refundedAfter)) / total) : 0
+      const toReverse = sale.loyalty_points_earned - pointsKept - sale.loyalty_points_reversed
+      if (toReverse > 0) {
+        await tx.$executeRaw`
+          UPDATE "Customer"
+          SET loyalty_points = GREATEST(loyalty_points - ${toReverse}, 0), updated_at = NOW()
+          WHERE id = ${sale.customer_id}
+        `
+        await tx.sale.update({ where: { id: saleId }, data: { loyalty_points_reversed: { increment: toReverse } } })
+      }
     }
 
     await recordAudit(
       {
         userId,
-        action: 'SALE_REFUNDED',
+        action: completesSale ? 'SALE_REFUNDED' : 'SALE_PARTIALLY_REFUNDED',
         entity: 'Sale',
         entityId: saleId,
-        details: `${sale.transaction_id} refunded (${sale.total_amount} via ${sale.payment_method})`,
+        details: `${sale.transaction_id}: ${amount.toFixed(2)} refunded via ${sale.payment_method} (${returnedUnits} item${returnedUnits === 1 ? '' : 's'}): ${refundReason}`,
       },
       tx
     )

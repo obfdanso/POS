@@ -49,7 +49,7 @@ const listSalesValidation = [
   query('end_date').optional().isISO8601().withMessage('end_date must be a valid date'),
   query('user_id').optional().isUUID().withMessage('Invalid user ID'),
   query('customer_id').optional().isUUID().withMessage('Invalid customer ID'),
-  query('payment_status').optional().isIn(['COMPLETED', 'REFUNDED', 'PENDING']).withMessage('Invalid payment status'),
+  query('payment_status').optional().isIn(['COMPLETED', 'PARTIALLY_REFUNDED', 'REFUNDED', 'PENDING']).withMessage('Invalid payment status'),
   query('payment_method').optional().isIn(['CASH', 'MOBILE_MONEY', 'CARD']).withMessage('Invalid payment method'),
   query('search').optional().isString().withMessage('Search must be text').trim().isLength({ max: 50 }),
   ...sortRules(Object.keys(SALE_SORTS)),
@@ -58,10 +58,21 @@ const listSalesValidation = [
 router.get('/', listSalesValidation, validate, salesController.listSales)
 router.get('/:id', authorize(['ADMIN', 'MANAGER', 'CASHIER']), param('id').isUUID(), validate, salesController.getSale)
 router.get('/:id/receipt', authorize(['ADMIN', 'MANAGER', 'CASHIER']), param('id').isUUID(), validate, salesController.getReceipt)
+// Body is optional: with no `items`, everything not yet returned is refunded
+const refundValidation = [
+  body('items').optional().isArray({ min: 1, max: 200 }).withMessage('items must list between 1 and 200 sale lines'),
+  body('items.*.sale_item_id').isUUID().withMessage('Each item needs a valid sale_item_id'),
+  body('items.*.quantity').isInt({ min: 1, max: 100000 }).withMessage('Each returned quantity must be at least 1').toInt(),
+  body('items.*.restock').optional().isBoolean().withMessage('restock must be true or false').toBoolean(),
+  body('reason').optional().isString().withMessage('Reason must be text').trim()
+    .isLength({ max: 500 }).withMessage('Reason must be 500 characters or fewer'),
+]
+
 router.post(
   '/:id/refund',
   authorize(['ADMIN', 'MANAGER']),
   param('id').isUUID(),
+  exactBody(refundValidation),
   validate,
   salesController.processRefund
 )

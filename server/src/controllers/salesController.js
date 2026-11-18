@@ -58,7 +58,8 @@ async function getSale(req, res, next) {
 
 async function processRefund(req, res, next) {
   try {
-    const sale = await salesService.processRefund(req.params.id, req.user.id)
+    const { items, reason } = req.body ?? {}
+    const sale = await salesService.processRefund(req.params.id, req.user.id, { items, reason })
     res.json({ success: true, data: normalizeSale(sale), message: 'Refund processed successfully' })
   } catch (err) {
     next(err)

@@ -109,4 +109,21 @@ describe('buildReceiptEmail', () => {
     expect(html).not.toContain('<b>Bold</b>')
     expect(text).toContain('2 × MailTest <b>Bold</b> Soap  GH₵ 25.00')
   })
+
+  it('lists each part of a split payment and the change from the cash part', () => {
+    const split = {
+      transaction_id: 'TXN-SPLIT', created_at: new Date(), subtotal: 50, discount_amount: 0, tax_amount: 0, total_amount: 50,
+      payment_method: 'SPLIT', sale_items: [],
+      payments: [
+        { method: 'CASH', amount_paid: 40, change_given: 10 },
+        { method: 'MOBILE_MONEY', amount_paid: 20, change_given: 0 },
+      ],
+    }
+    const { text } = buildReceiptEmail(split, { name: 'Shop', currency: 'GH₵' })
+    expect(text).toContain('Payment: Split')
+    expect(text).toContain('  Cash: GH₵ 40.00')
+    expect(text).toContain('  Mobile Money: GH₵ 20.00')
+    expect(text).toContain('Change: GH₵ 10.00')
+    expect(text).not.toContain('Amount paid')
+  })
 })

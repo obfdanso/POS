@@ -4,7 +4,7 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 }
 
-const METHOD_LABEL = { CASH: 'Cash', MOBILE_MONEY: 'Mobile Money', CARD: 'Card' }
+const METHOD_LABEL = { CASH: 'Cash', MOBILE_MONEY: 'Mobile Money', CARD: 'Card', SPLIT: 'Split' }
 
 /**
  * @param {object} sale - sale with sale_items (with product), payments, user, customer
@@ -27,7 +27,10 @@ function buildReceiptEmail(sale, store) {
   ].filter(Boolean)
   const paymentRows = [
     ['Payment', METHOD_LABEL[sale.payment_method] || sale.payment_method],
-    payment && ['Amount paid', money(payment.amount_paid)],
+    // A split payment lists each part; the cash part (listed first) is the one that gives change
+    ...(sale.payment_method === 'SPLIT'
+      ? (sale.payments || []).map((p) => [`  ${METHOD_LABEL[p.method] || p.method}`, money(p.amount_paid)])
+      : [payment && ['Amount paid', money(payment.amount_paid)]]),
     payment && Number(payment.change_given) > 0 && ['Change', money(payment.change_given)],
     Number(sale.refunded_amount) > 0 && ['Refunded', money(sale.refunded_amount)],
     sale.loyalty_points_earned > 0 && ['Points earned', String(sale.loyalty_points_earned)],

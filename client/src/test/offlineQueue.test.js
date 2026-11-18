@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { queueSale, queuedSales, removeQueued, syncQueuedSales, isNetworkError } from '../utils/offlineQueue'
+import { queueSale, queuedSales, removeQueued, syncQueuedSales, isNetworkError, newClientRef } from '../utils/offlineQueue'
 
 const sale = (ref) => ({ client_ref: ref, items: [], payment_method: 'CASH', amount_paid: 10 })
 
@@ -18,8 +18,8 @@ describe('offline sales queue', () => {
     ;['a', 'b', 'c', 'd'].forEach((ref) => queueSale('u1', sale(ref), 10))
     const send = vi.fn()
       .mockResolvedValueOnce({})
-      .mockRejectedValueOnce({ response: { data: { error: { details: [{ message: 'Insufficient stock' }] } } } })
-      .mockRejectedValueOnce(new Error('Network Error'))
+      .mockRejectedValueOnce({ isAxiosError: true, response: { status: 422, data: { error: { details: [{ message: 'Insufficient stock' }] } } } })
+      .mockRejectedValueOnce({ isAxiosError: true, message: 'Network Error' })
     expect(await syncQueuedSales('u1', send)).toEqual({ synced: 1, refused: 1 })
     expect(send).toHaveBeenCalledTimes(3)
     expect(queuedSales('u1').map((e) => [e.id, e.error])).toEqual([['b', 'Insufficient stock'], ['c', null], ['d', null]])
@@ -30,8 +30,28 @@ describe('offline sales queue', () => {
     expect(queuedSales('u1').map((e) => e.id)).toEqual(['b'])
   })
 
-  it('tells network errors from server answers', () => {
-    expect(isNetworkError(new Error('Network Error'))).toBe(true)
-    expect(isNetworkError({ response: { status: 422 } })).toBe(false)
+  it('waits on temporary server problems instead of marking the sale refused', async () => {
+    queueSale('u1', sale('a'), 10)
+    for (const status of [401, 429, 502]) {
+      const send = vi.fn().mockRejectedValue({ isAxiosError: true, response: { status, data: {} } })
+      expect(await syncQueuedSales('u1', send)).toEqual({ synced: 0, refused: 0 })
+    }
+    expect(queuedSales('u1')[0].error).toBeNull()
+  })
+
+  it('tells network errors from server answers and from bugs', () => {
+    expect(isNetworkError({ isAxiosError: true, message: 'Network Error' })).toBe(true)
+    expect(isNetworkError({ isAxiosError: true, response: { status: 422 } })).toBe(false)
+    expect(isNetworkError(new TypeError('x is undefined'))).toBe(false)
+  })
+
+  it('makes UUIDs without crypto.randomUUID', () => {
+    const original = globalThis.crypto.randomUUID
+    Object.defineProperty(globalThis.crypto, 'randomUUID', { value: undefined, configurable: true })
+    try {
+      expect(newClientRef()).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+    } finally {
+      Object.defineProperty(globalThis.crypto, 'randomUUID', { value: original, configurable: true })
+    }
   })
 })

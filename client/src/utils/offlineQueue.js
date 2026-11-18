@@ -20,9 +20,28 @@ function write(list) {
   }
 }
 
-/** No response at all means the request never reached the server (or its answer never came back). */
+/** A request that never reached the server, or whose answer never came back (not a bug in our code). */
 export function isNetworkError(err) {
-  return Boolean(err) && !err.response
+  return Boolean(err?.isAxiosError) && !err.response
+}
+
+/**
+ * Answers worth trying again later: the server restarting (5xx), too many requests (429), a timed-out
+ * request (408) or an expired login (401). Anything else is the server's final word on the sale.
+ */
+function isTemporary(err) {
+  const status = err?.response?.status
+  return isNetworkError(err) || !status || status >= 500 || [401, 408, 429].includes(status)
+}
+
+/** A random UUID, also on plain-http pages where crypto.randomUUID is missing. */
+export function newClientRef() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+  const b = globalThis.crypto.getRandomValues(new Uint8Array(16))
+  b[6] = (b[6] & 0x0f) | 0x40
+  b[8] = (b[8] & 0x3f) | 0x80
+  const h = [...b].map((x) => x.toString(16).padStart(2, '0')).join('')
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`
 }
 
 export function queueSale(userId, payload, total) {
@@ -41,7 +60,7 @@ export function removeQueued(id) {
 /**
  * Sends this user's waiting sales, oldest first, with `send(payload)`. A sale the server refuses is
  * kept with its reason for a person to deal with (the customer already paid); a network error
- * stops the run so the rest wait for the next try.
+ * (or a temporary server problem) stops the run so the rest wait for the next try.
  */
 export async function syncQueuedSales(userId, send) {
   let synced = 0
@@ -52,7 +71,7 @@ export async function syncQueuedSales(userId, send) {
       removeQueued(entry.id)
       synced++
     } catch (err) {
-      if (isNetworkError(err)) break
+      if (isTemporary(err)) break
       const api = err.response?.data?.error
       const message = api?.details?.[0]?.message || api?.message || 'The server refused this sale'
       write(read().map((e) => (e.id === entry.id ? { ...e, error: message } : e)))

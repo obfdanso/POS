@@ -3,6 +3,18 @@ const { buildOrderBy } = require('../middleware/sorting')
 const { recordAudit } = require('../utils/audit')
 const { NotFoundError, ConflictError, ForbiddenError, ValidationError } = require('../utils/errors')
 
+const PARENT = { select: { id: true, name: true, variant_name: true } }
+const PRODUCT_INCLUDE = {
+  category: { select: { id: true, name: true } },
+  supplier: { select: { id: true, name: true } },
+  parent: PARENT,
+}
+// What a product page or the till needs to know about each variant
+const VARIANT_SELECT = {
+  id: true, name: true, variant_name: true, sku: true, barcode: true, price: true, cost_price: true,
+  quantity: true, low_stock_threshold: true, is_active: true, image_url: true, category_id: true,
+}
+
 // status: 'active' (default), 'inactive', or 'all'
 const PRODUCT_SORTS = {
   name: (dir) => ({ name: dir }),
@@ -15,7 +27,11 @@ const PRODUCT_SORTS = {
   created_at: (dir) => ({ created_at: dir }),
 }
 
-async function listProducts({ page = 1, per_page = 20, search, category_id, status = 'active', sort, order } = {}) {
+/**
+ * With `group_variants`, only main products are listed, each with its active `variants`, so the
+ * till can show one card per product and offer its sizes or flavours.
+ */
+async function listProducts({ page = 1, per_page = 20, search, category_id, status = 'active', group_variants = false, sort, order } = {}) {
   const skip = (page - 1) * per_page
   const take = Math.min(per_page, 100)
 
@@ -23,6 +39,7 @@ async function listProducts({ page = 1, per_page = 20, search, category_id, stat
   if (status === 'active') where.is_active = true
   if (status === 'inactive') where.is_active = false
   if (category_id) where.category_id = category_id
+  if (group_variants) where.parent_id = null
   if (search) {
     where.OR = [
       { name: { contains: search, mode: 'insensitive' } },
@@ -37,8 +54,11 @@ async function listProducts({ page = 1, per_page = 20, search, category_id, stat
       skip,
       take,
       include: {
-        category: { select: { id: true, name: true } },
-        supplier: { select: { id: true, name: true } },
+        ...PRODUCT_INCLUDE,
+        _count: { select: { variants: true } },
+        ...(group_variants && {
+          variants: { where: { is_active: true }, select: VARIANT_SELECT, orderBy: [{ variant_name: 'asc' }] },
+        }),
       },
       orderBy: buildOrderBy({ sort, order }, PRODUCT_SORTS, { name: 'asc' }),
     }),
@@ -51,23 +71,14 @@ async function listProducts({ page = 1, per_page = 20, search, category_id, stat
 async function getProductById(id) {
   const product = await prisma.product.findUnique({
     where: { id },
-    include: {
-      category: { select: { id: true, name: true } },
-      supplier: { select: { id: true, name: true } },
-    },
+    include: { ...PRODUCT_INCLUDE, variants: { select: VARIANT_SELECT, orderBy: [{ variant_name: 'asc' }] } },
   })
   if (!product) throw new NotFoundError('Product not found')
   return product
 }
 
 async function getProductByBarcode(barcode) {
-  const product = await prisma.product.findUnique({
-    where: { barcode },
-    include: {
-      category: { select: { id: true, name: true } },
-      supplier: { select: { id: true, name: true } },
-    },
-  })
+  const product = await prisma.product.findUnique({ where: { barcode }, include: PRODUCT_INCLUDE })
   if (!product) throw new NotFoundError('Product not found')
   if (!product.is_active) throw new NotFoundError('Product is inactive')
   return product
@@ -77,6 +88,46 @@ async function assertSupplierExists(supplierId) {
   if (!supplierId) return
   const supplier = await prisma.supplier.findUnique({ where: { id: supplierId }, select: { id: true } })
   if (!supplier) throw new ValidationError('Supplier not found', [{ field: 'supplier_id', message: 'Supplier does not exist' }])
+}
+
+function variantError(field, message) {
+  return new ValidationError('Invalid variant', [{ field, message }])
+}
+
+/** Empty strings (e.g. from a form) mean no variant name. */
+function cleanVariantName(value) {
+  if (value === undefined) return undefined
+  const name = typeof value === 'string' ? value.trim() : value
+  return name || null
+}
+
+/**
+ * Throws if `name` is already used by another option of the same product: the main product
+ * (`familyId`) or any of its variants.
+ */
+async function assertVariantNameFree(familyId, name, selfId) {
+  if (!name) return
+  const clash = await prisma.product.findFirst({
+    where: {
+      OR: [{ id: familyId }, { parent_id: familyId }],
+      variant_name: { equals: name, mode: 'insensitive' },
+      ...(selfId && { NOT: { id: selfId } }),
+    },
+    select: { id: true },
+  })
+  if (clash) throw new ConflictError('This product already has an option with that name', 'variant_name')
+}
+
+/** Checks a new variant's main product and returns it. */
+async function resolveParent(data) {
+  const parent = await prisma.product.findUnique({ where: { id: data.parent_id } })
+  if (!parent) throw variantError('parent_id', 'The main product does not exist')
+  if (parent.parent_id) throw variantError('parent_id', 'A variant cannot have variants of its own; add it to the main product')
+  if (!cleanVariantName(data.variant_name)) throw variantError('variant_name', 'Name the variant, e.g. a size or flavour')
+  if (data.category_id !== parent.category_id) {
+    throw variantError('category_id', 'A variant must be in the same category as its main product')
+  }
+  return parent
 }
 
 // Keeps a cost price of 0 instead of treating it as missing
@@ -93,6 +144,10 @@ async function createProduct(data, userId) {
 
   if (existingSku) throw new ConflictError('SKU already exists', 'sku')
   if (existingBarcode) throw new ConflictError('Barcode already exists', 'barcode')
+
+  const parent = data.parent_id ? await resolveParent(data) : null
+  const variantName = cleanVariantName(data.variant_name) ?? null
+  if (parent) await assertVariantNameFree(parent.id, variantName)
 
   // Check category and supplier exist
   const category = await prisma.category.findUnique({ where: { id: data.category_id } })
@@ -116,11 +171,10 @@ async function createProduct(data, userId) {
         low_stock_threshold: data.low_stock_threshold ?? 10,
         image_url: data.image_url || null,
         is_active: data.is_active ?? true,
+        parent_id: parent?.id ?? null,
+        variant_name: variantName,
       },
-      include: {
-        category: { select: { id: true, name: true } },
-        supplier: { select: { id: true, name: true } },
-      },
+      include: PRODUCT_INCLUDE,
     })
 
     if (quantity > 0) {
@@ -165,26 +219,40 @@ async function updateProduct(id, data, user) {
   }
   await assertSupplierExists(data.supplier_id)
 
-  const product = await prisma.product.update({
-    where: { id },
-    data: {
-      ...(data.name !== undefined && { name: data.name }),
-      ...(data.sku !== undefined && { sku: data.sku }),
-      ...(data.barcode !== undefined && { barcode: data.barcode || null }),
-      ...(data.category_id !== undefined && { category_id: data.category_id }),
-      ...(data.supplier_id !== undefined && { supplier_id: data.supplier_id || null }),
-      ...(data.price !== undefined && { price: data.price }),
-      ...(data.cost_price !== undefined && { cost_price: optionalCost(data.cost_price) }),
-      // quantity is intentionally not editable here — stock changes go through inventory so they are logged
-      ...(data.low_stock_threshold !== undefined && { low_stock_threshold: data.low_stock_threshold }),
-      ...(data.image_url !== undefined && { image_url: data.image_url || null }),
-      ...(data.is_active !== undefined && { is_active: data.is_active }),
-    },
-    include: {
-      category: { select: { id: true, name: true } },
-      supplier: { select: { id: true, name: true } },
-    },
-  })
+  // Variants share their main product's category; moving the main product moves them too
+  const categoryChanged = data.category_id !== undefined && data.category_id !== existing.category_id
+  if (existing.parent_id && categoryChanged) {
+    throw variantError('category_id', "A variant is always in its main product's category; change the main product instead")
+  }
+  const variantName = cleanVariantName(data.variant_name)
+  if (variantName !== undefined) {
+    if (existing.parent_id && !variantName) throw variantError('variant_name', 'Name the variant, e.g. a size or flavour')
+    await assertVariantNameFree(existing.parent_id ?? existing.id, variantName, existing.id)
+  }
+
+  const [product] = await prisma.$transaction([
+    prisma.product.update({
+      where: { id },
+      data: {
+        ...(data.name !== undefined && { name: data.name }),
+        ...(data.sku !== undefined && { sku: data.sku }),
+        ...(data.barcode !== undefined && { barcode: data.barcode || null }),
+        ...(data.category_id !== undefined && { category_id: data.category_id }),
+        ...(data.supplier_id !== undefined && { supplier_id: data.supplier_id || null }),
+        ...(data.price !== undefined && { price: data.price }),
+        ...(data.cost_price !== undefined && { cost_price: optionalCost(data.cost_price) }),
+        // quantity is intentionally not editable here — stock changes go through inventory so they are logged
+        ...(data.low_stock_threshold !== undefined && { low_stock_threshold: data.low_stock_threshold }),
+        ...(data.image_url !== undefined && { image_url: data.image_url || null }),
+        ...(data.is_active !== undefined && { is_active: data.is_active }),
+        ...(variantName !== undefined && { variant_name: variantName }),
+      },
+      include: PRODUCT_INCLUDE,
+    }),
+    ...(categoryChanged && !existing.parent_id
+      ? [prisma.product.updateMany({ where: { parent_id: id }, data: { category_id: data.category_id } })]
+      : []),
+  ])
 
   if (data.is_active !== undefined && data.is_active !== existing.is_active) {
     await recordAudit({

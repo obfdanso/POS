@@ -46,7 +46,15 @@ const productValidation = [
   body('quantity').optional().isInt({ min: 0, max: 1000000 }).withMessage('Quantity must be between 0 and 1,000,000').toInt(),
   body('low_stock_threshold').optional().isInt({ min: 0, max: 1000000 }).withMessage('Threshold must be between 0 and 1,000,000').toInt(),
   body('is_active').optional().isBoolean().withMessage('is_active must be true or false').toBoolean(),
+  body('parent_id').optional({ values: 'falsy' }).isUUID().withMessage('Valid main product ID required'),
+  variantNameRule(),
 ]
+
+// A size or flavour label, e.g. "1.5L"
+function variantNameRule() {
+  return body('variant_name').optional({ values: 'null' }).isString().withMessage('Variant name must be text').trim()
+    .isLength({ max: 50 }).withMessage('Variant name must be 50 characters or fewer')
+}
 
 
 // All routes require authentication
@@ -68,6 +76,7 @@ function listProductsValidation() {
     query('search').optional().isString().withMessage('Search must be text').trim().isLength({ max: 100 }),
     query('category_id').optional().isUUID().withMessage('Invalid category ID'),
     query('status').optional().isIn(['active', 'inactive', 'all']).withMessage('Status must be active, inactive, or all'),
+    query('group_variants').optional().isBoolean().withMessage('group_variants must be true or false'),
     ...sortRules(Object.keys(PRODUCT_SORTS)),
   ]
 }
@@ -84,7 +93,9 @@ function updateProductValidation() {
     body('category_id').optional().isUUID().withMessage('Valid category ID is required'),
     body('price').optional().isFloat({ min: 0.01, max: 1000000 }).withMessage('Price must be > 0').toFloat(),
     body('cost_price').optional({ values: 'falsy' }).isFloat({ min: 0, max: 1000000 }).withMessage('Cost price must be between 0 and 1000000').toFloat(),
-    // quantity is deliberately absent: stock changes go through /inventory, so sending it is rejected
+    // quantity is deliberately absent: stock changes go through /inventory, so sending it is rejected.
+    // parent_id is too: a product's place in a variant group is fixed when it is created
+    variantNameRule(),
     body('low_stock_threshold').optional().isInt({ min: 0, max: 1000000 }).withMessage('Threshold must be between 0 and 1,000,000').toInt(),
     body('is_active').optional().isBoolean().withMessage('is_active must be true or false').toBoolean(),
   ]

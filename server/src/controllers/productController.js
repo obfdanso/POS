@@ -9,7 +9,10 @@ async function listProducts(req, res, next) {
     const canSeeInactive = ['ADMIN', 'MANAGER'].includes(req.user.role)
     const status = canSeeInactive ? req.query.status : 'active'
 
-    const result = await productService.listProducts({ page, per_page, search, category_id, status, sort: req.query.sort, order: req.query.order })
+    const group_variants = req.query.group_variants === 'true'
+    const result = await productService.listProducts({
+      page, per_page, search, category_id, status, group_variants, sort: req.query.sort, order: req.query.order,
+    })
 
     res.json({
       success: true,

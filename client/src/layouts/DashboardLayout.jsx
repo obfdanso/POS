@@ -7,6 +7,11 @@ import { Modal } from '../components/Modal'
 import toast from 'react-hot-toast'
 
 const icons = {
+  shifts: (
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  ),
   home: (
     <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
@@ -206,6 +211,7 @@ export function DashboardLayout({ children, noPad = false }) {
                 <NavItem to="/customers" icon={icons.customers} label="Customers" />
                 <div className="w-px bg-gray-200 dark:bg-gray-700 mx-1 xl:mx-2 my-3 flex-shrink-0" />
                 <NavItem to="/sales" icon={icons.mySales} label="Sales" />
+                <NavItem to="/shifts" icon={icons.shifts} label="Shifts" />
                 <NavItem to="/reports" icon={icons.reports} label="Reports" />
               </>
             )}
@@ -306,6 +312,7 @@ export function DashboardLayout({ children, noPad = false }) {
                 <MobileNavItem to="/customers" icon={icons.customers} label="Customers" onClick={closeMobile} />
                 <div className="h-px bg-gray-100 dark:bg-gray-800 my-1" />
                 <MobileNavItem to="/sales" icon={icons.mySales} label="Sales" onClick={closeMobile} />
+                <MobileNavItem to="/shifts" icon={icons.shifts} label="Shifts" onClick={closeMobile} />
                 <MobileNavItem to="/reports" icon={icons.reports} label="Reports" onClick={closeMobile} />
               </>
             )}

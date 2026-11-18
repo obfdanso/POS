@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   ResponsiveContainer,
   BarChart,
@@ -13,6 +13,7 @@ import {
   Legend,
 } from 'recharts'
 import toast from 'react-hot-toast'
+import { getErrorMessage } from '../utils/apiErrors'
 import { DashboardLayout } from '../layouts/DashboardLayout'
 import { Button } from '../components/Button'
 import { Table } from '../components/Table'
@@ -123,36 +124,46 @@ export default function ReportsPage() {
   const [catData, setCatData] = useState([])
   const [cashierData, setCashierData] = useState([])
   const [profitData, setProfitData] = useState([])
+  // Only the newest request may update the page, so quick date edits or tab switches can't show stale data
+  const latestRequest = useRef(0)
 
   const fetchTab = useCallback(
     async (tab) => {
       if (!startDate || !endDate) return
+      const requestId = ++latestRequest.current
+      const isStale = () => requestId !== latestRequest.current
       setLoading(true)
       const params = { start_date: startDate, end_date: endDate }
       try {
         if (tab === 'summary') {
           const res = await reportsService.salesSummary(params)
+          if (isStale()) return
           setSummaryData(res.data?.data ?? res.data)
         } else if (tab === 'daily') {
           const res = await reportsService.salesByDay(params)
+          if (isStale()) return
           setDailyData(res.data?.data ?? res.data ?? [])
         } else if (tab === 'top-products') {
           const res = await reportsService.topProducts({ ...params, limit: 50 })
+          if (isStale()) return
           setTopData((res.data?.data ?? []).map((p, i) => ({ ...p, rank: i + 1 })))
         } else if (tab === 'category') {
           const res = await reportsService.categoryPerformance(params)
+          if (isStale()) return
           setCatData(res.data?.data ?? res.data ?? [])
         } else if (tab === 'cashier') {
           const res = await reportsService.cashierPerformance(params)
+          if (isStale()) return
           setCashierData(res.data?.data ?? res.data ?? [])
         } else if (tab === 'profit') {
           const res = await reportsService.profit(params)
+          if (isStale()) return
           setProfitData(res.data?.data ?? res.data ?? [])
         }
-      } catch {
-        toast.error('Failed to load report data.')
+      } catch (err) {
+        if (!isStale()) toast.error(getErrorMessage(err, 'Failed to load report data.'))
       } finally {
-        setLoading(false)
+        if (!isStale()) setLoading(false)
       }
     },
     [startDate, endDate]

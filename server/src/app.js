@@ -24,6 +24,7 @@ const settingsRoutes = require('./routes/settings')
 const supplierRoutes = require('./routes/suppliers')
 const shiftRoutes = require('./routes/shifts')
 const purchaseOrderRoutes = require('./routes/purchaseOrders')
+const promotionRoutes = require('./routes/promotions')
 
 const app = express()
 
@@ -108,6 +109,7 @@ app.use('/api/settings', settingsRoutes)
 app.use('/api/suppliers', supplierRoutes)
 app.use('/api/shifts', shiftRoutes)
 app.use('/api/purchase-orders', purchaseOrderRoutes)
+app.use('/api/promotions', promotionRoutes)
 
 // 404 handler
 app.use((req, res) => {

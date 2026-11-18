@@ -271,6 +271,8 @@ function CustomerModal({ isOpen, onClose, onSelect }) {
 function CartItem({ item, fmt, onUpdate, onRemove, onDiscountChange }) {
   const lineGross = round2(parseFloat(item.price) * item.quantity)
   const clampQty = (q) => Math.min(Math.max(q, 1), item.quantity_available)
+  // What the cashier is typing; lets the box be cleared and retyped without snapping back to 1
+  const [qtyDraft, setQtyDraft] = useState(null)
   return (
     <div className="py-2.5 border-b border-gray-100 dark:border-gray-800 last:border-0">
       <div className="flex items-start justify-between gap-2">
@@ -304,8 +306,14 @@ function CartItem({ item, fmt, onUpdate, onRemove, onDiscountChange }) {
             type="number"
             min={1}
             max={item.quantity_available}
-            value={item.quantity}
-            onChange={(e) => onUpdate(item.product_id, clampQty(parseInt(e.target.value) || 1))}
+            value={qtyDraft ?? item.quantity}
+            onChange={(e) => {
+              setQtyDraft(e.target.value)
+              const q = parseInt(e.target.value)
+              if (q > 0) onUpdate(item.product_id, clampQty(q))
+            }}
+            onBlur={() => setQtyDraft(null)}
+            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
             aria-label={`Quantity of ${item.name}`}
             className="w-12 text-center text-sm border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded py-0.5 focus:outline-none focus:ring-1 focus:ring-primary-400"
           />

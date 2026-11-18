@@ -9,6 +9,13 @@ function formatMethod(method) {
   return method?.replace('_', ' ') ?? ''
 }
 
+// A line's discount is its promotion plus any discount the cashier added; receipts show them apart
+function discountParts(item) {
+  const promotion = parseFloat(item.promotion_discount) || 0
+  const manual = Math.round((parseFloat(item.discount || 0) - promotion) * 100) / 100
+  return { promotion, manual, promotionName: item.promotion?.name || 'Promotion' }
+}
+
 // Builds a standalone 80mm thermal receipt document for the print window
 function buildReceiptHtml(sale, settings, fmt) {
   const esc = escapeHtml
@@ -23,10 +30,14 @@ function buildReceiptHtml(sale, settings, fmt) {
         <td style="text-align:center;padding:2px 4px;">${item.quantity}</td>
         <td style="text-align:right;padding:2px 4px;">${fmt(item.unit_price)}</td>
         <td style="text-align:right;padding:2px 0;">${fmt(item.total)}</td>
-      </tr>${parseFloat(item.discount) > 0 ? `
+      </tr>${discountParts(item).promotion > 0 ? `
+      <tr>
+        <td colspan="3" style="text-align:left;padding:0 0 2px 8px;">${esc(discountParts(item).promotionName)}</td>
+        <td style="text-align:right;padding:0 0 2px 0;">-${fmt(discountParts(item).promotion)}</td>
+      </tr>` : ''}${discountParts(item).manual > 0 ? `
       <tr>
         <td colspan="3" style="text-align:left;padding:0 0 2px 8px;">Item discount</td>
-        <td style="text-align:right;padding:0 0 2px 0;">-${fmt(item.discount)}</td>
+        <td style="text-align:right;padding:0 0 2px 0;">-${fmt(discountParts(item).manual)}</td>
       </tr>` : ''}`).join('')
 
   return `<!DOCTYPE html>
@@ -146,10 +157,16 @@ export function Receipt({ sale, onClose, actions }) {
                 <span className="w-1/5 text-right">{fmt(item.total)}</span>
               </div>
               {/* The line total is after this discount, so show it to explain the difference */}
-              {parseFloat(item.discount) > 0 && (
+              {discountParts(item).promotion > 0 && (
+                <div className="flex justify-between pl-2 text-success-700">
+                  <span>{discountParts(item).promotionName}</span>
+                  <span>-{fmt(discountParts(item).promotion)}</span>
+                </div>
+              )}
+              {discountParts(item).manual > 0 && (
                 <div className="flex justify-between pl-2 text-gray-500">
                   <span>Item discount</span>
-                  <span>-{fmt(item.discount)}</span>
+                  <span>-{fmt(discountParts(item).manual)}</span>
                 </div>
               )}
             </div>

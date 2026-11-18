@@ -5,9 +5,10 @@ import { productsService } from '../services/products'
 import { salesService } from '../services/sales'
 import { customersService } from '../services/customers'
 import { shiftsService } from '../services/shifts'
+import { promotionsService } from '../services/promotions'
 import { OpenShiftModal, CloseShiftModal } from '../components/ShiftModals'
 import { formatCurrency } from '../utils/formatCurrency'
-import { lineTotal, round2, calculateTotals, maxRedeemablePoints } from '../utils/saleTotals'
+import { lineTotal, round2, calculateTotals, maxRedeemablePoints, applyPromotions, bestPromotion } from '../utils/saleTotals'
 import { Button } from '../components/Button'
 import { Input } from '../components/Input'
 import { Modal } from '../components/Modal'
@@ -279,7 +280,8 @@ function CustomerModal({ isOpen, onClose, onSelect }) {
 
 // ─── Cart Item Row ─────────────────────────────────────────────────────────────
 function CartItem({ item, fmt, onUpdate, onRemove, onDiscountChange }) {
-  const lineGross = round2(parseFloat(item.price) * item.quantity)
+  // The cashier's discount comes off what is left after any promotion
+  const lineGross = round2(round2(parseFloat(item.price) * item.quantity) - (item.promotion_discount || 0))
   const clampQty = (q) => Math.min(Math.max(q, 1), item.quantity_available)
   // What the cashier is typing; lets the box be cleared and retyped without snapping back to 1
   const [qtyDraft, setQtyDraft] = useState(null)
@@ -289,6 +291,11 @@ function CartItem({ item, fmt, onUpdate, onRemove, onDiscountChange }) {
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{item.name}</p>
           <p className="text-xs text-gray-400">{fmt(item.price)} each · {item.quantity_available} in stock</p>
+          {item.promotion && (
+            <p className="text-xs font-medium text-success-600 dark:text-success-400 truncate">
+              {item.promotion.name} · {Number(item.promotion.percent_off)}% off · -{fmt(item.promotion_discount)}
+            </p>
+          )}
         </div>
         <button
           onClick={() => onRemove(item.product_id)}
@@ -355,7 +362,7 @@ function CartItem({ item, fmt, onUpdate, onRemove, onDiscountChange }) {
 
         {/* Line total */}
         <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 min-w-[70px] text-right">
-          {fmt(lineTotal(item.price, item.quantity, item.discount))}
+          {fmt(lineTotal(item.price, item.quantity, item.line_discount ?? item.discount))}
         </p>
       </div>
     </div>
@@ -371,7 +378,7 @@ export default function POSPage() {
   const { user } = useAuth()
   const { loyalty_points_rate, currency_symbol, refreshSettings, require_open_shift } = useSettings()
   const fmt = (v) => formatCurrency(v, currency_symbol || 'GH₵')
-  const { items, cartDiscount, customer, redeemPoints, maxPoints, pointValue, pointsDiscount, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, setRedeemPoints, clearCart, syncItems } = useCart()
+  const { items, cartDiscount, customer, redeemPoints, maxPoints, pointValue, pointsDiscount, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, setRedeemPoints, clearCart, syncItems, promotions, setPromotions } = useCart()
 
   const [searchQuery, setSearchQuery] = useState('')
   const [products, setProducts] = useState([])
@@ -422,6 +429,13 @@ export default function POSPage() {
     searchRef.current?.focus()
     refreshSettings()
   }, [refreshSettings])
+
+  // Running promotions are applied to the cart automatically, as the server applies them
+  useEffect(() => {
+    promotionsService.active()
+      .then((res) => setPromotions(res.data?.data || []))
+      .catch(() => {}) // without them the server's total differs, which the pre-charge check reports
+  }, [setPromotions])
 
   useEffect(() => {
     productsService.categories()
@@ -567,14 +581,16 @@ export default function POSPage() {
   // what the server will charge; otherwise the cart is updated so the cashier sees the new total.
   async function checkCartBeforeCharge() {
     try {
-      const [products, latestSettings] = await Promise.all([
+      const [products, latestSettings, latestPromotions] = await Promise.all([
         Promise.all(items.map((i) => productsService.get(i.product_id).then((res) => res.data.data))),
         refreshSettings(),
+        promotionsService.active().then((res) => res.data?.data || []),
       ])
       if (!latestSettings) throw new Error('Settings unavailable')
-      const updates = Object.fromEntries(products.map((p) => [p.id, { price: p.price, quantity_available: p.quantity }]))
-      const refreshed = items.map((i) => ({ ...i, ...updates[i.product_id] }))
+      const updates = Object.fromEntries(products.map((p) => [p.id, { price: p.price, quantity_available: p.quantity, category_id: p.category_id }]))
+      const refreshed = applyPromotions(items.map((i) => ({ ...i, ...updates[i.product_id] })), latestPromotions)
       syncItems(updates)
+      setPromotions(latestPromotions)
 
       const shortItem = refreshed.find((i) => i.quantity > i.quantity_available)
       if (shortItem) {
@@ -590,7 +606,7 @@ export default function POSPage() {
       )
       const latest = calculateTotals(refreshed, cartDiscount, parseFloat(latestSettings.tax_rate) || 0, round2(latestPoints * latestPointValue))
       if (latest.total !== total) {
-        toast.error(`Prices or tax changed. The new total is ${formatCurrency(latest.total, currency_symbol)} — confirm again to charge it`)
+        toast.error(`Prices, promotions or tax changed. The new total is ${formatCurrency(latest.total, currency_symbol)} — confirm again to charge it`)
         return false
       }
       return true
@@ -799,7 +815,17 @@ export default function POSPage() {
                     </div>
                   )}
                   <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{product.name}</p>
-                  <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">{product.sku}</p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mb-1 flex items-center gap-1.5">
+                    <span className="truncate">{product.sku}</span>
+                    {(() => {
+                      const promo = bestPromotion({ product_id: product.id, category_id: product.category_id }, promotions)
+                      return promo && (
+                        <span className="flex-shrink-0 rounded bg-success-100 dark:bg-success-900/30 px-1 font-semibold text-success-700 dark:text-success-400" title={promo.name}>
+                          -{Number(promo.percent_off)}%
+                        </span>
+                      )
+                    })()}
+                  </p>
                   <div className="flex items-center justify-between mt-1">
                     <span className="text-sm font-bold text-primary-600">{fmt(product.price)}</span>
                     <Badge variant={product.quantity === 0 ? 'danger' : product.quantity <= product.low_stock_threshold ? 'warning' : 'success'}>

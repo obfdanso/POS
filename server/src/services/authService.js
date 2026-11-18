@@ -9,15 +9,33 @@ const MAX_FAILED_ATTEMPTS = 5
 // If every admin is locked out, run `npm run unlock-user -- <username>` on the server.
 const LOCKED_UNTIL_ADMIN_UNLOCK = new Date('9999-12-31T00:00:00Z')
 
-// In-memory blacklist for revoked refresh tokens.
-// Tokens are auto-removed after their 7-day expiry so memory stays bounded.
-const revokedTokens = new Set()
+/** Payload of a valid refresh token, or null if it is missing, forged, or expired. */
+function verifyRefreshToken(token) {
+  if (!token) return null
+  try {
+    return jwt.verify(token, process.env.JWT_REFRESH_SECRET)
+  } catch {
+    return null
+  }
+}
 
-function revokeToken(token) {
-  if (!token) return
-  revokedTokens.add(token)
-  // Clean up after the refresh token's maximum lifetime (7 days)
-  setTimeout(() => revokedTokens.delete(token), 7 * 24 * 60 * 60 * 1000)
+/**
+ * Record a verified refresh token as revoked, in the database so it stays revoked across
+ * restarts and server instances. Returns false if it was already revoked: the insert doubles as
+ * the check, so two requests racing to rotate the same token can't both succeed.
+ */
+async function revokeToken(payload, token) {
+  // Tokens issued before jwtids were added are keyed by a hash instead
+  const jti = payload.jti || crypto.createHash('sha256').update(token).digest('hex')
+  try {
+    await prisma.revokedToken.create({ data: { jti, expires_at: new Date(payload.exp * 1000) } })
+  } catch (err) {
+    if (err.code === 'P2002') return false
+    throw err
+  }
+  // An entry past its token's expiry can never match a usable token, so drop it
+  await prisma.revokedToken.deleteMany({ where: { expires_at: { lt: new Date() } } })
+  return true
 }
 
 async function logAuthEvent(userId, eventType, ipAddress, userAgent, details) {
@@ -128,7 +146,8 @@ async function login(username, password, ipAddress, userAgent) {
 }
 
 async function logout(userId, ipAddress, userAgent, refreshToken) {
-  revokeToken(refreshToken)
+  const payload = verifyRefreshToken(refreshToken)
+  if (payload) await revokeToken(payload, refreshToken)
   if (userId) {
     await logAuthEvent(userId, 'LOGOUT', ipAddress, userAgent, null)
   }
@@ -140,14 +159,8 @@ async function refreshToken(tokenFromCookie) {
     throw new UnauthorizedError('No refresh token')
   }
 
-  if (revokedTokens.has(tokenFromCookie)) {
-    throw new UnauthorizedError('Refresh token has been revoked')
-  }
-
-  let payload
-  try {
-    payload = jwt.verify(tokenFromCookie, process.env.JWT_REFRESH_SECRET)
-  } catch {
+  const payload = verifyRefreshToken(tokenFromCookie)
+  if (!payload) {
     throw new UnauthorizedError('Invalid or expired refresh token')
   }
 
@@ -164,7 +177,9 @@ async function refreshToken(tokenFromCookie) {
   }
 
   // Rotate: revoke the old token and issue a fresh one
-  revokeToken(tokenFromCookie)
+  if (!(await revokeToken(payload, tokenFromCookie))) {
+    throw new UnauthorizedError('Refresh token has been revoked')
+  }
   const accessToken = generateAccessToken(user.id, user.role)
   const newRefreshToken = generateRefreshToken(user.id)
 
@@ -209,7 +224,8 @@ async function changePassword(userId, currentPassword, newPassword, currentRefre
   const password_hash = await bcrypt.hash(newPassword, 12)
   // Sign out every existing session, then hand this device fresh tokens so it stays signed in
   await prisma.user.update({ where: { id: userId }, data: { password_hash, tokens_valid_after: new Date() } })
-  revokeToken(currentRefreshToken)
+  const currentPayload = verifyRefreshToken(currentRefreshToken)
+  if (currentPayload) await revokeToken(currentPayload, currentRefreshToken)
   return {
     accessToken: generateAccessToken(user.id, user.role),
     refreshToken: generateRefreshToken(user.id),

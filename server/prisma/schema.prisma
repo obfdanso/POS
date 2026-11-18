@@ -188,6 +188,17 @@ model InventoryLog {
   user    User    @relation(fields: [user_id], references: [id])
 }
 
+// Refresh tokens that were logged out or rotated, kept until they would have expired anyway.
+// Stored in the database so revocation survives restarts and works across server instances.
+model RevokedToken {
+  jti        String   @id
+  expires_at DateTime
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([expires_at])
+}
+
 model AuthLog {
   id         String   @id @default(uuid())
   user_id    String?

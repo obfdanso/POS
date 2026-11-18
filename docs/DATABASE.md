@@ -146,6 +146,14 @@ Who performed destructive or sensitive operations.
 | `entity` / `entity_id` | String / String? | What was changed, e.g. `Sale` + its id. Indexed |
 | `details` | String? | Human-readable summary, e.g. `TXN-20261016-0002 refunded (27.81 via CASH)` |
 
+### RevokedToken
+Refresh tokens that were logged out or rotated. Kept in the database so they stay revoked after a server restart.
+
+| Column | Type | Notes |
+|---|---|---|
+| `jti` | String PK | The token's JWT id. The unique key means two simultaneous refreshes with one token can't both succeed |
+| `expires_at` | DateTime | When the token would have expired. Rows past this are deleted. Indexed |
+
 ### Settings
 Key–value store, edited on the Settings page.
 

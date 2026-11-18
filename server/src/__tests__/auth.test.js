@@ -152,6 +152,30 @@ describe('POST /api/auth/refresh', () => {
     expect((await request(app).post('/api/auth/refresh').set('Cookie', original)).status).toBe(401)
   })
 
+  it('keeps rotated tokens revoked in the database, so a restart does not revive them', async () => {
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ username: 'testuser_auth', password: 'testpass123' })
+    const cookie = loginRes.headers['set-cookie']
+    const token = /refreshToken=([^;]+)/.exec(cookie.join(';'))[1]
+    const { jti } = require('jsonwebtoken').decode(token)
+
+    expect((await request(app).post('/api/auth/refresh').set('Cookie', cookie)).status).toBe(200)
+    expect(await prisma.revokedToken.findUnique({ where: { jti } })).not.toBeNull()
+  })
+
+  it('lets only one of two simultaneous refreshes with the same token succeed', async () => {
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ username: 'testuser_auth', password: 'testpass123' })
+    const cookie = loginRes.headers['set-cookie']
+    const results = await Promise.all([
+      request(app).post('/api/auth/refresh').set('Cookie', cookie),
+      request(app).post('/api/auth/refresh').set('Cookie', cookie),
+    ])
+    expect(results.map((r) => r.status).sort()).toEqual([200, 401])
+  })
+
   it('returns 401 without refresh cookie', async () => {
     const res = await request(app).post('/api/auth/refresh')
     expect(res.status).toBe(401)

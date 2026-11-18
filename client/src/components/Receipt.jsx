@@ -4,10 +4,7 @@ import { EmailReceiptForm } from './EmailReceiptForm'
 import { useSettings } from '../context/SettingsContext'
 import { formatCurrency } from '../utils/formatCurrency'
 import { escapeHtml, printDocument, RECEIPT_STYLES } from '../utils/print'
-
-function formatMethod(method) {
-  return method?.replace('_', ' ') ?? ''
-}
+import { methodLabel, paymentLines } from '../utils/payments'
 
 // A line's discount is its promotion plus any discount the cashier added; receipts show them apart
 function discountParts(item) {
@@ -19,7 +16,7 @@ function discountParts(item) {
 // Builds a standalone 80mm thermal receipt document for the print window
 function buildReceiptHtml(sale, settings, fmt) {
   const esc = escapeHtml
-  const { transaction_id, created_at, user, customer, items, subtotal, discount_amount, tax_amount, total_amount, payment_method, payment, payment_status } = sale
+  const { transaction_id, created_at, user, customer, items, subtotal, discount_amount, tax_amount, total_amount, payment_method, payment_status } = sale
   // discount_amount includes the value of redeemed loyalty points; show the two separately
   const pointsDiscount = parseFloat(sale.points_discount) || 0
   const cartDiscount = Math.round((parseFloat(discount_amount) - pointsDiscount) * 100) / 100
@@ -80,10 +77,8 @@ function buildReceiptHtml(sale, settings, fmt) {
   ${parseFloat(tax_amount) > 0 ? `<div class="row"><span>Tax:</span><span>${fmt(tax_amount)}</span></div>` : ''}
   <div class="dashed"></div>
   <div class="row bold" style="font-size:14px;"><span>TOTAL:</span><span>${fmt(total_amount)}</span></div>
-  <div class="row"><span>Payment:</span><span>${esc(formatMethod(payment_method))}</span></div>
-  ${payment?.amount_paid ? `<div class="row"><span>Amount Paid:</span><span>${fmt(payment.amount_paid)}</span></div>` : ''}
-  ${parseFloat(payment?.change_given) > 0 ? `<div class="row"><span>Change:</span><span>${fmt(payment.change_given)}</span></div>` : ''}
-  ${payment?.reference ? `<div class="row"><span>Reference:</span><span>${esc(payment.reference)}</span></div>` : ''}
+  <div class="row"><span>Payment:</span><span>${esc(methodLabel(payment_method))}</span></div>
+  ${paymentLines(sale).map((l) => `<div class="row"><span>${esc(l.label)}</span><span>${l.text ? esc(l.text) : fmt(l.amount)}</span></div>`).join('')}
   <div class="dashed"></div>
   <div class="center">${esc(settings.receipt_footer || 'Thank you for choosing QuickMart!')}</div>
 </body>
@@ -111,7 +106,7 @@ export function Receipt({ sale, onClose, actions }) {
 
   if (!sale) return null
 
-  const { transaction_id, created_at, user, customer, items, subtotal, discount_amount, tax_amount, total_amount, payment_method, payment, payment_status } = sale
+  const { transaction_id, created_at, user, customer, items, subtotal, discount_amount, tax_amount, total_amount, payment_method, payment_status } = sale
   // discount_amount includes the value of redeemed loyalty points; show the two separately
   const pointsDiscount = parseFloat(sale.points_discount) || 0
   const cartDiscount = Math.round((parseFloat(discount_amount) - pointsDiscount) * 100) / 100
@@ -179,14 +174,10 @@ export function Receipt({ sale, onClose, actions }) {
           {pointsDiscount > 0 && <Row label={`Points (${sale.loyalty_points_redeemed} pts):`} value={`-${fmt(pointsDiscount)}`} className="text-danger-600" />}
           {parseFloat(tax_amount) > 0 && <Row label="Tax:" value={fmt(tax_amount)} />}
           <Row label="TOTAL:" value={fmt(total_amount)} className="font-bold text-base border-t border-gray-300 pt-1 mt-1" />
-          <Row label="Payment:" value={formatMethod(payment_method)} />
-          {payment && (
-            <>
-              <Row label="Amount Paid:" value={fmt(payment.amount_paid)} />
-              {parseFloat(payment.change_given) > 0 && <Row label="Change:" value={fmt(payment.change_given)} className="font-semibold" />}
-              {payment.reference && <Row label="Reference:" value={payment.reference} />}
-            </>
-          )}
+          <Row label="Payment:" value={methodLabel(payment_method)} />
+          {paymentLines(sale).map((l) => (
+            <Row key={l.label} label={l.label} value={l.text ?? fmt(l.amount)} className={l.strong ? 'font-semibold' : ''} />
+          ))}
         </div>
 
         <div className="border-t border-dashed border-gray-400 mt-3 pt-2 text-center text-xs text-gray-500">

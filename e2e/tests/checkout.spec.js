@@ -23,7 +23,7 @@ test('cashier scans a product and completes a cash sale with the keyboard', asyn
   await expect(receipt).toBeVisible()
   await expect(receipt.getByText(/TXN-\d{8}-\d{4}/)).toBeVisible()
   await expect(receipt.getByText('Coca-Cola 500ml')).toBeVisible()
-  await expect(receipt.getByText('CASH', { exact: true })).toBeVisible()
+  await expect(receipt.getByText('Cash', { exact: true })).toBeVisible()
 })
 
 test('the Charge button stays disabled with an empty cart', async ({ page }) => {

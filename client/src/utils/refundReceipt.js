@@ -1,6 +1,5 @@
 import { escapeHtml as esc, RECEIPT_STYLES } from './print'
-
-const METHOD_LABEL = { CASH: 'Cash', MOBILE_MONEY: 'Mobile Money', CARD: 'Card' }
+import { METHOD_LABEL, splitOtherMethods } from './payments'
 
 /**
  * Builds an 80mm refund slip for one return against a sale: the items that came back, what each
@@ -58,7 +57,10 @@ export function buildRefundReceiptHtml(sale, refund, settings, fmt) {
   <div class="dashed"></div>
   <div class="row"><span>Reason:</span><span>${esc(refund.reason)}</span></div>
   <div class="row bold" style="font-size:14px;"><span>REFUNDED:</span><span>${fmt(refund.amount)}</span></div>
-  <div class="row"><span>Paid back by:</span><span>${esc(method)}</span></div>
+  ${refund.method === 'SPLIT'
+    ? `<div class="row"><span>In cash:</span><span>${fmt(refund.cash_amount)}</span></div>
+  ${parseFloat(refund.amount) > parseFloat(refund.cash_amount) ? `<div class="row"><span>By ${esc(splitOtherMethods(sale))}:</span><span>${fmt(parseFloat(refund.amount) - parseFloat(refund.cash_amount))}</span></div>` : ''}`
+    : `<div class="row"><span>Paid back by:</span><span>${esc(method)}</span></div>`}
   ${isLast ? `<div class="row"><span>Sale total refunded:</span><span>${fmt(sale.refunded_amount)} of ${fmt(sale.total_amount)}</span></div>` : ''}
   <div class="dashed"></div>
   <div class="center">Customer signature</div>

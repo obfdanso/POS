@@ -6,6 +6,7 @@ import { Input } from './Input'
 import { salesService } from '../services/sales'
 import { formatCurrency } from '../utils/formatCurrency'
 import { estimateRefund } from '../utils/refunds'
+import { methodLabel, splitOtherMethods, splitRefundCash } from '../utils/payments'
 import { getErrorMessage, getFieldErrors } from '../utils/apiErrors'
 
 export function ReturnModal({ sale, onClose, onDone }) {
@@ -19,7 +20,9 @@ export function ReturnModal({ sale, onClose, onDone }) {
   const remaining = (item) => item.quantity - (item.refunded_quantity || 0)
   const refund = estimateRefund(sale, quantities)
   const units = Object.values(quantities).reduce((n, q) => n + (q || 0), 0)
-  const method = sale.payment_method.replace('_', ' ').toLowerCase()
+  const method = methodLabel(sale.payment_method).toLowerCase()
+  // A split sale pays back cash first (from the drawer), the rest by card or Mobile Money
+  const cashBack = sale.payment_method === 'SPLIT' ? splitRefundCash(sale, refund) : null
 
   function setQuantity(item, value) {
     const q = Math.max(0, Math.min(remaining(item), parseInt(value, 10) || 0))
@@ -114,8 +117,12 @@ export function ReturnModal({ sale, onClose, onDone }) {
             <span>{formatCurrency(refund)}</span>
           </div>
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            Each item is refunded at its share of what the customer paid, after any discount. Pay it back via {method} yourself;
-            the system records it{sale.payment_method === 'CASH' ? ' and takes it out of your open shift\'s drawer' : ''}.
+            Each item is refunded at its share of what the customer paid, after any discount.{' '}
+            {cashBack
+              ? <>Pay back {formatCurrency(cashBack.cash)} in cash{cashBack.other > 0 && <> and {formatCurrency(cashBack.other)} by {splitOtherMethods(sale)}</>} yourself;
+                  the system records it and takes the cash out of your open shift&apos;s drawer.</>
+              : <>Pay it back via {method} yourself;
+                  the system records it{sale.payment_method === 'CASH' ? ' and takes it out of your open shift\'s drawer' : ''}.</>}
           </p>
         </div>
 

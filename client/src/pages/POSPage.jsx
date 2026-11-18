@@ -113,7 +113,15 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
 
   return (
     <Modal isOpen={isOpen} onClose={handleClose} title="Process Payment" size="sm">
-      <div className="space-y-4">
+      {/* Enter confirms card and mobile money too (cash confirms from its amount box), except on Cancel */}
+      <div
+        className="space-y-4"
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' || method === 'CASH' || e.target.closest('[data-cancel]')) return
+          e.preventDefault()
+          handleConfirm()
+        }}
+      >
         {/* Total */}
         <div className="bg-primary-50 border border-primary-100 rounded-lg p-4 text-center">
           <p className="text-sm text-primary-600 font-medium">Amount Due</p>
@@ -193,7 +201,7 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
         )}
 
         <div className="flex gap-3 pt-2">
-          <Button variant="secondary" className="flex-1" onClick={handleClose} disabled={isLoading}>Cancel</Button>
+          <Button variant="secondary" className="flex-1" onClick={handleClose} disabled={isLoading} data-cancel>Cancel</Button>
           <Button variant="success" className="flex-1" onClick={handleConfirm} isLoading={isLoading || isChecking} title="Enter">
             Confirm Payment
           </Button>

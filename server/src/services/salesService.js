@@ -180,7 +180,8 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
         method: payment_method,
         amount_paid: amountPaid,
         change_given: changeGiven,
-        reference: reference || null,
+        // Only verified non-cash payments carry a reference, so cash sales cannot claim a real Paystack one
+        reference: payment_method === 'CASH' ? null : reference,
       },
     })
 

@@ -10,6 +10,7 @@ import { OpenShiftModal, CloseShiftModal } from '../components/ShiftModals'
 import { formatCurrency } from '../utils/formatCurrency'
 import { lineTotal, round2, calculateTotals, maxRedeemablePoints, applyPromotions, bestPromotion } from '../utils/saleTotals'
 import { splitCash } from '../utils/payments'
+import { isNetworkError, queueSale, queuedSales, removeQueued, syncQueuedSales } from '../utils/offlineQueue'
 import { Button } from '../components/Button'
 import { Input } from '../components/Input'
 import { Modal } from '../components/Modal'
@@ -499,6 +500,8 @@ export default function POSPage() {
   const [categories, setCategories] = useState([])
   const [activeCategory, setActiveCategory] = useState('')
   const [showPaymentModal, setShowPaymentModal] = useState(false)
+  // Cash sales saved on this device while the server couldn't be reached
+  const [offlineSales, setOfflineSales] = useState([])
   // The product whose sizes or flavours are being offered, or null
   const [choosingVariant, setChoosingVariant] = useState(null)
   const [showReceiptModal, setShowReceiptModal] = useState(false)
@@ -743,10 +746,31 @@ export default function POSPage() {
     }
   }
 
+  // Sends sales queued offline; runs when the till opens and whenever the connection comes back
+  const syncOffline = useCallback(async () => {
+    if (!user?.id) return
+    if (queuedSales(user.id).some((e) => !e.error)) {
+      const { synced, refused } = await syncQueuedSales(user.id, (payload) => salesService.create(payload))
+      if (synced) toast.success(`${synced} sale${synced === 1 ? '' : 's'} saved offline sent to the server`)
+      if (refused) toast.error(`${refused} offline sale${refused === 1 ? ' was' : 's were'} refused; see the note above the products`, { duration: 8000 })
+    }
+    setOfflineSales(queuedSales(user.id))
+  }, [user?.id])
+
+  useEffect(() => {
+    syncOffline()
+    window.addEventListener('online', syncOffline)
+    return () => window.removeEventListener('online', syncOffline)
+  }, [syncOffline])
+
   async function handlePaymentConfirm({ payment_method, amount_paid, reference, payments }) {
     setIsSubmitting(true)
+    // One id per sale, so a resend (e.g. from the offline queue) is never recorded twice
+    const client_ref = crypto.randomUUID()
+    let payload
     try {
-      const payload = {
+      payload = {
+        client_ref,
         items: items.map((i) => ({
           product_id: i.product_id,
           quantity: i.quantity,
@@ -790,6 +814,16 @@ export default function POSPage() {
       }
       toast.success(reference ? `Payment successful! Ref: ${reference}` : 'Sale completed successfully!')
     } catch (err) {
+      // No connection: keep a cash sale on this device and send it later. Card and Mobile Money
+      // need Paystack, so they can't be taken offline
+      if (isNetworkError(err) && payment_method === 'CASH' && payload) {
+        queueSale(user.id, payload, total)
+        setOfflineSales(queuedSales(user.id))
+        setShowPaymentModal(false)
+        clearCart()
+        toast.success(`No connection. Sale saved on this device; give change of ${formatCurrency(Math.max(0, amount_paid - total), currency_symbol)}. It is sent when the connection is back.`, { duration: 8000 })
+        return
+      }
       const apiError = err.response?.data?.error
       toast.error(apiError?.details?.[0]?.message || apiError?.message || 'Failed to process sale')
       // The shift may have been closed elsewhere (e.g. by a manager); show the real state
@@ -826,6 +860,22 @@ export default function POSPage() {
               <kbd className="bg-gray-200 dark:bg-gray-800 px-1 rounded text-xs">F4</kbd> Clear &nbsp;
               <kbd className="bg-gray-200 dark:bg-gray-800 px-1 rounded text-xs">↵</kbd> Add / Confirm
             </p>
+            {offlineSales.length > 0 && (
+              <div className="mt-1 space-y-0.5 text-xs">
+                {offlineSales.some((e) => !e.error) && (
+                  <p className="text-warning-600">
+                    {offlineSales.filter((e) => !e.error).length} sale(s) saved offline, waiting to be sent.{' '}
+                    <button type="button" onClick={syncOffline} className="font-semibold underline">Send now</button>
+                  </p>
+                )}
+                {offlineSales.filter((e) => e.error).map((e) => (
+                  <p key={e.id} className="text-danger-600">
+                    Offline sale of {formatCurrency(e.total, currency_symbol)} ({new Date(e.queued_at).toLocaleTimeString('en-GH')}) was refused: {e.error}. Ring it up again or refund the customer.{' '}
+                    <button type="button" onClick={() => { removeQueued(e.id); setOfflineSales(queuedSales(user.id)) }} className="font-semibold underline">Dismiss</button>
+                  </p>
+                ))}
+              </div>
+            )}
           </div>
           <div className="text-right">
             <p className="text-xs text-gray-400">Cashier</p>

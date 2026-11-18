@@ -1,0 +1,54 @@
+# Runs the whole POS (database, API, web app) with one command:
+#   cp .env.docker.example .env      # then fill in the secrets
+#   docker compose up --build
+# The app is then at http://localhost:8080 (or APP_PORT).
+# First run only, to load the sample data:
+#   docker compose exec server npx prisma db seed
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pos
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: pos_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U pos -d pos_db']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  server:
+    build: ./server
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://pos:${POSTGRES_PASSWORD}@db:5432/pos_db
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?Set JWT_ACCESS_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET in .env}
+      CORS_ORIGIN: http://localhost:${APP_PORT:-8080}
+      # nginx in the client container is the one proxy in front of the API
+      TRUST_PROXY: 1
+      PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY:-}
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+
+  client:
+    build:
+      context: ./client
+      args:
+        VITE_PAYSTACK_PUBLIC_KEY: ${VITE_PAYSTACK_PUBLIC_KEY:-}
+    restart: unless-stopped
+    ports:
+      - '${APP_PORT:-8080}:80'
+    depends_on:
+      - server
+
+volumes:
+  pgdata:
+  uploads:

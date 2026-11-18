@@ -180,6 +180,7 @@ Processes the whole sale in one database transaction: validate stock, calculate 
   "payment_method": "CASH | MOBILE_MONEY | CARD",
   "amount_paid": 50.0,
   "discount_amount": 5.0,
+  "redeem_points": 0,
   "reference": "required for MOBILE_MONEY and CARD",
   "notes": "optional, max 500 chars"
 }
@@ -187,6 +188,7 @@ Processes the whole sale in one database transaction: validate stock, calculate 
 
 - **Totals:** subtotal = Σ(unit price × qty − item discount). Tax = configured rate × (subtotal − cart discount). Every step is rounded to 2 dp, and the client's cart uses the same arithmetic.
 - **Discounts:** an item discount can't exceed its line total, and the cart discount can't exceed the subtotal.
+- **Loyalty points:** `redeem_points` spends that many of the customer's points at the `loyalty_point_value` setting each, after the cart discount and before tax. It needs a `customer_id`, redemption turned on (point value above 0), enough points, and points worth no more than what is left after discounts; otherwise `422` with a `redeem_points` field error, before any payment verification. The points are deducted in the sale's transaction, so two tills can't spend the same points. The sale records `loyalty_points_redeemed` and `points_discount`, and `discount_amount` includes the points' value.
 - **Limits:** 1–200 items per sale, 1–100,000 units per line, amounts up to GH₵ 1,000,000.
 - **customer_id**, if given, must exist (`422` otherwise). This is checked before any payment verification.
 - **CASH:** `amount_paid` must cover the total; change is calculated.
@@ -225,6 +227,7 @@ Returns some or all of a sale. **Body (all optional):**
 - `restock: false` (damaged goods) refunds the money but leaves stock unchanged. Restocked units get `RETURN` inventory logs.
 - The sale becomes `PARTIALLY_REFUNDED`, then `REFUNDED` once every unit is back. `refunded_amount` and each item's `refunded_quantity` keep running totals, and `refunds` lists every return with its items, amount, reason and who processed it.
 - Loyalty points are reduced so the customer keeps only the points for what they kept (never below zero).
+- Points redeemed on the sale are given back in proportion to the value of goods returned (all of them once the whole sale is back), and tracked in `loyalty_points_restored`. They are restored before earned points are taken back.
 - If the refunding user has an open shift, the refund is linked to it, and cash refunds reduce that drawer's expected cash.
 - `422` when returning more than is left, an item from another sale, the same line twice, or a sale already fully refunded. Simultaneous returns against one sale are processed one at a time.
 - Card and Mobile Money money must be returned through Paystack separately; the system records the refund.
@@ -250,7 +253,7 @@ Any of the create fields.
 ### GET /customers/:id/purchases
 Paginated purchases, newest first, each with `items_count`, `payment_method`, and `payment_status`. Cashiers only see the sales they rang up themselves.
 
-Loyalty: 1 point per *loyalty rate* GHS spent (Settings, default 10), awarded on each completed sale.
+Loyalty: 1 point per *loyalty rate* GHS spent (Settings, default 10), awarded on each completed sale on the amount actually paid. Customers can spend points at checkout when *loyalty point value* is above 0 (see `redeem_points` on `POST /sales`).
 
 ---
 
@@ -336,11 +339,12 @@ One shift with its `summary`. Cashiers can only view their own (`403`).
   "currency_symbol": "GH₵",
   "tax_rate": "3",
   "loyalty_points_rate": "10",
+  "loyalty_point_value": "0.10",
   "receipt_footer": "Thank you for shopping with us!",
   "require_open_shift": "true"
 }
 ```
-`require_open_shift`: `"true"` makes cashiers open a shift before they can sell.
+`require_open_shift`: `"true"` makes cashiers open a shift before they can sell. `loyalty_point_value`: money off per point redeemed, 0–1000 (default `"0"`, which turns redemption off).
 
 ---
 

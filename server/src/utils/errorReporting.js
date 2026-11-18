@@ -1,12 +1,26 @@
 const Sentry = require('@sentry/node')
 
-// Never send credentials, cookies, or request bodies (which can hold passwords) to Sentry
+// Never send credentials, cookies, request bodies (which can hold passwords), query strings (customer
+// searches), or log breadcrumbs to Sentry. Database errors can quote the values of the failed query,
+// so their message is replaced with the error's name and code.
 const SENSITIVE_HEADERS = ['authorization', 'cookie', 'set-cookie', 'x-paystack-signature']
 
-function scrubEvent(event) {
+function isDatabaseError(err) {
+  return Boolean(err && (/^Prisma/.test(err.constructor?.name ?? '') || /^P\d{4}$/.test(err.code ?? '') || /invocation/.test(err.message ?? '')))
+}
+
+function scrubEvent(event, hint = {}) {
+  delete event.breadcrumbs
+  const original = hint.originalException
+  if (isDatabaseError(original) && event.exception?.values) {
+    const summary = [original.constructor?.name, original.code].filter(Boolean).join(' ') || 'Database error'
+    for (const value of event.exception.values) value.value = summary
+  }
   if (event.request) {
     delete event.request.cookies
     delete event.request.data
+    delete event.request.query_string
+    if (event.request.url) event.request.url = event.request.url.split('?')[0]
     if (event.request.headers) {
       for (const name of Object.keys(event.request.headers)) {
         if (SENSITIVE_HEADERS.includes(name.toLowerCase())) delete event.request.headers[name]

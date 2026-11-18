@@ -50,6 +50,27 @@ describe('error reporting', () => {
     })
     expect(event.request).toEqual({ headers: { 'user-agent': 'Chrome' } })
   })
+
+  it('drops query strings and breadcrumbs, which can hold customer searches and log text', () => {
+    const { scrubEvent } = loadFresh()
+    const event = scrubEvent({
+      breadcrumbs: [{ message: 'login for kofi@example.com' }],
+      request: { url: 'https://pos.example.com/api/customers?search=0241234567', query_string: 'search=0241234567' },
+    })
+    expect(event.breadcrumbs).toBeUndefined()
+    expect(event.request).toEqual({ url: 'https://pos.example.com/api/customers' })
+  })
+
+  it('replaces database error messages, which can quote query values, with the error code', () => {
+    const { scrubEvent } = loadFresh()
+    class PrismaClientKnownRequestError extends Error {}
+    const dbError = Object.assign(new PrismaClientKnownRequestError('Invalid `prisma.customer.create()` invocation: email "kofi@example.com"'), { code: 'P2002' })
+    const event = scrubEvent({ exception: { values: [{ type: 'PrismaClientKnownRequestError', value: dbError.message }] } }, { originalException: dbError })
+    expect(event.exception.values[0].value).toBe('PrismaClientKnownRequestError P2002')
+
+    const plain = scrubEvent({ exception: { values: [{ type: 'TypeError', value: 'x is undefined' }] } }, { originalException: new TypeError('x is undefined') })
+    expect(plain.exception.values[0].value).toBe('x is undefined')
+  })
 })
 
 describe('error handler', () => {

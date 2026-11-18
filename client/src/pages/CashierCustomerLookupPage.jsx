@@ -23,18 +23,21 @@ export default function CashierCustomerLookupPage() {
   useEffect(() => {
     const q = query.trim()
     if (!q) return
+    // A superseded search must not overwrite newer results or clear the newer spinner
+    let cancelled = false
     const timer = setTimeout(() => {
       setLoading(true)
       api.get('/customers', { params: { search: q, per_page: 20 } })
-        .then((res) => setResults({ searchedFor: q, customers: res.data.data || [] }))
-        .catch(() => setResults({ searchedFor: q, customers: [] }))
-        .finally(() => setLoading(false))
+        .then((res) => { if (!cancelled) setResults({ searchedFor: q, customers: res.data.data || [] }) })
+        .catch(() => { if (!cancelled) setResults({ searchedFor: q, customers: [] }) })
+        .finally(() => { if (!cancelled) setLoading(false) })
     }, 350)
-    return () => clearTimeout(timer)
+    return () => { cancelled = true; clearTimeout(timer) }
   }, [query])
 
-  const searched = query.trim() !== '' && results.searchedFor !== ''
-  const customers = query.trim() ? results.customers : []
+  // Show results only for the query currently in the box
+  const searched = query.trim() !== '' && results.searchedFor === query.trim()
+  const customers = searched ? results.customers : []
 
   return (
     <DashboardLayout>
@@ -47,7 +50,7 @@ export default function CashierCustomerLookupPage() {
         {/* Search bar */}
         <div className="relative">
           <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-            {loading ? (
+            {loading && query.trim() ? (
               <svg className="w-4 h-4 text-teal-500 animate-spin" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -89,7 +92,7 @@ export default function CashierCustomerLookupPage() {
           </div>
         )}
 
-        {searched && !loading && customers.length === 0 && (
+        {searched && customers.length === 0 && (
           <div className="text-center py-12 text-gray-400 dark:text-gray-500 text-sm">
             No customers found matching &quot;{results.searchedFor}&quot;
           </div>

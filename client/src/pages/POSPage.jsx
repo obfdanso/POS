@@ -35,6 +35,8 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
   const [amountPaid, setAmountPaid] = useState('')
   const [errors, setErrors] = useState({})
   const [isChecking, setIsChecking] = useState(false)
+  // A Paystack charge that succeeded; kept so a failed sale is retried without charging again
+  const [paidCharge, setPaidCharge] = useState(null)
 
   const paid = parseFloat(amountPaid)
   const change = method === 'CASH' && paid >= total ? paid - total : 0
@@ -53,6 +55,11 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
     if (method === 'CASH') {
       if (!validate()) return
       onConfirm({ payment_method: 'CASH', amount_paid: paid })
+      return
+    }
+
+    if (paidCharge) {
+      onConfirm({ payment_method: paidCharge.method, amount_paid: paidCharge.total, reference: paidCharge.reference })
       return
     }
 
@@ -81,10 +88,21 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
         toast.error('Payment was cancelled')
       },
       callback: (response) => {
+        setPaidCharge({ method, total, reference: response.reference })
         onConfirm({ payment_method: method, amount_paid: total, reference: response.reference })
       },
     })
     handler.openIframe()
+  }
+
+  function handleClose() {
+    if (paidCharge) {
+      toast.error(
+        `The customer paid ${fmt(paidCharge.total)} (Paystack ref ${paidCharge.reference}) but the sale was not saved. Refund it from Paystack or ring it up again.`,
+        { duration: Infinity }
+      )
+    }
+    onClose()
   }
 
   const methods = [
@@ -94,7 +112,7 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
   ]
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Process Payment" size="sm">
+    <Modal isOpen={isOpen} onClose={handleClose} title="Process Payment" size="sm">
       <div className="space-y-4">
         {/* Total */}
         <div className="bg-primary-50 border border-primary-100 rounded-lg p-4 text-center">
@@ -111,6 +129,7 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
                 key={m.value}
                 type="button"
                 onClick={() => { setMethod(m.value); setErrors({}) }}
+                disabled={Boolean(paidCharge)}
                 className={`py-2.5 px-3 rounded-full border text-sm font-medium transition ${
                   method === m.value
                     ? 'border-primary-500 bg-primary-50 text-primary-700'
@@ -159,15 +178,22 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
           </div>
         )}
 
+        {paidCharge && (
+          <div className="rounded-lg border border-warning-100 bg-warning-50 px-4 py-3 text-sm text-warning-600">
+            Payment of {fmt(paidCharge.total)} received (ref {paidCharge.reference}), but the sale was not saved.
+            Press Confirm to try saving it again. The customer will not be charged twice.
+          </div>
+        )}
+
         {/* Card / Mobile Money: Paystack handles payment details in its popup */}
-        {(method === 'MOBILE_MONEY' || method === 'CARD') && (
+        {!paidCharge && (method === 'MOBILE_MONEY' || method === 'CARD') && (
           <div className="rounded-lg border border-primary-100 bg-primary-50 px-4 py-3 text-sm text-primary-700">
             A secure Paystack payment window will open to complete this transaction.
           </div>
         )}
 
         <div className="flex gap-3 pt-2">
-          <Button variant="secondary" className="flex-1" onClick={onClose} disabled={isLoading}>Cancel</Button>
+          <Button variant="secondary" className="flex-1" onClick={handleClose} disabled={isLoading}>Cancel</Button>
           <Button variant="success" className="flex-1" onClick={handleConfirm} isLoading={isLoading || isChecking} title="Enter">
             Confirm Payment
           </Button>

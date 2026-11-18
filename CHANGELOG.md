@@ -5,6 +5,9 @@ Notable changes to QuickMart POS, newest first.
 ## 2026-11-18
 
 ### Added
+- **Emailed receipts.** An *Email* button on every receipt sends it to the customer's email on file or an address typed at the till, as HTML with a plain-text version. It uses any SMTP provider configured with `SMTP_*` and `MAIL_FROM`; without them the button explains that email isn't set up. API: `POST /api/sales/:id/email-receipt`.
+- **Monitoring.** Every request gets an `X-Request-Id` that appears in its log lines and in unexpected-error messages ("ref 3f2a9c1e"). Request logs now include response times. `GET /api/health/ready` checks the database, and Docker Compose starts the web app only once the API is ready.
+- **End-to-end tests.** Playwright drives a real browser against the real API and a production build: sign-in and role access, a keyboard checkout from barcode scan to receipt, and a partial return with its refund slip. They run in CI against a freshly seeded database.
 - **Loyalty points redemption.** Cashiers can spend a customer's points as money off at the till ("Use Points", with a Max button). An admin sets what a point is worth under Settings → Customer & Loyalty (0 turns it off; the seed uses GH₵ 0.10). Points come off after the cart discount and before tax, are deducted in the sale's transaction so two tills can't spend the same points, and appear as their own line on receipts. Returns give the points back in proportion to the goods returned. API: `redeem_points` on `POST /api/sales`.
 - **Refund slips.** Each return in a sale's refund history has a *Print slip* button that prints an 80mm slip with the items returned, the amount, the reason, who processed it, and a signature line.
 - **Installable app (PWA).** A web app manifest, icons and a service worker let QuickMart be installed on tablets and desktops. Its screens load without a connection (API calls are never cached), and a banner warns staff when they're offline.

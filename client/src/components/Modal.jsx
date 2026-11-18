@@ -1,6 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useId } from 'react'
 
 export function Modal({ isOpen, onClose, title, children, size = 'md' }) {
+  const titleId = useId()
   useEffect(() => {
     if (!isOpen) return
     function onKey(e) { if (e.key === 'Escape') onClose() }
@@ -16,9 +17,9 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }) {
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="flex min-h-full items-center justify-center p-4">
         <div className="fixed inset-0 bg-black/60 transition-opacity" onClick={onClose} />
-        <div className={`relative bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full ${sizes[size]} z-10 border border-gray-100 dark:border-gray-800`}>
+        <div role="dialog" aria-modal="true" aria-labelledby={titleId} className={`relative bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full ${sizes[size]} z-10 border border-gray-100 dark:border-gray-800`}>
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
+            <h2 id={titleId} className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
             <button
               onClick={onClose}
               aria-label="Close"

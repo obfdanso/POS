@@ -444,15 +444,14 @@ export default function POSPage() {
   // Keyboard shortcuts
   useEffect(() => {
     function onKey(e) {
-      if (e.key === 'F1') { e.preventDefault(); searchRef.current?.focus() }
-      if (e.key === 'F2') {
-        e.preventDefault()
-        if (items.length > 0 && !anyModalOpen) setShowPaymentModal(true)
-      }
-      if (e.key === 'F4') {
-        e.preventDefault()
-        if (items.length > 0 && !anyModalOpen) setShowClearConfirm(true)
-      }
+      if (!['F1', 'F2', 'F4'].includes(e.key)) return
+      e.preventDefault()
+      // Includes dialogs this page doesn't own, such as the sign-out confirmation
+      const dialogOpen = anyModalOpen || Boolean(document.querySelector('[role="dialog"]'))
+      if (dialogOpen) return
+      if (e.key === 'F1') searchRef.current?.focus()
+      if (e.key === 'F2' && items.length > 0) setShowPaymentModal(true)
+      if (e.key === 'F4' && items.length > 0) setShowClearConfirm(true)
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)

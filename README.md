@@ -19,10 +19,12 @@ A web-based point of sale system for a retail shop, built as a final-year capsto
 - Payment by cash (with one-tap "Exact" and rounded-up amount buttons, and change calculation), Mobile Money, or card. Mobile Money and card payments go through Paystack and are verified on the server.
 - An 80mm thermal receipt is printed with `window.print()`.
 - Keyboard shortcuts: **F1** search, **F2** pay, **F4** clear cart, **Enter** add / confirm.
+- **Cash drawer shifts.** Cashiers open a shift with a counted float and close it by counting the drawer. The system works out the expected cash (float + cash sales − cash refunds) and records whether the drawer was over or short. Admins can make an open shift required before selling.
 
 **Back office**
 - **Dashboard.** Today's revenue, today's transaction count, low-stock alerts, a 7-day revenue chart, top products, and sales by category.
-- **Sales.** Filter by date, status, payment method, cashier, or transaction ID. Reprint any receipt, and refund sales (stock and loyalty points are reversed).
+- **Sales.** Filter by date, status, payment method, cashier, or transaction ID. Reprint any receipt, and return some or all of a sale: choose items and quantities, decide whether each goes back on the shelf or was damaged, and give a reason. Each item is refunded at its share of what the customer paid, and stock and loyalty points are adjusted.
+- **Shifts.** Every drawer session with its float, takings by payment method, expected and counted cash, and the over/short result. Managers can close a shift a cashier left open.
 - **Products.** Create, edit, image upload, categories, suppliers, and soft delete/reactivate (admin).
 - **Inventory.** Stock levels, low and out-of-stock views, restock and adjustments, plus each product's full stock history.
 - **Customers.** Loyalty points, lifetime spend, and purchase history.
@@ -33,7 +35,7 @@ A web-based point of sale system for a retail shop, built as a final-year capsto
 - Every sale is one database transaction. Stock can't oversell even when two tills sell the last unit at once, a Paystack payment can only pay for one sale, and every stock change is logged.
 - Role-based access is enforced on every endpoint: ADMIN, MANAGER, CASHIER.
 - Passwords use bcrypt (cost 12). Access tokens last 15 minutes; refresh tokens last 7 days, rotate on each use, and live in an httpOnly cookie.
-- Accounts lock after 5 failed logins until an admin unlocks them, and changing a password signs out every other device. Logins go to an auth log; refunds, deactivations, deletions and settings or user changes go to an audit log with who made them.
+- Accounts lock after 5 failed logins until an admin unlocks them, and changing a password signs out every other device. Logins go to an auth log; refunds, shift closes, deactivations, deletions and settings or user changes go to an audit log with who made them.
 - All input is validated on the server, including rejecting fields an endpoint doesn't expect. Login is rate-limited, and the database itself refuses negative stock and amounts.
 
 ---
@@ -145,7 +147,7 @@ cd server && npm test     # Jest + Supertest integration tests (uses the databas
 cd client && npm test     # Vitest component and utility tests
 ```
 
-158 backend tests cover every module: auth (lockout, token rotation), sales (payments, discounts, concurrent sales, refunds), inventory, products, customers, suppliers, reports (exact totals), users, and settings. Services have about 88% line coverage. The tests create and delete their own data, run one file at a time, and mock Paystack.
+177 backend tests cover every module: auth (lockout, token rotation), sales (payments, discounts, concurrent sales), partial returns, cash drawer shifts, inventory, products, customers, suppliers, reports (exact totals), users, and settings. Services have about 90% line coverage. The tests create and delete their own data, run one file at a time, and mock Paystack.
 
 GitHub Actions runs the server tests against a fresh PostgreSQL database, plus both linters, the client tests and a production build, on every push and pull request (`.github/workflows/ci.yml`).
 

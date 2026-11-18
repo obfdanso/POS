@@ -5,6 +5,9 @@ Notable changes to QuickMart POS, newest first.
 ## 2026-11-18
 
 ### Added
+- **Promotions.** Managers create automatic percentage discounts for one product, a category, or the whole store, optionally scheduled with start and end times (new **Promos** page). At checkout each line gets the biggest promotion that applies; the till shows it on product cards and cart lines and prices the cart exactly as the server does, and receipts name it. Cashier discounts still apply on top. API: `/api/promotions`.
+- **Purchase orders.** Managers order stock from a supplier (new **Orders** page), with suggested quantities for its low-stock products, then receive deliveries in full or in parts. Receiving adds stock with a restock log and can update the product's cost price. Orders can be cancelled; suppliers with orders can't be deleted. API: `/api/purchase-orders`.
+- **Sentry error reporting (optional).** Set `SENTRY_DSN` and/or `VITE_SENTRY_DSN` to report unexpected server errors and browser crashes, tagged with the request ID and the user's role. Tokens, cookies, request bodies, query strings and database error details are stripped, and the browser SDK is only downloaded when a DSN is set.
 - **Emailed receipts.** An *Email* button on every receipt sends it to the customer's email on file or an address typed at the till, as HTML with a plain-text version. It uses any SMTP provider configured with `SMTP_*` and `MAIL_FROM`; without them the button explains that email isn't set up. API: `POST /api/sales/:id/email-receipt`.
 - **Monitoring.** Every request gets an `X-Request-Id` that appears in its log lines and in unexpected-error messages ("ref 3f2a9c1e"). Request logs now include response times. `GET /api/health/ready` checks the database, and Docker Compose starts the web app only once the API is ready.
 - **End-to-end tests.** Playwright drives a real browser against the real API and a production build: sign-in and role access, a keyboard checkout from barcode scan to receipt, and a partial return with its refund slip. They run in CI against a freshly seeded database.
@@ -18,6 +21,7 @@ Notable changes to QuickMart POS, newest first.
 - `COOKIE_SECURE=false` allows refresh cookies over plain HTTP on a private network (e.g. shop tablets reaching a Docker install).
 
 ### Fixed
+- body-parser updated to 1.20.9 for a denial-of-service advisory.
 - Transaction numbers now follow the highest number issued that day, so removing one of today's sales can't cause a duplicate ID.
 - Card and mobile money: the POS rechecks prices, stock and tax before charging, and retries a failed sale with the same Paystack reference instead of charging the customer again. Cash sales no longer store a payment reference, and non-cash sales record the verified total as the amount paid.
 - Tax and totals round half-pesewa amounts up. The profit report counts the cost of fully discounted items. Reports given only an end date default to the 30 days before it.

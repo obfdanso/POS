@@ -9,6 +9,8 @@ COPY . .
 # Vite bakes VITE_* variables into the bundle at build time
 ARG VITE_PAYSTACK_PUBLIC_KEY=""
 ENV VITE_PAYSTACK_PUBLIC_KEY=$VITE_PAYSTACK_PUBLIC_KEY
+ARG VITE_SENTRY_DSN=""
+ENV VITE_SENTRY_DSN=$VITE_SENTRY_DSN
 RUN npm run build
 
 FROM nginx:1.27-alpine

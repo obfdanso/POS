@@ -16,6 +16,7 @@ A web-based point of sale system for a retail shop, built as a final-year capsto
 - Search by name, SKU, or barcode. A scanned or typed barcode plus **Enter** adds the product straight to the cart.
 - Browse products by category. Stock badges warn when an item is running low.
 - Cart with per-item and cart-wide discounts, tax (configurable), and an optional customer for loyalty points. Walk-in sales need no customer.
+- **Promotions** apply automatically: a percentage off one product, a category, or the whole store, for a set period. Product cards show the deal, cart lines show the saving, and receipts name the promotion.
 - **Loyalty redemption.** Customers can spend their points as money off at the till (the point value is set by an admin). Returned goods give the points back.
 - Payment by cash (with one-tap "Exact" and rounded-up amount buttons, and change calculation), Mobile Money, or card. Mobile Money and card payments go through Paystack and are verified on the server.
 - An 80mm thermal receipt is printed with `window.print()`, or emailed to the customer (to the address on file or one typed at the till) when an SMTP server is configured.
@@ -29,6 +30,8 @@ A web-based point of sale system for a retail shop, built as a final-year capsto
 - **Shifts.** Every drawer session with its float, takings by payment method, expected and counted cash, and the over/short result. Managers can close a shift a cashier left open.
 - **Products.** Create, edit, image upload, categories, suppliers, and soft delete/reactivate (admin).
 - **Inventory.** Stock levels, low and out-of-stock views, restock and adjustments, plus each product's full stock history.
+- **Purchase orders.** Order stock from a supplier (with one-click suggestions for its low-stock products), then receive deliveries in full or in parts. Received goods go straight into stock with a log entry and can update the cost price used in profit reports.
+- **Promotions.** Create, schedule, edit and switch off automatic discounts, and see how often each was used.
 - **Customers.** Loyalty points, lifetime spend, and purchase history.
 - **Reports.** Sales summary, daily sales, top products, category, cashier performance, and profit. All support date ranges and CSV export.
 - **Users and settings (admin).** Roles, deactivation, password resets, and unlocking accounts. Store details, tax rate, loyalty rate and point value, currency symbol, and receipt footer.
@@ -38,7 +41,7 @@ A web-based point of sale system for a retail shop, built as a final-year capsto
 - Role-based access is enforced on every endpoint: ADMIN, MANAGER, CASHIER.
 - Passwords use bcrypt (cost 12). Access tokens last 15 minutes; refresh tokens last 7 days, rotate on each use, and live in an httpOnly cookie.
 - Accounts lock after 5 failed logins until an admin unlocks them, and changing a password signs out every other device. Logins go to an auth log; refunds, shift closes, deactivations, deletions and settings or user changes go to an audit log with who made them.
-- Every request gets an ID that appears in its log lines and in unexpected-error messages, so a problem a cashier reports can be found in the logs. `/api/health/ready` checks the database for Docker and uptime monitors.
+- Every request gets an ID that appears in its log lines and in unexpected-error messages, so a problem a cashier reports can be found in the logs. `/api/health/ready` checks the database for Docker and uptime monitors. With a Sentry DSN set, unexpected server errors and browser crashes are reported to Sentry, without tokens, cookies, request bodies or customer searches.
 - All input is validated on the server, including rejecting fields an endpoint doesn't expect. Login is rate-limited, and the database itself refuses negative stock and amounts.
 
 ---
@@ -117,6 +120,7 @@ The app is at http://localhost:8080. Migrations run automatically each time the 
 | `TRUST_PROXY` | behind a proxy | — | `1` behind nginx/Caddy, so client IPs are correct |
 | `COOKIE_SECURE` | | follows `NODE_ENV` | `false` allows refresh cookies over plain HTTP on a private network |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` | for emailed receipts | — | Any SMTP provider. Leave `SMTP_HOST` empty to turn email off |
+| `SENTRY_DSN` (server), `VITE_SENTRY_DSN` (client) | | — | Optional error reporting to Sentry. The browser SDK is only downloaded when set |
 
 Generate a secret with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
 
@@ -152,9 +156,9 @@ cd client && npm test     # Vitest component and utility tests
 cd e2e && npm install && npm test   # Playwright: real browser against the real API and a production build
 ```
 
-The end-to-end tests start the API and a production build of the web app themselves (or reuse ones already running), sign in as the seeded users, and use the database in `server/.env`, which must be seeded. They cover sign-in and role access, a keyboard checkout from barcode scan to receipt, and a partial return with its refund slip. Locally they use your installed Chrome.
+The end-to-end tests start the API and a production build of the web app themselves (or reuse ones already running), sign in as the seeded users, and use the database in `server/.env`, which must be seeded. They cover sign-in and role access, a keyboard checkout from barcode scan to receipt, a partial return with its refund slip, a promotion from creation to the receipt, and a purchase order received in two deliveries. Locally they use your installed Chrome.
 
-197 backend tests cover every module: auth (lockout, token rotation), sales (payments, discounts, concurrent sales), loyalty redemption, emailed receipts, request IDs and readiness, partial returns, cash drawer shifts, inventory, products, customers, suppliers, reports (exact totals), users, and settings. Services have about 90% line coverage. The tests create and delete their own data, run one file at a time, and mock Paystack.
+222 backend tests cover every module: auth (lockout, token rotation), sales (payments, discounts, concurrent sales), promotions, purchase orders, loyalty redemption, emailed receipts, request IDs, readiness and error reporting, partial returns, cash drawer shifts, inventory, products, customers, suppliers, reports (exact totals), users, and settings. Services have about 90% line coverage. The tests create and delete their own data, run one file at a time, and mock Paystack.
 
 GitHub Actions runs the server tests against a fresh PostgreSQL database, both linters, the client tests, a production build, and the Playwright tests against a freshly seeded database, on every push and pull request (`.github/workflows/ci.yml`).
 

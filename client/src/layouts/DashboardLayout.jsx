@@ -7,6 +7,11 @@ import { Modal } from '../components/Modal'
 import toast from 'react-hot-toast'
 
 const icons = {
+  orders: (
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0zM13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10m10 0h2m-2 0H9m10 0h1a1 1 0 001-1v-3.65a1 1 0 00-.22-.624l-3.48-4.35A1 1 0 0016.52 6H13" />
+    </svg>
+  ),
   shifts: (
     <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -208,6 +213,7 @@ export function DashboardLayout({ children, noPad = false }) {
                 <div className="w-px bg-gray-200 dark:bg-gray-700 mx-1 xl:mx-2 my-3 flex-shrink-0" />
                 <NavItem to="/products" icon={icons.products} label="Products" />
                 <NavItem to="/inventory" icon={icons.inventory} label="Inventory" />
+                <NavItem to="/purchase-orders" icon={icons.orders} label="Orders" />
                 <NavItem to="/customers" icon={icons.customers} label="Customers" />
                 <div className="w-px bg-gray-200 dark:bg-gray-700 mx-1 xl:mx-2 my-3 flex-shrink-0" />
                 <NavItem to="/sales" icon={icons.mySales} label="Sales" />
@@ -309,6 +315,7 @@ export function DashboardLayout({ children, noPad = false }) {
                 <div className="h-px bg-gray-100 dark:bg-gray-800 my-1" />
                 <MobileNavItem to="/products" icon={icons.products} label="Products" onClick={closeMobile} />
                 <MobileNavItem to="/inventory" icon={icons.inventory} label="Inventory" onClick={closeMobile} />
+                <MobileNavItem to="/purchase-orders" icon={icons.orders} label="Purchase Orders" onClick={closeMobile} />
                 <MobileNavItem to="/customers" icon={icons.customers} label="Customers" onClick={closeMobile} />
                 <div className="h-px bg-gray-100 dark:bg-gray-800 my-1" />
                 <MobileNavItem to="/sales" icon={icons.mySales} label="Sales" onClick={closeMobile} />

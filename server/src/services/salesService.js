@@ -10,7 +10,7 @@ const { isEmailConfigured, sendMail } = require('../utils/mailer')
 const { buildReceiptEmail } = require('../utils/receiptEmail')
 const { activePromotionsFor, bestPromotionFor } = require('./promotionService')
 
-async function createSale({ items, customer_id, payment_method, amount_paid, discount_amount = 0, redeem_points = 0, notes, reference }, user) {
+async function createSale({ items, customer_id, payment_method, amount_paid, discount_amount = 0, redeem_points = 0, notes, reference, payments }, user) {
   // Support legacy callers that pass userId as a string
   const userId = typeof user === 'string' ? user : user.id
 
@@ -126,59 +126,11 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
   const taxAmount = round2(taxableAmount * (taxRate / 100))
   const totalAmount = round2(taxableAmount + taxAmount)
 
-  // Validate payment
-  // Non-cash payments are verified against the total, so record that instead of the client's figure
-  const amountPaid = payment_method === 'CASH' ? parseFloat(amount_paid) : totalAmount
-  if (payment_method === 'CASH' && amountPaid < totalAmount) {
-    throw new ValidationError('Insufficient payment', [
-      { field: 'amount_paid', message: `Amount paid (${amountPaid}) is less than total (${totalAmount})` },
-    ])
+  // Work out the payment rows, then check every card and Mobile Money part with Paystack
+  const paymentRows = planPayments({ payment_method, amount_paid, reference, payments }, totalAmount)
+  for (const row of paymentRows.filter((r) => r.reference)) {
+    await verifyCharge(row.reference, row.amount_paid)
   }
-
-  if (payment_method === 'MOBILE_MONEY' || payment_method === 'CARD') {
-    if (!reference) {
-      throw new ValidationError('Payment reference required', [
-        { field: 'reference', message: 'Paystack reference is required for non-cash payments' }
-      ])
-    }
-
-    // A successful Paystack charge can pay for one sale only
-    const alreadyUsed = await prisma.payment.findUnique({ where: { reference }, select: { id: true } })
-    if (alreadyUsed) {
-      throw new ConflictError('This payment reference has already been used for another sale', 'reference')
-    }
-
-    let paystackRes;
-    try {
-      paystackRes = await verifyPaystackPayment(reference);
-    } catch (err) {
-      throw err instanceof AppError ? err : new AppError('payment verification unavailable', 503);
-    }
-
-    if (!paystackRes || paystackRes.status !== true || paystackRes.data?.status !== 'success') {
-      throw new ValidationError('Payment verification failed', [
-        { field: 'reference', message: 'Paystack transaction not successful' }
-      ])
-    }
-    if (paystackRes.data.currency && paystackRes.data.currency !== 'GHS') {
-      throw new ValidationError('Payment verification failed', [
-        { field: 'reference', message: `Payment was made in ${paystackRes.data.currency}, not GHS` }
-      ])
-    }
-
-    // The customer must have been charged the full sale total (including tax), in pesewas
-    const paystackAmountPesewas = paystackRes.data.amount;
-    const expectedAmountPesewas = Math.round(totalAmount * 100);
-    if (Math.abs(paystackAmountPesewas - expectedAmountPesewas) > 1) {
-      throw new ValidationError(`Payment verification failed: amount mismatch (Paystack: ${paystackAmountPesewas} pesewas, expected: ${expectedAmountPesewas} pesewas)`, [
-        { field: 'amount', message: 'Verified amount does not match total amount' }
-      ])
-    }
-
-    logger.info(`Paystack verification successful: Ref ${reference}, Amount ${paystackAmountPesewas} pesewas, Channel ${paystackRes.data.channel || 'unknown'}`);
-  }
-
-  const changeGiven = payment_method === 'CASH' ? round2(amountPaid - totalAmount) : 0
 
   // Loyalty points (1 point per <loyalty rate> GHS); stored on the sale so a refund reverses exactly this
   const loyaltyRate = customer_id ? await getNumericSetting('loyalty_points_rate', 10) : 0
@@ -251,17 +203,8 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
       })),
     })
 
-    // Create Payment
-    await tx.payment.create({
-      data: {
-        sale_id: newSale.id,
-        method: payment_method,
-        amount_paid: amountPaid,
-        change_given: changeGiven,
-        // Only verified non-cash payments carry a reference, so cash sales cannot claim a real Paystack one
-        reference: payment_method === 'CASH' ? null : reference,
-      },
-    })
+    // One payment row per method; only verified card and Mobile Money parts carry a reference
+    await tx.payment.createMany({ data: paymentRows.map((row) => ({ sale_id: newSale.id, ...row })) })
 
     // Deduct stock atomically — the quantity guard stops concurrent sales from overselling
     for (const item of saleItems) {
@@ -322,6 +265,106 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
   return getSaleById(sale.id)
 }
 
+const METHOD_LABEL = { CASH: 'Cash', MOBILE_MONEY: 'Mobile Money', CARD: 'Card', SPLIT: 'Split' }
+
+function paymentError(message, field = 'payments') {
+  return new ValidationError('Invalid payment', [{ field, message }])
+}
+
+/**
+ * The Payment rows for a sale of `total`. CASH, MOBILE_MONEY and CARD pay the whole total. SPLIT
+ * takes `payments` ([{ method, amount, reference }], each method at most once): card and Mobile
+ * Money parts are charged exactly their amount, and a cash part is the cash handed over for what
+ * is left, with change given from it.
+ */
+function planPayments({ payment_method, amount_paid, reference, payments }, total) {
+  if (payment_method !== 'SPLIT') {
+    if (payments) throw paymentError('List payments only for a split payment')
+    if (payment_method === 'CASH') {
+      const paid = parseFloat(amount_paid)
+      if (!(paid >= total)) {
+        throw new ValidationError('Insufficient payment', [
+          { field: 'amount_paid', message: `Amount paid (${amount_paid}) is less than total (${total})` },
+        ])
+      }
+      return [{ method: 'CASH', amount_paid: paid, change_given: round2(paid - total), reference: null }]
+    }
+    if (!reference) {
+      throw new ValidationError('Payment reference required', [
+        { field: 'reference', message: 'Paystack reference is required for non-cash payments' },
+      ])
+    }
+    // Verified against the total, so record that instead of the client's figure
+    return [{ method: payment_method, amount_paid: total, change_given: 0, reference }]
+  }
+
+  const parts = payments || []
+  if (parts.length < 2) throw paymentError('A split payment needs at least two parts')
+  if (new Set(parts.map((p) => p.method)).size !== parts.length) throw paymentError('Use each payment method once in a split payment')
+
+  const nonCash = parts.filter((p) => p.method !== 'CASH')
+  for (const part of nonCash) {
+    if (!part.reference) throw paymentError(`The ${METHOD_LABEL[part.method]} part needs its Paystack reference`)
+  }
+  if (new Set(nonCash.map((p) => p.reference)).size !== nonCash.length) throw paymentError('Each part needs its own Paystack payment')
+  const nonCashTotal = round2(nonCash.reduce((sum, p) => sum + round2(p.amount), 0))
+
+  const rows = []
+  const cash = parts.find((p) => p.method === 'CASH')
+  if (cash) {
+    const due = round2(total - nonCashTotal)
+    if (due <= 0) {
+      throw paymentError(`The card and Mobile Money parts (${nonCashTotal.toFixed(2)}) already cover the total (${total.toFixed(2)}); take no cash`)
+    }
+    const handed = round2(cash.amount)
+    if (handed < due) throw paymentError(`Cash received (${handed.toFixed(2)}) is less than the ${due.toFixed(2)} left to pay`)
+    rows.push({ method: 'CASH', amount_paid: handed, change_given: round2(handed - due), reference: null })
+  } else if (nonCashTotal !== total) {
+    throw paymentError(`The parts add up to ${nonCashTotal.toFixed(2)} but the total is ${total.toFixed(2)}`)
+  }
+  for (const part of nonCash) {
+    rows.push({ method: part.method, amount_paid: round2(part.amount), change_given: 0, reference: part.reference })
+  }
+  return rows
+}
+
+/** Confirms with Paystack that `reference` is an unused, successful GHS charge of exactly `amount`. */
+async function verifyCharge(reference, amount) {
+  // A successful Paystack charge can pay for one sale only
+  const alreadyUsed = await prisma.payment.findUnique({ where: { reference }, select: { id: true } })
+  if (alreadyUsed) {
+    throw new ConflictError('This payment reference has already been used for another sale', 'reference')
+  }
+
+  let paystackRes
+  try {
+    paystackRes = await verifyPaystackPayment(reference)
+  } catch (err) {
+    throw err instanceof AppError ? err : new AppError('payment verification unavailable', 503)
+  }
+
+  if (!paystackRes || paystackRes.status !== true || paystackRes.data?.status !== 'success') {
+    throw new ValidationError('Payment verification failed', [{ field: 'reference', message: 'Paystack transaction not successful' }])
+  }
+  if (paystackRes.data.currency && paystackRes.data.currency !== 'GHS') {
+    throw new ValidationError('Payment verification failed', [
+      { field: 'reference', message: `Payment was made in ${paystackRes.data.currency}, not GHS` },
+    ])
+  }
+
+  // The customer must have been charged exactly this amount (including tax), in pesewas
+  const paystackAmountPesewas = paystackRes.data.amount
+  const expectedAmountPesewas = Math.round(amount * 100)
+  if (Math.abs(paystackAmountPesewas - expectedAmountPesewas) > 1) {
+    throw new ValidationError(
+      `Payment verification failed: amount mismatch (Paystack: ${paystackAmountPesewas} pesewas, expected: ${expectedAmountPesewas} pesewas)`,
+      [{ field: 'amount', message: 'Verified amount does not match total amount' }]
+    )
+  }
+
+  logger.info(`Paystack verification successful: Ref ${reference}, Amount ${paystackAmountPesewas} pesewas, Channel ${paystackRes.data.channel || 'unknown'}`)
+}
+
 async function getSaleById(id) {
   const sale = await prisma.sale.findUnique({
     where: { id },
@@ -334,7 +377,8 @@ async function getSaleById(id) {
           promotion: { select: { id: true, name: true, percent_off: true } },
         },
       },
-      payments: true,
+      // Enum order puts cash first
+      payments: { orderBy: { method: 'asc' } },
       refunds: {
         include: {
           user: { select: { id: true, full_name: true } },
@@ -403,7 +447,7 @@ async function processRefund(saleId, userId, { items, reason } = {}) {
 
     const sale = await tx.sale.findUnique({
       where: { id: saleId },
-      include: { sale_items: { include: { product: { select: { name: true } } } } },
+      include: { sale_items: { include: { product: { select: { name: true } } } }, payments: true },
     })
     if (sale.payment_status === 'REFUNDED') {
       throw new ValidationError('Sale already refunded', [{ field: 'sale_id', message: 'This sale has already been refunded' }])
@@ -487,6 +531,20 @@ async function processRefund(saleId, userId, { items, reason } = {}) {
       data: { refunded_amount: refundedAfter, payment_status: completesSale ? 'REFUNDED' : 'PARTIALLY_REFUNDED' },
     })
 
+    // The part paid back in cash from the drawer. A split sale gives cash back first, up to the
+    // cash it took (net of change) less cash already refunded; the rest goes back by card/Mobile Money
+    let cashAmount = 0
+    if (sale.payment_method === 'CASH') {
+      cashAmount = amount
+    } else if (sale.payment_method === 'SPLIT') {
+      const cashTaken = sale.payments
+        .filter((p) => p.method === 'CASH')
+        .reduce((sum, p) => sum + parseFloat(p.amount_paid) - parseFloat(p.change_given), 0)
+      const earlier = await tx.refund.aggregate({ where: { sale_id: saleId }, _sum: { cash_amount: true } })
+      const cashLeft = round2(cashTaken - parseFloat(earlier._sum.cash_amount || 0))
+      cashAmount = Math.max(0, Math.min(amount, cashLeft))
+    }
+
     const openShift = await tx.shift.findFirst({ where: { user_id: userId, status: 'OPEN' }, select: { id: true } })
     const refundReason = reason?.trim() || (completesSale && !items ? 'Full refund' : 'Return')
     await tx.refund.create({
@@ -496,6 +554,7 @@ async function processRefund(saleId, userId, { items, reason } = {}) {
         shift_id: openShift?.id ?? null,
         amount,
         method: sale.payment_method,
+        cash_amount: cashAmount,
         reason: refundReason,
         items: {
           create: refundItems.map((i) => ({
@@ -555,7 +614,7 @@ async function processRefund(saleId, userId, { items, reason } = {}) {
         action: completesSale ? 'SALE_REFUNDED' : 'SALE_PARTIALLY_REFUNDED',
         entity: 'Sale',
         entityId: saleId,
-        details: `${sale.transaction_id}: ${amount.toFixed(2)} refunded via ${sale.payment_method} (${returnedUnits} item${returnedUnits === 1 ? '' : 's'}): ${refundReason}`,
+        details: `${sale.transaction_id}: ${amount.toFixed(2)} refunded via ${sale.payment_method}${sale.payment_method === 'SPLIT' ? ` (${cashAmount.toFixed(2)} in cash)` : ''} (${returnedUnits} item${returnedUnits === 1 ? '' : 's'}): ${refundReason}`,
       },
       tx
     )

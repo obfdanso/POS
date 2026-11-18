@@ -4,9 +4,10 @@ function normalizeSale(sale) {
   return {
     ...sale,
     items: sale.sale_items ?? [],
+    // The cash part first when there is one; split sales list every part in `payments`
     payment: sale.payments?.[0] ?? null,
+    payments: sale.payments ?? [],
     sale_items: undefined,
-    payments: undefined,
   }
 }
 

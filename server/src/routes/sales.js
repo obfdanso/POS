@@ -28,9 +28,22 @@ const saleValidation = [
   body('items.*.quantity').isInt({ min: 1, max: 100000 }).withMessage('Each item quantity must be between 1 and 100000').toInt(),
   body('items.*.discount').optional().isFloat({ min: 0, max: 1000000 }).withMessage('Item discount must be >= 0').toFloat(),
   body('payment_method')
-    .isIn(['CASH', 'MOBILE_MONEY', 'CARD'])
-    .withMessage('Payment method must be CASH, MOBILE_MONEY, or CARD'),
-  body('amount_paid').isFloat({ min: 0, max: 1000000 }).withMessage('Amount paid must be between 0 and 1000000').toFloat(),
+    .isIn(['CASH', 'MOBILE_MONEY', 'CARD', 'SPLIT'])
+    .withMessage('Payment method must be CASH, MOBILE_MONEY, CARD, or SPLIT'),
+  // A split payment gives its amounts in `payments` instead
+  body('amount_paid')
+    .if((value, { req }) => req.body.payment_method !== 'SPLIT')
+    .isFloat({ min: 0, max: 1000000 }).withMessage('Amount paid must be between 0 and 1000000').toFloat(),
+  body('payments')
+    .if(body('payment_method').equals('SPLIT'))
+    .isArray({ min: 2, max: 3 }).withMessage('A split payment needs 2 or 3 parts'),
+  body('payments')
+    .if((value, { req }) => req.body.payment_method !== 'SPLIT')
+    .not().exists().withMessage('payments is only used with a SPLIT payment'),
+  body('payments.*.method').isIn(['CASH', 'MOBILE_MONEY', 'CARD']).withMessage('Each part must be CASH, MOBILE_MONEY, or CARD'),
+  body('payments.*.amount').isFloat({ min: 0.01, max: 1000000 }).withMessage('Each part must be between 0.01 and 1000000').toFloat(),
+  body('payments.*.reference').optional().isString().withMessage('Reference must be text').trim()
+    .isLength({ min: 1, max: 100 }).withMessage('Reference must be 1 to 100 characters'),
   body('discount_amount').optional().isFloat({ min: 0, max: 1000000 }).withMessage('Discount must be >= 0').toFloat(),
   body('redeem_points').optional().isInt({ min: 0, max: 1000000 }).withMessage('Points to redeem must be a whole number, 0 or more').toInt(),
   body('customer_id').optional({ nullable: true }).isUUID().withMessage('Customer ID must be a valid UUID'),
@@ -51,7 +64,7 @@ const listSalesValidation = [
   query('user_id').optional().isUUID().withMessage('Invalid user ID'),
   query('customer_id').optional().isUUID().withMessage('Invalid customer ID'),
   query('payment_status').optional().isIn(['COMPLETED', 'PARTIALLY_REFUNDED', 'REFUNDED', 'PENDING']).withMessage('Invalid payment status'),
-  query('payment_method').optional().isIn(['CASH', 'MOBILE_MONEY', 'CARD']).withMessage('Invalid payment method'),
+  query('payment_method').optional().isIn(['CASH', 'MOBILE_MONEY', 'CARD', 'SPLIT']).withMessage('Invalid payment method'),
   query('search').optional().isString().withMessage('Search must be text').trim().isLength({ max: 50 }),
   ...sortRules(Object.keys(SALE_SORTS)),
 ]

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { DashboardLayout } from '../layouts/DashboardLayout'
 import { Button } from '../components/Button'
@@ -15,6 +15,12 @@ export default function ProductFormPage() {
   const navigate = useNavigate()
   const { id } = useParams()
   const isEditing = Boolean(id)
+  // /products/new?variantOf=<id> adds a size or flavour to that product
+  const [searchParams] = useSearchParams()
+  const variantOf = isEditing ? null : searchParams.get('variantOf')
+  // The main product when this one is a variant ({ id, name, variant_name }), and this one's own variants
+  const [parent, setParent] = useState(null)
+  const [variants, setVariants] = useState([])
   const { currency_symbol } = useSettings()
   const { user } = useAuth()
   // Activating/deactivating is ADMIN-only, matching product deletion
@@ -26,7 +32,7 @@ export default function ProductFormPage() {
   const [newCategoryError, setNewCategoryError] = useState('')
   const [isCreatingCategory, setIsCreatingCategory] = useState(false)
   const [suppliers, setSuppliers] = useState([])
-  const [isLoadingProduct, setIsLoadingProduct] = useState(isEditing)
+  const [isLoadingProduct, setIsLoadingProduct] = useState(isEditing || Boolean(variantOf))
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errors, setErrors] = useState({})
   const fileInputRef = useRef(null)
@@ -42,6 +48,7 @@ export default function ProductFormPage() {
     quantity: '0',
     low_stock_threshold: '10',
     is_active: true,
+    variant_name: '',
   })
   const [imageFile, setImageFile] = useState(null)
   const [imagePreview, setImagePreview] = useState(null)
@@ -75,12 +82,37 @@ export default function ProductFormPage() {
           quantity: p.quantity?.toString() || '0',
           low_stock_threshold: p.low_stock_threshold?.toString() || '10',
           is_active: p.is_active ?? true,
+          variant_name: p.variant_name || '',
         })
+        setParent(p.parent || null)
+        setVariants(p.variants || [])
         if (p.image_url) setImagePreview(p.image_url)
       })
       .catch(() => { toast.error('Failed to load product'); navigate('/products') })
       .finally(() => setIsLoadingProduct(false))
   }, [id, isEditing, navigate])
+
+  // New variant: start from the main product's details; the cashier-facing name gets the option added
+  useEffect(() => {
+    if (!variantOf) return
+    productsService.get(variantOf)
+      .then((res) => {
+        const p = res.data?.data
+        if (p.parent) { toast.error('Add variants to the main product'); navigate(`/products/new?variantOf=${p.parent.id}`, { replace: true }); return }
+        setParent({ id: p.id, name: p.name, variant_name: p.variant_name })
+        setForm((prev) => ({
+          ...prev,
+          name: `${p.name} `,
+          category_id: p.category_id || '',
+          supplier_id: p.supplier_id || '',
+          price: p.price?.toString() || '',
+          cost_price: p.cost_price?.toString() || '',
+          low_stock_threshold: p.low_stock_threshold?.toString() || '10',
+        }))
+      })
+      .catch(() => { toast.error('Main product not found'); navigate('/products') })
+      .finally(() => setIsLoadingProduct(false))
+  }, [variantOf, navigate])
 
   async function handleCreateCategory(e) {
     e.preventDefault()
@@ -135,6 +167,8 @@ export default function ProductFormPage() {
     const isWholeAtLeastZero = (v) => v !== '' && Number.isInteger(Number(v)) && Number(v) >= 0
     if (!isWholeAtLeastZero(form.quantity)) errs.quantity = 'Quantity must be a whole number, 0 or more'
     if (!isWholeAtLeastZero(form.low_stock_threshold)) errs.low_stock_threshold = 'Threshold must be a whole number, 0 or more'
+    if (parent && !form.variant_name.trim()) errs.variant_name = 'Name the variant, e.g. a size or flavour'
+    if (form.variant_name.trim().length > 50) errs.variant_name = 'Variant name must be 50 characters or fewer'
     setErrors(errs)
     return Object.keys(errs).length === 0
   }
@@ -162,6 +196,8 @@ export default function ProductFormPage() {
         if (!isEditing) payload.append('quantity', form.quantity)
         payload.append('low_stock_threshold', form.low_stock_threshold)
         if (canToggleActive) payload.append('is_active', form.is_active ? 'true' : 'false')
+        payload.append('variant_name', form.variant_name.trim())
+        if (!isEditing && parent) payload.append('parent_id', parent.id)
         payload.append('image', imageFile)
       } else {
         payload = {
@@ -176,6 +212,8 @@ export default function ProductFormPage() {
           low_stock_threshold: parseInt(form.low_stock_threshold),
           ...(canToggleActive && { is_active: form.is_active }),
           ...(isEditing && imageRemoved && { image_url: null }),
+          variant_name: form.variant_name.trim() || null,
+          ...(!isEditing && parent && { parent_id: parent.id }),
         }
       }
 
@@ -187,7 +225,8 @@ export default function ProductFormPage() {
         toast.success('Product created successfully')
       }
 
-      navigate('/products')
+      // A new variant goes back to its main product, to add the next size
+      navigate(!isEditing && parent ? `/products/${parent.id}/edit` : '/products')
     } catch (err) {
       const fieldErrors = getFieldErrors(err)
       setErrors(fieldErrors)
@@ -228,8 +267,14 @@ export default function ProductFormPage() {
             </svg>
           </button>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{isEditing ? 'Edit Product' : 'Add Product'}</h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400">{isEditing ? 'Update the product details below' : 'Fill in the details for the new product'}</p>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+              {isEditing ? (parent ? 'Edit Variant' : 'Edit Product') : parent ? 'Add Variant' : 'Add Product'}
+            </h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              {parent
+                ? <>A size or flavour of <Link to={`/products/${parent.id}/edit`} className="text-primary-600 hover:underline">{parent.name}</Link>, with its own SKU, price and stock</>
+                : isEditing ? 'Update the product details below' : 'Fill in the details for the new product'}
+            </p>
           </div>
         </div>
 
@@ -245,6 +290,17 @@ export default function ProductFormPage() {
               placeholder="e.g. Coca-Cola 500ml"
               error={errors.name}
             />
+
+            {parent && (
+              <Input
+                label="Variant name *"
+                value={form.variant_name}
+                onChange={(e) => setField('variant_name', e.target.value)}
+                placeholder="e.g. 1.5L, Large, Strawberry"
+                error={errors.variant_name}
+                maxLength={50}
+              />
+            )}
 
             <div className="grid grid-cols-2 gap-4">
               <Input
@@ -279,6 +335,8 @@ export default function ProductFormPage() {
                   id="product-category"
                   value={form.category_id}
                   onChange={(e) => setField('category_id', e.target.value)}
+                  disabled={Boolean(parent)}
+                  title={parent ? "A variant is always in its main product's category" : undefined}
                   className={`block w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition bg-white dark:bg-gray-800 dark:text-gray-100 dark:border-gray-700
                     ${errors.category_id ? 'border-danger-500 bg-danger-50' : 'border-gray-300'}`}
                 >
@@ -414,6 +472,43 @@ export default function ProductFormPage() {
               </div>
             </div>
           </div>
+
+          {/* Variants: only main products have them */}
+          {isEditing && !parent && (
+            <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6 space-y-4 mt-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">Variants</h2>
+                  <p className="text-xs text-gray-400 mt-0.5">Sizes or flavours, each with its own SKU, barcode, price and stock. The till offers them together.</p>
+                </div>
+                <Button type="button" variant="secondary" size="sm" onClick={() => navigate(`/products/new?variantOf=${id}`)}>
+                  + Add variant
+                </Button>
+              </div>
+              {variants.length > 0 && (
+                <>
+                  <Input
+                    label="This product's option name"
+                    value={form.variant_name}
+                    onChange={(e) => setField('variant_name', e.target.value)}
+                    placeholder="e.g. 500ml (shown next to its variants)"
+                    error={errors.variant_name}
+                    maxLength={50}
+                  />
+                  <ul className="divide-y divide-gray-100 dark:divide-gray-800 rounded-lg border border-gray-100 dark:border-gray-800">
+                    {variants.map((v) => (
+                      <li key={v.id} className="flex items-center justify-between px-3 py-2 text-sm">
+                        <Link to={`/products/${v.id}/edit`} className="font-medium text-primary-600 hover:underline">{v.variant_name}</Link>
+                        <span className="text-gray-500 dark:text-gray-400">
+                          {v.sku} · {currency_symbol} {Number(v.price).toFixed(2)} · {v.quantity} in stock{v.is_active ? '' : ' · inactive'}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+          )}
 
           {/* Status (admin only) */}
           {canToggleActive && (

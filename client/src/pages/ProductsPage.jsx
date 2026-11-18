@@ -107,7 +107,11 @@ export default function ProductsPage() {
       render: (val, row) => (
         <div>
           <p className="font-medium text-gray-900 dark:text-gray-100">{val}</p>
-          <p className="text-xs text-gray-400 dark:text-gray-500">{row.sku}</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500">
+            {row.sku}
+            {row.parent && <> · {row.variant_name} of {row.parent.name}</>}
+            {row._count?.variants > 0 && <> · {row._count.variants} variant{row._count.variants === 1 ? '' : 's'}</>}
+          </p>
         </div>
       ),
     },

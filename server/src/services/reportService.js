@@ -194,9 +194,9 @@ async function getProfitReport({ start_date, end_date }) {
       p.id,
       p.name,
       p.sku,
-      ROUND(SUM(si.total * (s.subtotal - s.discount_amount) / NULLIF(s.subtotal, 0)), 2)::float as revenue,
+      ROUND(SUM(COALESCE(si.total * (s.subtotal - s.discount_amount) / NULLIF(s.subtotal, 0), 0)), 2)::float as revenue,
       SUM(si.quantity * COALESCE(si.unit_cost, p.cost_price, 0))::float as cost,
-      ROUND(SUM((si.total * (s.subtotal - s.discount_amount) / NULLIF(s.subtotal, 0)) - (si.quantity * COALESCE(si.unit_cost, p.cost_price, 0))), 2)::float as profit
+      ROUND(SUM(COALESCE(si.total * (s.subtotal - s.discount_amount) / NULLIF(s.subtotal, 0), 0) - (si.quantity * COALESCE(si.unit_cost, p.cost_price, 0))), 2)::float as profit
     FROM "SaleItem" si
     JOIN "Product" p ON p.id = si.product_id
     JOIN "Sale" s ON s.id = si.sale_id

@@ -1,6 +1,7 @@
 const fs = require('fs')
 const multer = require('multer')
 const { logger } = require('./logger')
+const { reportError } = require('../utils/errorReporting')
 
 // Express recognises error handlers by their four parameters, so `_next` must stay
 function errorHandler(err, req, res, _next) {
@@ -122,6 +123,7 @@ function errorHandler(err, req, res, _next) {
 
   // Unhandled/programming errors — don't leak details in production, but keep the stack in the logs
   if (process.env.NODE_ENV !== 'development' && err.stack) logger.error(`${tag}${err.stack}`)
+  reportError(err, req)
   res.status(500).json({
     success: false,
     error: {

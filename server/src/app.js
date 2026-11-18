@@ -1,4 +1,6 @@
 require('dotenv').config()
+// Optional error reporting (SENTRY_DSN); started first so it sees errors from everything below
+require('./utils/errorReporting').initErrorReporting()
 const express = require('express')
 const cors = require('cors')
 const helmet = require('helmet')

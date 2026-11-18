@@ -453,6 +453,8 @@ export default function POSPage() {
   // Product grid: debounced search, or browse by category when the search box is empty
   useEffect(() => {
     const query = searchQuery.trim()
+    // A superseded request must not overwrite the grid or clear the spinner for the newer one
+    let cancelled = false
     setIsSearching(true)
     const id = setTimeout(async () => {
       try {
@@ -460,14 +462,14 @@ export default function POSPage() {
         if (query) params.search = query
         if (activeCategory) params.category_id = activeCategory
         const res = await productsService.list(params)
-        setProducts(res.data?.data || [])
+        if (!cancelled) setProducts(res.data?.data || [])
       } catch {
-        setProducts([])
+        if (!cancelled) setProducts([])
       } finally {
-        setIsSearching(false)
+        if (!cancelled) setIsSearching(false)
       }
     }, query ? 300 : 0)
-    return () => clearTimeout(id)
+    return () => { cancelled = true; clearTimeout(id) }
   }, [searchQuery, activeCategory])
 
   function handleAddProduct(product) {

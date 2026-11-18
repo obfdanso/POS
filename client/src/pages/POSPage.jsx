@@ -4,6 +4,8 @@ import { useCart } from '../context/CartContext'
 import { productsService } from '../services/products'
 import { salesService } from '../services/sales'
 import { customersService } from '../services/customers'
+import { shiftsService } from '../services/shifts'
+import { OpenShiftModal, CloseShiftModal } from '../components/ShiftModals'
 import { formatCurrency } from '../utils/formatCurrency'
 import { lineTotal, round2, calculateTotals } from '../utils/saleTotals'
 import { Button } from '../components/Button'
@@ -367,7 +369,7 @@ function isTypingTarget(el) {
 
 export default function POSPage() {
   const { user } = useAuth()
-  const { loyalty_points_rate, currency_symbol, refreshSettings } = useSettings()
+  const { loyalty_points_rate, currency_symbol, refreshSettings, require_open_shift } = useSettings()
   const fmt = (v) => formatCurrency(v, currency_symbol || 'GH₵')
   const { items, cartDiscount, customer, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, clearCart, syncItems } = useCart()
 
@@ -382,6 +384,10 @@ export default function POSPage() {
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const [completedSale, setCompletedSale] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  // undefined while loading, null when no shift is open
+  const [currentShift, setCurrentShift] = useState(undefined)
+  const [showOpenShift, setShowOpenShift] = useState(false)
+  const [closingShift, setClosingShift] = useState(null)
 
   const searchRef = useRef(null)
   const barcodeBufferRef = useRef('')
@@ -390,7 +396,26 @@ export default function POSPage() {
   const itemsRef = useRef(items)
   itemsRef.current = items
 
-  const anyModalOpen = showPaymentModal || showReceiptModal || showCustomerModal || showClearConfirm
+  const anyModalOpen = showPaymentModal || showReceiptModal || showCustomerModal || showClearConfirm || showOpenShift || Boolean(closingShift)
+  // When the store requires it, nothing can be charged until a shift is open
+  const needsShift = require_open_shift === 'true' && currentShift === null
+  const canCharge = items.length > 0 && !needsShift && currentShift !== undefined
+
+  const loadShift = useCallback(() => {
+    return shiftsService.current()
+      .then((res) => { setCurrentShift(res.data?.data ?? null); return res.data?.data ?? null })
+      .catch(() => { setCurrentShift(null); return null })
+  }, [])
+
+  useEffect(() => {
+    loadShift()
+  }, [loadShift])
+
+  async function startCloseShift() {
+    // Fresh totals, so the expected cash includes every sale up to now
+    const shift = await loadShift()
+    if (shift) setClosingShift(shift)
+  }
 
   // Focus search on mount, and pick up any tax/loyalty changes an admin made since login
   useEffect(() => {
@@ -458,12 +483,12 @@ export default function POSPage() {
       const dialogOpen = anyModalOpen || Boolean(document.querySelector('[role="dialog"]'))
       if (dialogOpen) return
       if (e.key === 'F1') searchRef.current?.focus()
-      if (e.key === 'F2' && items.length > 0) setShowPaymentModal(true)
+      if (e.key === 'F2' && canCharge) setShowPaymentModal(true)
       if (e.key === 'F4' && items.length > 0) setShowClearConfirm(true)
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [items.length, anyModalOpen])
+  }, [items.length, anyModalOpen, canCharge])
 
   // Barcode scanner detection when focus is outside any input: rapid keystrokes ending with Enter.
   // (When the search box is focused, its own Enter handler resolves the code.)
@@ -472,7 +497,7 @@ export default function POSPage() {
   addByCodeRef.current = addByCode
   const scanBlockedRef = useRef(false)
   // A scan may start the next sale while the receipt is still showing; other dialogs block scans
-  scanBlockedRef.current = showPaymentModal || showCustomerModal || showClearConfirm
+  scanBlockedRef.current = showPaymentModal || showCustomerModal || showClearConfirm || showOpenShift || Boolean(closingShift)
   const receiptOpenRef = useRef(false)
   receiptOpenRef.current = showReceiptModal
 
@@ -614,6 +639,11 @@ export default function POSPage() {
     } catch (err) {
       const apiError = err.response?.data?.error
       toast.error(apiError?.details?.[0]?.message || apiError?.message || 'Failed to process sale')
+      // The shift may have been closed elsewhere (e.g. by a manager); show the real state
+      if (apiError?.details?.[0]?.field === 'shift') {
+        setShowPaymentModal(false)
+        loadShift()
+      }
     } finally {
       setIsSubmitting(false)
     }
@@ -647,8 +677,29 @@ export default function POSPage() {
           <div className="text-right">
             <p className="text-xs text-gray-400">Cashier</p>
             <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{user?.full_name || '—'}</p>
+            {currentShift && (
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Shift since {new Date(currentShift.opened_at).toLocaleTimeString('en-GH', { hour: '2-digit', minute: '2-digit' })}
+                {' · '}
+                <button type="button" onClick={startCloseShift} className="text-primary-600 dark:text-primary-400 hover:underline font-medium">
+                  Close shift
+                </button>
+              </p>
+            )}
+            {currentShift === null && !needsShift && (
+              <button type="button" onClick={() => setShowOpenShift(true)} className="text-xs text-primary-600 dark:text-primary-400 hover:underline font-medium">
+                Open shift
+              </button>
+            )}
           </div>
         </div>
+
+        {needsShift && (
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-warning-100 bg-warning-50 dark:bg-warning-900/20 px-4 py-3">
+            <p className="text-sm text-warning-700 dark:text-warning-400">Open a shift and count your opening float before you start selling.</p>
+            <Button size="sm" onClick={() => setShowOpenShift(true)}>Open shift</Button>
+          </div>
+        )}
 
         {/* Search bar */}
         <div className="relative">
@@ -893,9 +944,9 @@ export default function POSPage() {
             variant="success"
             size="lg"
             className="w-full text-base"
-            disabled={items.length === 0}
+            disabled={!canCharge}
             onClick={() => setShowPaymentModal(true)}
-            title="Charge (F2)"
+            title={needsShift ? 'Open a shift first' : 'Charge (F2)'}
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
@@ -906,6 +957,18 @@ export default function POSPage() {
       </div>
 
       {/* ── Modals ── */}
+      <OpenShiftModal
+        isOpen={showOpenShift}
+        onClose={() => setShowOpenShift(false)}
+        onOpened={(shift) => { setCurrentShift(shift); setShowOpenShift(false); searchRef.current?.focus() }}
+      />
+      {closingShift && (
+        <CloseShiftModal
+          shift={closingShift}
+          onClose={() => { setClosingShift(null); searchRef.current?.focus() }}
+          onClosed={() => setCurrentShift(null)}
+        />
+      )}
       {/* Mounted only while open so each payment starts with fresh state */}
       {showPaymentModal && (
       <PaymentModal

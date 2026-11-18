@@ -59,8 +59,9 @@ export function SettingsProvider({ children }) {
     applyTheme(newTheme)
   }
 
+  // Resolves to the loaded settings, or null if they couldn't be fetched
   const loadSettings = useCallback(() => {
-    settingsService
+    return settingsService
       .get()
       .then((res) => {
         const data = res.data?.data
@@ -69,9 +70,11 @@ export function SettingsProvider({ children }) {
           setDefaultCurrencySymbol(data.currency_symbol)
           setSettings((prev) => ({ ...prev, ...data }))
         }
+        return data ?? null
       })
       .catch(() => {
         // Fall back to defaults silently
+        return null
       })
   }, [])
 

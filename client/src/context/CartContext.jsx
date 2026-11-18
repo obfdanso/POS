@@ -53,6 +53,13 @@ function cartReducer(state, action) {
           i.product_id === action.payload.product_id ? { ...i, discount: action.payload.discount } : i
         ),
       })
+    case 'SYNC_ITEMS': {
+      // payload: { [product_id]: { price, quantity_available } } fetched from the server
+      return clampDiscounts({
+        ...state,
+        items: state.items.map((i) => (action.payload[i.product_id] ? { ...i, ...action.payload[i.product_id] } : i)),
+      })
+    }
     case 'SET_CART_DISCOUNT':
       return clampDiscounts({ ...state, cartDiscount: action.payload })
     case 'SET_CUSTOMER':
@@ -87,10 +94,11 @@ export function CartProvider({ children }) {
   const setCartDiscount = useCallback((amount) => dispatch({ type: 'SET_CART_DISCOUNT', payload: amount }), [])
   const setCustomer = useCallback((customer) => dispatch({ type: 'SET_CUSTOMER', payload: customer }), [])
   const clearCart = useCallback(() => dispatch({ type: 'CLEAR_CART' }), [])
+  const syncItems = useCallback((updates) => dispatch({ type: 'SYNC_ITEMS', payload: updates }), [])
 
   const value = useMemo(
-    () => ({ ...state, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, clearCart }),
-    [state, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, clearCart]
+    () => ({ ...state, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, clearCart, syncItems }),
+    [state, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, clearCart, syncItems]
   )
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>

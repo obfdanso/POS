@@ -5,7 +5,7 @@ import { productsService } from '../services/products'
 import { salesService } from '../services/sales'
 import { customersService } from '../services/customers'
 import { formatCurrency } from '../utils/formatCurrency'
-import { lineTotal, round2 } from '../utils/saleTotals'
+import { lineTotal, round2, calculateTotals } from '../utils/saleTotals'
 import { Button } from '../components/Button'
 import { Input } from '../components/Input'
 import { Modal } from '../components/Modal'
@@ -26,7 +26,7 @@ function quickCashAmounts(total) {
   return options.slice(0, 4)
 }
 
-function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCustomer }) {
+function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCustomer, onBeforeCharge }) {
   const { currency_symbol, store_name } = useSettings()
   const sym = currency_symbol || 'GH₵'
   const fmt = (v) => formatCurrency(v, sym)
@@ -34,6 +34,7 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
   const [method, setMethod] = useState('CASH')
   const [amountPaid, setAmountPaid] = useState('')
   const [errors, setErrors] = useState({})
+  const [isChecking, setIsChecking] = useState(false)
 
   const paid = parseFloat(amountPaid)
   const change = method === 'CASH' && paid >= total ? paid - total : 0
@@ -47,8 +48,8 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
     return Object.keys(errs).length === 0
   }
 
-  function handleConfirm() {
-    if (isLoading) return
+  async function handleConfirm() {
+    if (isLoading || isChecking) return
     if (method === 'CASH') {
       if (!validate()) return
       onConfirm({ payment_method: 'CASH', amount_paid: paid })
@@ -61,6 +62,11 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
       toast.error('Card and Mobile Money payments are not configured. Add VITE_PAYSTACK_PUBLIC_KEY to client/.env')
       return
     }
+    // The server re-prices the sale and rejects a charge that doesn't match, so confirm the total first
+    setIsChecking(true)
+    const totalIsCurrent = await onBeforeCharge()
+    setIsChecking(false)
+    if (!totalIsCurrent) return
     const handler = window.PaystackPop.setup({
       key: publicKey,
       email: selectedCustomer?.email || 'guest@quickmart.com',
@@ -162,7 +168,7 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
 
         <div className="flex gap-3 pt-2">
           <Button variant="secondary" className="flex-1" onClick={onClose} disabled={isLoading}>Cancel</Button>
-          <Button variant="success" className="flex-1" onClick={handleConfirm} isLoading={isLoading} title="Enter">
+          <Button variant="success" className="flex-1" onClick={handleConfirm} isLoading={isLoading || isChecking} title="Enter">
             Confirm Payment
           </Button>
         </div>
@@ -321,7 +327,7 @@ export default function POSPage() {
   const { user } = useAuth()
   const { loyalty_points_rate, currency_symbol, refreshSettings } = useSettings()
   const fmt = (v) => formatCurrency(v, currency_symbol || 'GH₵')
-  const { items, cartDiscount, customer, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, clearCart } = useCart()
+  const { items, cartDiscount, customer, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, clearCart, syncItems } = useCart()
 
   const [searchQuery, setSearchQuery] = useState('')
   const [products, setProducts] = useState([])
@@ -489,6 +495,36 @@ export default function POSPage() {
     const added = await addByCode(code)
     // Put an unrecognised code back so it can be corrected, unless the cashier has moved on
     if (!added) setSearchQuery((current) => current || code)
+  }
+
+  // Re-fetches cart prices, stock, and the tax rate. Returns true only if the total shown is still
+  // what the server will charge; otherwise the cart is updated so the cashier sees the new total.
+  async function checkCartBeforeCharge() {
+    try {
+      const [products, latestSettings] = await Promise.all([
+        Promise.all(items.map((i) => productsService.get(i.product_id).then((res) => res.data.data))),
+        refreshSettings(),
+      ])
+      if (!latestSettings) throw new Error('Settings unavailable')
+      const updates = Object.fromEntries(products.map((p) => [p.id, { price: p.price, quantity_available: p.quantity }]))
+      const refreshed = items.map((i) => ({ ...i, ...updates[i.product_id] }))
+      syncItems(updates)
+
+      const shortItem = refreshed.find((i) => i.quantity > i.quantity_available)
+      if (shortItem) {
+        toast.error(`Only ${shortItem.quantity_available} ${shortItem.name} left in stock — update the cart`)
+        return false
+      }
+      const latest = calculateTotals(refreshed, cartDiscount, parseFloat(latestSettings.tax_rate) || 0)
+      if (latest.total !== total) {
+        toast.error(`Prices or tax changed. The new total is ${formatCurrency(latest.total, currency_symbol)} — confirm again to charge it`)
+        return false
+      }
+      return true
+    } catch {
+      toast.error('Could not confirm the current prices. Check the connection and try again.')
+      return false
+    }
   }
 
   async function handlePaymentConfirm({ payment_method, amount_paid, reference }) {
@@ -836,6 +872,7 @@ export default function POSPage() {
         onClose={() => setShowPaymentModal(false)}
         total={total}
         onConfirm={handlePaymentConfirm}
+        onBeforeCharge={checkCartBeforeCharge}
         isLoading={isSubmitting}
         selectedCustomer={customer}
       />

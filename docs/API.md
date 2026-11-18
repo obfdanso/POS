@@ -179,8 +179,9 @@ Processes the whole sale in one database transaction: validate stock, calculate 
 {
   "items": [{ "product_id": "uuid", "quantity": 2, "discount": 0 }],
   "customer_id": "uuid or null",
-  "payment_method": "CASH | MOBILE_MONEY | CARD",
+  "payment_method": "CASH | MOBILE_MONEY | CARD | SPLIT",
   "amount_paid": 50.0,
+  "payments": "SPLIT only, see below",
   "discount_amount": 5.0,
   "redeem_points": 0,
   "reference": "required for MOBILE_MONEY and CARD",
@@ -196,11 +197,12 @@ Processes the whole sale in one database transaction: validate stock, calculate 
 - **customer_id**, if given, must exist (`422` otherwise). This is checked before any payment verification.
 - **CASH:** `amount_paid` must cover the total; change is calculated.
 - **MOBILE_MONEY / CARD:** `reference` is verified with Paystack. The charge must be in GHS and equal the total **including tax**. A reference can pay for **one sale only**: reuse returns `409`.
+- **SPLIT:** instead of `amount_paid` and `reference`, send `payments`: 2–3 parts, each method at most once, e.g. `[{ "method": "CASH", "amount": 40 }, { "method": "MOBILE_MONEY", "amount": 20, "reference": "QM-…" }]`. Each card or Mobile Money part needs its own Paystack reference, verified for exactly its `amount`. A cash part is the cash handed over for what is left (total − other parts); it must cover that, and change is given from it. With no cash part, the parts must add up to the total. `422` for parts that don't add up, a repeated method, a missing reference, or cash when the other parts already cover the total. Each part becomes its own `Payment` row.
 - The cost price and the loyalty points awarded are recorded on the sale, so later price changes don't alter profit reports or refunds.
 - **Transaction ID** format: `TXN-YYYYMMDD-NNNN`, numbered per day after the highest number already issued that day.
 - **Shift:** the sale is linked to the cashier's open shift (`shift_id`). When the `require_open_shift` setting is `"true"`, selling with no open shift returns `422` with a `shift` field error, checked before any payment verification.
 
-**Response `201`:** the full sale, including `items` (each with its `product`) and `payment`.
+**Response `201`:** the full sale, including `items` (each with its `product`), `payments` (cash first) and `payment` (the first of them).
 
 ### GET /sales — *sortable*
 Cashiers only ever see their own sales.
@@ -220,6 +222,9 @@ Receipt data for reprinting: `{ "store": { "name", "address", "phone" }, "sale":
 ### POST /sales/:id/email-receipt
 Emails the receipt (HTML with a plain-text version) through the SMTP server in the environment. **Body:** `{ "email": "optional" }`; without it the receipt goes to the customer's email on file. Cashiers can only email their own sales (`403`). `422` when there is no address or it isn't valid; `503` (`EMAIL_NOT_CONFIGURED`) when `SMTP_HOST`/`MAIL_FROM` aren't set; `502` (`EMAIL_FAILED`) when the mail server refuses it. Limited to 10 per minute per user. Each send is written to the audit log (`RECEIPT_EMAILED`).
 
+### POST /sales/:id/sms-receipt
+Texts a short receipt (total, how it was paid, change, points earned) through Arkesel or Twilio. **Body:** `{ "phone": "optional" }`; without it the text goes to the customer's phone on file. Local numbers such as `024-123-4567` get `SMS_COUNTRY_CODE` (default `233`). Only numbers in that country, or in `SMS_ALLOWED_COUNTRY_CODES`, can be texted. Cashiers can only text their own sales (`403`). `422` when there is no number, it isn't valid, or it is in another country; `429` (`SMS_LIMIT`) once a receipt has been texted 3 times; `503` (`SMS_NOT_CONFIGURED`) when SMS isn't set up; `502` (`SMS_FAILED`) when the provider refuses it. Limited to 5 per minute per user. Each text is written to the audit log (`RECEIPT_TEXTED`).
+
 ### POST /sales/:id/refund — ADMIN, MANAGER
 Returns some or all of a sale. **Body (all optional):**
 ```json
@@ -235,6 +240,7 @@ Returns some or all of a sale. **Body (all optional):**
 - Loyalty points are reduced so the customer keeps only the points for what they kept (never below zero).
 - Points redeemed on the sale are given back in proportion to the value of goods returned (all of them once the whole sale is back), and tracked in `loyalty_points_restored`. They are restored before earned points are taken back.
 - If the refunding user has an open shift, the refund is linked to it, and cash refunds reduce that drawer's expected cash.
+- A split sale's refunds are paid back in cash first, up to the cash the sale took (net of change) less cash already refunded; the rest goes back to the card or Mobile Money. Each refund records the cash part in `cash_amount`.
 - `422` when returning more than is left, an item from another sale, the same line twice, or a sale already fully refunded. Simultaneous returns against one sale are processed one at a time.
 - Card and Mobile Money money must be returned through Paystack separately; the system records the refund.
 
@@ -356,7 +362,7 @@ Any of the create fields, e.g. `{ "is_active": false }` to switch one off. Past 
 
 A shift is one person's session at a till: opened with a counted cash float, closed by counting the drawer. Every role can open and close its own shift; managers and admins can see and close anyone's. A user can have only one open shift.
 
-Every shift response includes a `summary`: `sales_count`, `sales_total`, `by_method` (`CASH`, `MOBILE_MONEY`, `CARD`, each `{ count, total }`), `cash_sales`, `cash_refunds`, and `expected_cash` (opening float + cash sales − cash refunds).
+Every shift response includes a `summary`: `sales_count`, `sales_total`, `by_method` (`CASH`, `MOBILE_MONEY`, `CARD`, each `{ count, total }` of money taken that way, so a split sale counts towards each method it used), `split_count`, `cash_sales`, `cash_refunds` (the cash part of refunds), and `expected_cash` (opening float + cash sales − cash refunds).
 
 ### GET /shifts/current
 The caller's open shift with live totals, or `null`.

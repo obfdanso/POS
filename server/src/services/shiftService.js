@@ -20,35 +20,43 @@ function getOpenShift(userId, db = prisma) {
 }
 
 /**
- * Takings for a shift, aggregated in SQL: sales by payment method, cash refunds paid out of the
- * drawer, and the cash the drawer should hold (opening float + cash sales − cash refunds).
+ * Takings for a shift, aggregated in SQL: money taken by payment method (a split sale counts
+ * towards each method it used), cash refunds paid out of the drawer, and the cash the drawer should
+ * hold (opening float + cash taken − cash refunds).
  */
 async function getShiftTotals(shift, db = prisma) {
-  const salesByMethod = await db.sale.groupBy({
-    by: ['payment_method'],
-    where: { shift_id: shift.id },
-    _sum: { total_amount: true },
-    _count: { id: true },
-  })
+  const [paymentsByMethod, sales, split_count, cashRefunds] = await Promise.all([
+    db.payment.groupBy({
+      by: ['method'],
+      where: { sale: { shift_id: shift.id } },
+      _sum: { amount_paid: true, change_given: true },
+      _count: { id: true },
+    }),
+    db.sale.aggregate({ where: { shift_id: shift.id }, _sum: { total_amount: true }, _count: { id: true } }),
+    db.sale.count({ where: { shift_id: shift.id, payment_method: 'SPLIT' } }),
+    // Cash paid back to customers from this drawer (refunds processed while this shift was open)
+    db.refund.aggregate({ where: { shift_id: shift.id }, _sum: { cash_amount: true } }),
+  ])
 
   const by_method = {
     CASH: { count: 0, total: 0 },
     MOBILE_MONEY: { count: 0, total: 0 },
     CARD: { count: 0, total: 0 },
   }
-  for (const row of salesByMethod) {
-    by_method[row.payment_method] = { count: row._count.id, total: parseFloat(row._sum.total_amount || 0) }
+  for (const row of paymentsByMethod) {
+    by_method[row.method] = {
+      count: row._count.id,
+      total: round2(parseFloat(row._sum.amount_paid || 0) - parseFloat(row._sum.change_given || 0)),
+    }
   }
 
-  const sales_count = Object.values(by_method).reduce((n, m) => n + m.count, 0)
-  const sales_total = round2(Object.values(by_method).reduce((sum, m) => sum + m.total, 0))
+  const sales_count = sales._count.id
+  const sales_total = round2(parseFloat(sales._sum.total_amount || 0))
   const cash_sales = by_method.CASH.total
-  // Cash paid back to customers from this drawer (refunds processed while this shift was open)
-  const cashRefunds = await db.refund.aggregate({ where: { shift_id: shift.id, method: 'CASH' }, _sum: { amount: true } })
-  const cash_refunds = parseFloat(cashRefunds._sum.amount || 0)
+  const cash_refunds = parseFloat(cashRefunds._sum.cash_amount || 0)
   const expected_cash = round2(parseFloat(shift.opening_float) + cash_sales - cash_refunds)
 
-  return { sales_count, sales_total, by_method, cash_sales, cash_refunds, expected_cash }
+  return { sales_count, sales_total, by_method, split_count, cash_sales, cash_refunds, expected_cash }
 }
 
 async function withTotals(shift, db = prisma) {

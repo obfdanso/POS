@@ -1,8 +1,14 @@
 const authService = require('../services/authService')
 
+// Secure (HTTPS-only) cookies in production. COOKIE_SECURE=false allows plain HTTP, e.g. tablets
+// reaching a Docker install on the shop's local network; never use it on the internet.
+const SECURE_COOKIES = process.env.COOKIE_SECURE
+  ? process.env.COOKIE_SECURE === 'true'
+  : process.env.NODE_ENV === 'production'
+
 const COOKIE_OPTIONS = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
+  secure: SECURE_COOKIES,
   sameSite: 'strict',
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
 }
@@ -38,7 +44,7 @@ async function logout(req, res, next) {
 
     res.clearCookie('refreshToken', {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: SECURE_COOKIES,
       sameSite: 'strict',
     })
 

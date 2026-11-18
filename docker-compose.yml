@@ -32,6 +32,8 @@ services:
       # nginx in the client container is the one proxy in front of the API
       TRUST_PROXY: 1
       PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY:-}
+      # Leave unset (HTTPS-only cookies) unless tablets reach the app over plain HTTP on the shop network
+      COOKIE_SECURE: ${COOKIE_SECURE:-}
     volumes:
       - uploads:/app/uploads
     depends_on:

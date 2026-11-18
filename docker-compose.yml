@@ -32,6 +32,7 @@ services:
       # nginx in the client container is the one proxy in front of the API
       TRUST_PROXY: 1
       PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY:-}
+      PAYSTACK_AUTO_REFUND: ${PAYSTACK_AUTO_REFUND:-true}
       # Leave unset (HTTPS-only cookies) unless tablets reach the app over plain HTTP on the shop network
       COOKIE_SECURE: ${COOKIE_SECURE:-}
       # Optional emailed receipts (see server/.env.example)

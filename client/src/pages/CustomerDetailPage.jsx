@@ -103,7 +103,11 @@ export default function CustomerDetailPage() {
     {
       key: 'payment_status',
       label: 'Status',
-      render: (v) => <Badge variant={v === 'REFUNDED' ? 'danger' : v === 'PENDING' ? 'warning' : 'success'}>{v}</Badge>,
+      render: (v) => (
+        <Badge variant={v === 'REFUNDED' ? 'danger' : v === 'PARTIALLY_REFUNDED' || v === 'PENDING' ? 'warning' : 'success'}>
+          {v === 'PARTIALLY_REFUNDED' ? 'PART REFUNDED' : v}
+        </Badge>
+      ),
     },
   ]
 

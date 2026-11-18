@@ -52,6 +52,7 @@ function buildReceiptHtml(sale, settings, fmt) {
     ${settings.store_phone ? `<div>Tel: ${esc(settings.store_phone)}</div>` : ''}
   </div>
   ${payment_status === 'REFUNDED' ? '<div class="center bold" style="margin-top:4px;">*** REFUNDED ***</div>' : ''}
+  ${payment_status === 'PARTIALLY_REFUNDED' ? `<div class="center bold" style="margin-top:4px;">*** PART REFUNDED: ${fmt(sale.refunded_amount)} ***</div>` : ''}
   <div class="dashed"></div>
   <div class="row"><span>TXN:</span><span>${esc(transaction_id)}</span></div>
   <div class="row"><span>Date:</span><span>${new Date(created_at).toLocaleString('en-GH')}</span></div>
@@ -129,6 +130,9 @@ export function Receipt({ sale, onClose, actions }) {
           {settings.store_address && <p className="text-xs text-gray-500">{settings.store_address}</p>}
           {settings.store_phone && <p className="text-xs text-gray-500">Tel: {settings.store_phone}</p>}
           {payment_status === 'REFUNDED' && <p className="mt-1 text-xs font-bold text-danger-600">*** REFUNDED ***</p>}
+          {payment_status === 'PARTIALLY_REFUNDED' && (
+            <p className="mt-1 text-xs font-bold text-warning-600">*** PART REFUNDED: {fmt(sale.refunded_amount)} ***</p>
+          )}
         </div>
 
         <div className="border-t border-dashed border-gray-400 pt-2 mb-2 text-xs">

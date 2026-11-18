@@ -8,14 +8,15 @@ import { Table } from '../components/Table'
 import { Pagination } from '../components/Pagination'
 import { Badge } from '../components/Badge'
 import { Receipt } from '../components/Receipt'
+import { ReturnModal } from '../components/ReturnModal'
 import { salesService } from '../services/sales'
 import { usersService } from '../services/users'
-import { useSettings } from '../context/SettingsContext'
 import { formatCurrency } from '../utils/formatCurrency'
 import { daysFromToday } from '../utils/date'
 import { getErrorMessage } from '../utils/apiErrors'
 
-const STATUS_BADGE = { COMPLETED: 'success', REFUNDED: 'danger', PENDING: 'warning' }
+const STATUS_BADGE = { COMPLETED: 'success', PARTIALLY_REFUNDED: 'warning', REFUNDED: 'danger', PENDING: 'default' }
+const STATUS_LABEL = { PARTIALLY_REFUNDED: 'PART REFUNDED' }
 const METHOD_BADGE = { CASH: 'default', MOBILE_MONEY: 'primary', CARD: 'success' }
 
 const selectClass =
@@ -25,12 +26,10 @@ function formatDateTime(value) {
   return new Date(value).toLocaleString('en-GH', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-// Shows a sale's receipt with reprint, and lets managers/admins refund completed sales
+// Shows a sale's receipt with reprint, its returns so far, and lets managers/admins return items
 function SaleDetailModal({ saleId, onClose, onRefunded }) {
-  const { loyalty_points_rate } = useSettings()
   const [sale, setSale] = useState(null)
-  const [confirmingRefund, setConfirmingRefund] = useState(false)
-  const [isRefunding, setIsRefunding] = useState(false)
+  const [isReturning, setIsReturning] = useState(false)
 
   useEffect(() => {
     salesService.get(saleId)
@@ -41,75 +40,61 @@ function SaleDetailModal({ saleId, onClose, onRefunded }) {
       })
   }, [saleId, onClose])
 
-  async function handleRefund() {
-    setIsRefunding(true)
-    try {
-      const res = await salesService.refund(sale.id)
-      setSale(res.data?.data)
-      setConfirmingRefund(false)
-      toast.success(`${sale.transaction_id} refunded and stock restored`)
-      onRefunded()
-    } catch (err) {
-      toast.error(getErrorMessage(err, 'Refund failed'))
-    } finally {
-      setIsRefunding(false)
-    }
+  const canReturn = sale && ['COMPLETED', 'PARTIALLY_REFUNDED'].includes(sale.payment_status)
+
+  if (isReturning && sale) {
+    return (
+      <ReturnModal
+        sale={sale}
+        onClose={() => setIsReturning(false)}
+        onDone={(updated) => {
+          setSale(updated)
+          setIsReturning(false)
+          onRefunded()
+        }}
+      />
+    )
   }
 
-  const loyaltyRate = parseFloat(loyalty_points_rate) || 0
-  const pointsToReverse = sale?.customer && loyaltyRate > 0 ? Math.floor(parseFloat(sale.total_amount) / loyaltyRate) : 0
-  const unitsToRestore = sale?.items?.reduce((sum, i) => sum + i.quantity, 0) ?? 0
-
   return (
-    <>
-      <Modal isOpen={!confirmingRefund} onClose={onClose} title={sale ? `Sale ${sale.transaction_id}` : 'Sale details'} size="md">
-        {!sale ? (
-          <div className="space-y-3 animate-pulse">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="h-4 bg-gray-200 dark:bg-gray-700 rounded" />
-            ))}
-          </div>
-        ) : (
+    <Modal isOpen onClose={onClose} title={sale ? `Sale ${sale.transaction_id}` : 'Sale details'} size="md">
+      {!sale ? (
+        <div className="space-y-3 animate-pulse">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-4 bg-gray-200 dark:bg-gray-700 rounded" />
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {sale.refunds?.length > 0 && (
+            <div className="rounded-lg border border-warning-100 bg-warning-50 dark:bg-warning-900/20 px-4 py-3">
+              <p className="text-sm font-semibold text-warning-700 dark:text-warning-400 mb-1">
+                Refunded {formatCurrency(sale.refunded_amount)} of {formatCurrency(sale.total_amount)}
+              </p>
+              <ul className="space-y-1 text-xs text-gray-600 dark:text-gray-300">
+                {sale.refunds.map((r) => (
+                  <li key={r.id}>
+                    {formatDateTime(r.created_at)} · {formatCurrency(r.amount)} · {r.items.reduce((n, i) => n + i.quantity, 0)} item(s) · {r.reason}
+                    {r.user && <span className="text-gray-400"> · {r.user.full_name}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <Receipt
             sale={sale}
             onClose={onClose}
             actions={
-              sale.payment_status === 'COMPLETED' && (
-                <Button variant="danger" onClick={() => setConfirmingRefund(true)}>
-                  Refund
+              canReturn && (
+                <Button variant="danger" onClick={() => setIsReturning(true)}>
+                  Return / refund
                 </Button>
               )
             }
           />
-        )}
-      </Modal>
-
-      <Modal isOpen={confirmingRefund} onClose={() => setConfirmingRefund(false)} title="Refund sale" size="sm">
-        {sale && (
-          <div className="space-y-4">
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              Refund <span className="font-semibold text-gray-900 dark:text-gray-100">{formatCurrency(sale.total_amount)}</span> for{' '}
-              <span className="font-mono">{sale.transaction_id}</span>? This cannot be undone.
-            </p>
-            <ul className="text-sm text-gray-600 dark:text-gray-400 list-disc pl-5 space-y-1">
-              <li>{unitsToRestore} unit{unitsToRestore !== 1 ? 's' : ''} will be returned to stock</li>
-              {pointsToReverse > 0 && (
-                <li>{pointsToReverse} loyalty point{pointsToReverse !== 1 ? 's' : ''} will be removed from {sale.customer.name}</li>
-              )}
-              <li>Pay the customer back via {sale.payment_method.replace('_', ' ').toLowerCase()} yourself — the system only records the refund</li>
-            </ul>
-            <div className="flex gap-3">
-              <Button variant="secondary" className="flex-1" onClick={() => setConfirmingRefund(false)} disabled={isRefunding}>
-                Cancel
-              </Button>
-              <Button variant="danger" className="flex-1" onClick={handleRefund} isLoading={isRefunding}>
-                Confirm refund
-              </Button>
-            </div>
-          </div>
-        )}
-      </Modal>
-    </>
+        </div>
+      )}
+    </Modal>
   )
 }
 
@@ -214,7 +199,7 @@ export default function SalesPage() {
       key: 'payment_status',
       label: 'Status',
       sortable: true,
-      render: (v) => <Badge variant={STATUS_BADGE[v] ?? 'default'}>{v}</Badge>,
+      render: (v) => <Badge variant={STATUS_BADGE[v] ?? 'default'}>{STATUS_LABEL[v] ?? v}</Badge>,
     },
   ]
 
@@ -226,7 +211,7 @@ export default function SalesPage() {
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
             {isLoading && sales.length === 0
               ? 'Loading sales…'
-              : `${meta.total} sale${meta.total !== 1 ? 's' : ''} in this period · click a sale to reprint its receipt or refund it`}
+              : `${meta.total} sale${meta.total !== 1 ? 's' : ''} in this period · click a sale to reprint its receipt or return items`}
           </p>
         </div>
 
@@ -258,6 +243,7 @@ export default function SalesPage() {
               <select id="sales-status" value={filters.payment_status} onChange={(e) => setFilter('payment_status', e.target.value)} className={selectClass}>
                 <option value="">All statuses</option>
                 <option value="COMPLETED">Completed</option>
+                <option value="PARTIALLY_REFUNDED">Partly refunded</option>
                 <option value="REFUNDED">Refunded</option>
               </select>
             </div>

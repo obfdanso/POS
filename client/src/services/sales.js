@@ -7,4 +7,6 @@ export const salesService = {
   receipt: (id) => api.get(`/sales/${id}/receipt`),
   // data: { items?: [{ sale_item_id, quantity, restock }], reason }; no items refunds everything left
   refund: (id, data = {}) => api.post(`/sales/${id}/refund`, data),
+  // data: { email? }; without one the receipt goes to the customer's email on file
+  emailReceipt: (id, data = {}) => api.post(`/sales/${id}/email-receipt`, data),
 }

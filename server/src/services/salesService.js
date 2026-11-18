@@ -8,6 +8,8 @@ const generateTransactionId = require('../utils/generateTransactionId')
 const { buildDateRange } = require('../utils/dateRange')
 const { isEmailConfigured, sendMail } = require('../utils/mailer')
 const { buildReceiptEmail } = require('../utils/receiptEmail')
+const { isSmsConfigured, normalizePhone, sendSms } = require('../utils/sms')
+const { buildReceiptSms } = require('../utils/receiptSms')
 const { activePromotionsFor, bestPromotionFor } = require('./promotionService')
 
 async function createSale({ items, customer_id, payment_method, amount_paid, discount_amount = 0, redeem_points = 0, notes, reference, payments }, user) {
@@ -678,6 +680,33 @@ async function emailReceipt(sale, userId, email) {
   return { to }
 }
 
+/**
+ * Texts a sale's receipt to `phone`, or to the customer's number on file. SMS must be set up with
+ * SMS_PROVIDER and the provider's keys. `sale` is the already-loaded, access-checked sale.
+ */
+async function smsReceipt(sale, userId, phone) {
+  if (!isSmsConfigured()) {
+    throw new AppError("SMS receipts aren't set up on this server. Ask an admin to add the SMS settings.", 503, 'SMS_NOT_CONFIGURED')
+  }
+  const raw = phone || sale.customer?.phone
+  if (!raw) {
+    throw new ValidationError('Phone number required', [{ field: 'phone', message: 'Enter a phone number to text the receipt to' }])
+  }
+  const to = normalizePhone(raw)
+  if (!to) {
+    throw new ValidationError('Invalid phone number', [{ field: 'phone', message: 'Enter a valid phone number, e.g. 024-123-4567' }])
+  }
+  const [name, currency] = await Promise.all([getSettingValue('store_name', 'My Store'), getSettingValue('currency_symbol', 'GH₵')])
+  try {
+    await sendSms(to, buildReceiptSms(sale, { name, currency }))
+  } catch (err) {
+    logger.error(`Receipt SMS for ${sale.transaction_id} failed: ${err.message}`)
+    throw new AppError('The text message could not be sent. Check the number and try again.', 502, 'SMS_FAILED')
+  }
+  await recordAudit({ userId, action: 'RECEIPT_TEXTED', entity: 'Sale', entityId: sale.id, details: `${sale.transaction_id} to ${to}` })
+  return { to }
+}
+
 // Half-up to 2 decimals; EPSILON stops values like 1.005 (stored as 1.00499…) rounding down
 function round2(n) {
   return Math.round((n + Number.EPSILON) * 100) / 100
@@ -697,4 +726,4 @@ async function getNumericSetting(key, defaultValue) {
   return isNaN(val) ? defaultValue : val
 }
 
-module.exports = { SALE_SORTS, createSale, getSaleById, listSales, processRefund, getReceiptData, emailReceipt }
+module.exports = { SALE_SORTS, createSale, getSaleById, listSales, processRefund, getReceiptData, emailReceipt, smsReceipt }

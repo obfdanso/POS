@@ -117,4 +117,29 @@ router.post(
   salesController.emailReceipt
 )
 
+// Each text costs money and goes to an outside number, so limit how many one user can send
+const smsRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  keyGenerator: (req) => req.user.id,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
+  message: { success: false, error: { code: 'RATE_LIMITED', message: 'Too many receipt texts. Wait a minute and try again.' } },
+})
+
+// With no `phone`, the receipt goes to the customer's number on file
+router.post(
+  '/:id/sms-receipt',
+  authorize(['ADMIN', 'MANAGER', 'CASHIER']),
+  smsRateLimit,
+  param('id').isUUID(),
+  exactBody([
+    body('phone').optional().isString().withMessage('Phone number must be text').trim()
+      .isLength({ min: 1, max: 20 }).withMessage('Phone number must be 1 to 20 characters'),
+  ]),
+  validate,
+  salesController.smsReceipt
+)
+
 module.exports = router

@@ -4,6 +4,7 @@ import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../context/SettingsContext'
 import { useCart } from '../context/CartContext'
 import { Modal } from '../components/Modal'
+import { OfflineBanner } from '../components/OfflineBanner'
 import toast from 'react-hot-toast'
 
 const icons = {
@@ -330,6 +331,7 @@ export function DashboardLayout({ children, noPad = false }) {
 
       {/* Page content */}
       <main className="flex-1 min-h-0 flex flex-col">
+        <OfflineBanner />
         {noPad ? children : (
           <div className="max-w-7xl mx-auto px-6 py-6 w-full">
             {children}

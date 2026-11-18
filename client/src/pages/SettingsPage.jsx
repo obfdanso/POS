@@ -5,6 +5,7 @@ import { Button } from '../components/Button'
 import { Input } from '../components/Input'
 import { settingsService } from '../services/settings'
 import { useSettings } from '../context/SettingsContext'
+import { getFieldErrors, getErrorMessage } from '../utils/apiErrors'
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -197,6 +198,17 @@ export default function SettingsPage() {
     const errs = {}
     if (!settings.store_name?.trim()) errs.store_name = 'Store name is required'
     if (!settings.currency_symbol?.trim()) errs.currency_symbol = 'Currency symbol is required'
+    // Same limits the server enforces
+    const maxLengths = {
+      store_name: [100, 'Store name must be 100 characters or less'],
+      store_address: [255, 'Address must be 255 characters or less'],
+      store_phone: [20, 'Phone must be 20 characters or less'],
+      currency_symbol: [5, 'Currency symbol must be 1–5 characters'],
+      receipt_footer: [200, 'Receipt footer must be 200 characters or less'],
+    }
+    for (const [key, [max, message]] of Object.entries(maxLengths)) {
+      if ((settings[key]?.trim().length ?? 0) > max) errs[key] = message
+    }
     if (taxEnabled) {
       const taxRate = parseFloat(settings.tax_rate)
       if (isNaN(taxRate) || taxRate <= 0 || taxRate > 100) {
@@ -234,7 +246,9 @@ export default function SettingsPage() {
       refreshSettings()
       toast.success('Settings saved')
     } catch (err) {
-      toast.error(err.response?.data?.error?.message || 'Failed to save settings')
+      const fieldErrors = getFieldErrors(err)
+      setErrors(fieldErrors)
+      toast.error(Object.keys(fieldErrors).length ? 'Please fix the errors below' : getErrorMessage(err, 'Failed to save settings'))
     } finally {
       setIsSaving(false)
     }
@@ -271,7 +285,7 @@ export default function SettingsPage() {
                   />
                 </FieldRow>
 
-                <FieldRow label="Store Address" hint="Shown on printed receipts" half>
+                <FieldRow label="Store Address" hint="Shown on printed receipts" error={errors.store_address} half>
                   <Input
                     value={settings.store_address ?? ''}
                     onChange={(e) => handleChange('store_address', e.target.value)}
@@ -279,7 +293,7 @@ export default function SettingsPage() {
                   />
                 </FieldRow>
 
-                <FieldRow label="Store Phone" hint="Customer contact number" half>
+                <FieldRow label="Store Phone" hint="Customer contact number" error={errors.store_phone} half>
                   <Input
                     value={settings.store_phone ?? ''}
                     onChange={(e) => handleChange('store_phone', e.target.value)}
@@ -387,7 +401,7 @@ export default function SettingsPage() {
             {isLoading ? (
               <SkeletonRow />
             ) : (
-              <FieldRow label="Footer Message" hint="A short message printed at the bottom of every receipt." half>
+              <FieldRow label="Footer Message" hint="A short message printed at the bottom of every receipt." error={errors.receipt_footer} half>
                 <Input
                   value={settings.receipt_footer ?? ''}
                   onChange={(e) => handleChange('receipt_footer', e.target.value)}

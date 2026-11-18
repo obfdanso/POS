@@ -1,8 +1,8 @@
 /**
  * Database Restore Script
  * Usage:
- *   npm run db:restore -- --file backups/pos_backup_2026-04-13T10-00-00.dump
- *   node scripts/restore.js --file backups/pos_backup_2026-04-13T10-00-00.dump
+ *   npm run db:restore -- --file backups/pos_backup_2026-04-13T10-00-00.dump --yes
+ *   node scripts/restore.js --file backups/pos_backup_2026-04-13T10-00-00.dump --yes
  *
  * Supported formats:
  *   .dump  — pg_dump custom format (created by npm run db:backup)
@@ -22,8 +22,8 @@ if (fileArgIndex === -1 || !args[fileArgIndex + 1]) {
   console.error('Error: Missing required argument --file')
   console.error('')
   console.error('Usage:')
-  console.error('  npm run db:restore -- --file backups/pos_backup_2026-04-13T10-00-00.dump')
-  console.error('  npm run db:restore -- --file backups/my_backup.sql')
+  console.error('  npm run db:restore -- --file backups/pos_backup_2026-04-13T10-00-00.dump --yes')
+  console.error('  npm run db:restore -- --file backups/my_backup.sql --yes')
   process.exit(1)
 }
 
@@ -69,6 +69,13 @@ console.log(`  Target DB   : ${maskUrl(databaseUrl)}`)
 console.log('')
 console.log('  WARNING: This will overwrite existing data in the database.')
 console.log('')
+
+if (!args.includes('--yes')) {
+  console.log('  Nothing was changed. Re-run with --yes to confirm the restore:')
+  console.log(`    npm run db:restore -- --file ${rawFilePath} --yes`)
+  console.log('')
+  process.exit(1)
+}
 
 // ── Run restore ──────────────────────────────────────────────────────────────
 try {

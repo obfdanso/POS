@@ -115,7 +115,7 @@ npm run db:migrate               # create + apply a migration after editing pris
 npm run db:seed                  # wipe everything and reload the sample data
 npm run db:studio                # browse the data in Prisma Studio
 npm run db:backup                # pg_dump to server/backups/pos_backup_<timestamp>.dump
-npm run db:restore -- --file backups/<file>.dump
+npm run db:restore -- --file backups/<file>.dump --yes
 npm run unlock-user -- <username>   # unlock an account if no admin can log in
 ```
 

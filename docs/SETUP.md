@@ -133,7 +133,7 @@ The Vite dev server proxies `/api`, `/uploads`, and `/product-images` to the bac
 | `npm run db:seed` | Wipe and reload sample data |
 | `npm run db:studio` | Prisma Studio, a visual database browser |
 | `npm run db:backup` | `pg_dump` to `server/backups/pos_backup_<timestamp>.dump` |
-| `npm run db:restore -- --file <path>` | Restore a `.dump` or `.sql` backup (overwrites current data) |
+| `npm run db:restore -- --file <path> --yes` | Restore a `.dump` or `.sql` backup (overwrites current data; `--yes` confirms) |
 | `npm run unlock-user -- <username>` | Unlock an account from the server console, for when every admin is locked out |
 | `npm run clear-sales` | Delete all sales, payments, and sale inventory logs, put the sold stock back, and reset loyalty points |
 | `npm run import-images` | Copy `product-images/<SKU>.jpg` into uploads and link them to products |

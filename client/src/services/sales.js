@@ -11,4 +11,6 @@ export const salesService = {
   emailReceipt: (id, data = {}) => api.post(`/sales/${id}/email-receipt`, data),
   // data: { phone? }; without one the receipt goes to the customer's phone on file
   smsReceipt: (id, data = {}) => api.post(`/sales/${id}/sms-receipt`, data),
+  // Sends a refund's card / Mobile Money part through Paystack, or checks on one already sent
+  sendRefundToPaystack: (id, refundId) => api.post(`/sales/${id}/refunds/${refundId}/paystack`, {}),
 }

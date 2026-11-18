@@ -43,6 +43,15 @@ export function splitRefundCash(sale, amount) {
   return { cash, other: round2(amount - cash) }
 }
 
+// How a refund's card / Mobile Money part is going through Paystack
+export const GATEWAY_STATUS = {
+  NOT_SENT: { label: 'Not sent to Paystack', tone: 'warning', action: 'Send to Paystack' },
+  PENDING: { label: 'Sent to Paystack, pending', tone: 'muted', action: 'Check status' },
+  PROCESSING: { label: 'Paystack is processing it', tone: 'muted', action: 'Check status' },
+  PROCESSED: { label: 'Refunded by Paystack', tone: 'success', action: null },
+  FAILED: { label: 'Paystack refund failed', tone: 'danger', action: 'Try again' },
+}
+
 /**
  * Splits `total` between a card or Mobile Money part of `otherAmount` and cash for the rest.
  * Returns the cash still due, the change from `cashGiven`, and an error message when the amounts

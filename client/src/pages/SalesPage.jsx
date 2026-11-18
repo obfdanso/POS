@@ -16,6 +16,7 @@ import { daysFromToday } from '../utils/date'
 import { getErrorMessage } from '../utils/apiErrors'
 import { printDocument } from '../utils/print'
 import { buildRefundReceiptHtml } from '../utils/refundReceipt'
+import { GATEWAY_STATUS } from '../utils/payments'
 import { useSettings } from '../context/SettingsContext'
 
 const STATUS_BADGE = { COMPLETED: 'success', PARTIALLY_REFUNDED: 'warning', REFUNDED: 'danger', PENDING: 'default' }
@@ -33,6 +34,8 @@ function formatDateTime(value) {
 function SaleDetailModal({ saleId, onClose, onRefunded }) {
   const [sale, setSale] = useState(null)
   const [isReturning, setIsReturning] = useState(false)
+  // The refund being sent to (or checked with) Paystack
+  const [sendingRefundId, setSendingRefundId] = useState(null)
   const settings = useSettings()
   const fmt = (v) => formatCurrency(v, settings.currency_symbol || 'GH₵')
 
@@ -46,6 +49,22 @@ function SaleDetailModal({ saleId, onClose, onRefunded }) {
   }, [saleId, onClose])
 
   const canReturn = sale && ['COMPLETED', 'PARTIALLY_REFUNDED'].includes(sale.payment_status)
+
+  async function sendToPaystack(refund) {
+    setSendingRefundId(refund.id)
+    try {
+      const res = await salesService.sendRefundToPaystack(sale.id, refund.id)
+      const updated = res.data.data
+      setSale(updated)
+      const status = updated.refunds.find((r) => r.id === refund.id)?.gateway_status
+      if (status === 'FAILED') toast.error('Paystack did not accept the refund. See the reason under it.')
+      else toast.success(GATEWAY_STATUS[status]?.label || 'Updated')
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Could not reach Paystack'))
+    } finally {
+      setSendingRefundId(null)
+    }
+  }
 
   if (isReturning && sale) {
     return (
@@ -82,6 +101,29 @@ function SaleDetailModal({ saleId, onClose, onRefunded }) {
                     <span>
                       {formatDateTime(r.created_at)} · {fmt(r.amount)} · {r.items.reduce((n, i) => n + i.quantity, 0)} item(s) · {r.reason}
                       {r.user && <span className="text-gray-400"> · {r.user.full_name}</span>}
+                      {r.gateway_status && (
+                        <span className="block mt-0.5">
+                          <span className={{
+                            success: 'text-success-700 dark:text-success-400',
+                            warning: 'text-warning-700 dark:text-warning-400',
+                            danger: 'text-danger-600 dark:text-danger-400',
+                            muted: 'text-gray-500 dark:text-gray-400',
+                          }[GATEWAY_STATUS[r.gateway_status].tone]}>
+                            {fmt(r.gateway_amount)} by card / Mobile Money: {GATEWAY_STATUS[r.gateway_status].label}
+                          </span>
+                          {r.gateway_error && <span className="block text-gray-500 dark:text-gray-400">{r.gateway_error}</span>}
+                          {GATEWAY_STATUS[r.gateway_status].action && r.gateway_reference && (
+                            <button
+                              type="button"
+                              onClick={() => sendToPaystack(r)}
+                              disabled={sendingRefundId === r.id}
+                              className="font-semibold text-primary-600 dark:text-primary-400 hover:underline disabled:opacity-50"
+                            >
+                              {sendingRefundId === r.id ? 'Working…' : GATEWAY_STATUS[r.gateway_status].action}
+                            </button>
+                          )}
+                        </span>
+                      )}
                     </span>
                     <button
                       type="button"

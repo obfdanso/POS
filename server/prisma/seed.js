@@ -222,6 +222,7 @@ async function main() {
       { key: 'loyalty_points_rate', value: String(LOYALTY_RATE) },
       { key: 'currency_symbol', value: 'GH₵' },
       { key: 'receipt_footer', value: 'Thank you for choosing QuickMart!' },
+      { key: 'require_open_shift', value: 'true' },
     ],
   })
   console.log('Settings created')

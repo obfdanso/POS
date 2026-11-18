@@ -11,6 +11,12 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
   // Support legacy callers that pass userId as a string
   const userId = typeof user === 'string' ? user : user.id
 
+  // Checked up front (before any card charge is verified) and again inside the transaction
+  const requireShift = (await getSettingValue('require_open_shift', 'false')) === 'true'
+  if (requireShift && !(await prisma.shift.findFirst({ where: { user_id: userId, status: 'OPEN' }, select: { id: true } }))) {
+    throw noOpenShiftError()
+  }
+
   // Step 1: Validate all items exist and have sufficient stock
   const productIds = items.map((i) => i.product_id)
   const products = await prisma.product.findMany({
@@ -143,6 +149,10 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
     const todayCount = await tx.sale.count({ where: { created_at: { gte: startOfDay } } })
     const transaction_id = generateTransactionId(now, todayCount + 1)
 
+    // The sale belongs to the cashier's open shift, so the drawer count at close includes it
+    const openShift = await tx.shift.findFirst({ where: { user_id: userId, status: 'OPEN' }, select: { id: true } })
+    if (!openShift && requireShift) throw noOpenShiftError()
+
     // Create Sale
     const newSale = await tx.sale.create({
       data: {
@@ -157,6 +167,7 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
         payment_status: 'COMPLETED',
         notes: notes || null,
         loyalty_points_earned: pointsEarned,
+        shift_id: openShift?.id ?? null,
       },
     })
 
@@ -384,6 +395,10 @@ async function getReceiptData(saleId) {
 }
 
 // Half-up to 2 decimals; EPSILON stops values like 1.005 (stored as 1.00499…) rounding down
+function noOpenShiftError() {
+  return new ValidationError('No open shift', [{ field: 'shift', message: 'Open a cash drawer shift before making sales' }])
+}
+
 function round2(n) {
   return Math.round((n + Number.EPSILON) * 100) / 100
 }

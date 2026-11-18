@@ -18,6 +18,8 @@ const DEFAULT_SETTINGS = {
   loyalty_points_rate: '10',
   currency_symbol: 'GH₵',
   receipt_footer: 'Thank you for your business!',
+  // 'true' makes cashiers open a cash drawer shift before they can sell
+  require_open_shift: 'false',
 }
 
 const settingsValidation = [
@@ -34,6 +36,7 @@ const settingsValidation = [
     .isFloat({ min: 0 })
     .withMessage('Loyalty rate must be 0 or greater'),
   body('receipt_footer').optional().trim().isLength({ max: 200 }).withMessage('Receipt footer must be 200 characters or less'),
+  body('require_open_shift').optional().isIn(['true', 'false', true, false]).withMessage('require_open_shift must be true or false'),
 ]
 
 router.get('/', async (req, res, next) => {

@@ -18,7 +18,7 @@ A web-based point of sale system for a retail shop, built as a final-year capsto
 - Cart with per-item and cart-wide discounts, tax (configurable), and an optional customer for loyalty points. Walk-in sales need no customer.
 - **Loyalty redemption.** Customers can spend their points as money off at the till (the point value is set by an admin). Returned goods give the points back.
 - Payment by cash (with one-tap "Exact" and rounded-up amount buttons, and change calculation), Mobile Money, or card. Mobile Money and card payments go through Paystack and are verified on the server.
-- An 80mm thermal receipt is printed with `window.print()`.
+- An 80mm thermal receipt is printed with `window.print()`, or emailed to the customer (to the address on file or one typed at the till) when an SMTP server is configured.
 - **Installable app.** QuickMart can be installed from the browser on a tablet or desktop and opens in its own window. Its screens load even when the connection drops, and a banner warns that nothing can be saved until it's back.
 - Keyboard shortcuts: **F1** search, **F2** pay, **F4** clear cart, **Enter** add / confirm.
 - **Cash drawer shifts.** Cashiers open a shift with a counted float and close it by counting the drawer. The system works out the expected cash (float + cash sales − cash refunds) and records whether the drawer was over or short. Admins can make an open shift required before selling.
@@ -38,6 +38,7 @@ A web-based point of sale system for a retail shop, built as a final-year capsto
 - Role-based access is enforced on every endpoint: ADMIN, MANAGER, CASHIER.
 - Passwords use bcrypt (cost 12). Access tokens last 15 minutes; refresh tokens last 7 days, rotate on each use, and live in an httpOnly cookie.
 - Accounts lock after 5 failed logins until an admin unlocks them, and changing a password signs out every other device. Logins go to an auth log; refunds, shift closes, deactivations, deletions and settings or user changes go to an audit log with who made them.
+- Every request gets an ID that appears in its log lines and in unexpected-error messages, so a problem a cashier reports can be found in the logs. `/api/health/ready` checks the database for Docker and uptime monitors.
 - All input is validated on the server, including rejecting fields an endpoint doesn't expect. Login is rate-limited, and the database itself refuses negative stock and amounts.
 
 ---
@@ -115,6 +116,7 @@ The app is at http://localhost:8080. Migrations run automatically each time the 
 | `PAYSTACK_SECRET_KEY` | for card/MoMo | — | Verifies Paystack payments server-side |
 | `TRUST_PROXY` | behind a proxy | — | `1` behind nginx/Caddy, so client IPs are correct |
 | `COOKIE_SECURE` | | follows `NODE_ENV` | `false` allows refresh cookies over plain HTTP on a private network |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` | for emailed receipts | — | Any SMTP provider. Leave `SMTP_HOST` empty to turn email off |
 
 Generate a secret with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
 
@@ -147,11 +149,14 @@ The schema and the reasoning behind it are in [docs/DATABASE.md](docs/DATABASE.m
 ```bash
 cd server && npm test     # Jest + Supertest integration tests (uses the database in .env)
 cd client && npm test     # Vitest component and utility tests
+cd e2e && npm install && npm test   # Playwright: real browser against the real API and a production build
 ```
 
-185 backend tests cover every module: auth (lockout, token rotation), sales (payments, discounts, concurrent sales), loyalty redemption, partial returns, cash drawer shifts, inventory, products, customers, suppliers, reports (exact totals), users, and settings. Services have about 90% line coverage. The tests create and delete their own data, run one file at a time, and mock Paystack.
+The end-to-end tests start the API and a production build of the web app themselves (or reuse ones already running), sign in as the seeded users, and use the database in `server/.env`, which must be seeded. They cover sign-in and role access, a keyboard checkout from barcode scan to receipt, and a partial return with its refund slip. Locally they use your installed Chrome.
 
-GitHub Actions runs the server tests against a fresh PostgreSQL database, plus both linters, the client tests and a production build, on every push and pull request (`.github/workflows/ci.yml`).
+197 backend tests cover every module: auth (lockout, token rotation), sales (payments, discounts, concurrent sales), loyalty redemption, emailed receipts, request IDs and readiness, partial returns, cash drawer shifts, inventory, products, customers, suppliers, reports (exact totals), users, and settings. Services have about 90% line coverage. The tests create and delete their own data, run one file at a time, and mock Paystack.
+
+GitHub Actions runs the server tests against a fresh PostgreSQL database, both linters, the client tests, a production build, and the Playwright tests against a freshly seeded database, on every push and pull request (`.github/workflows/ci.yml`).
 
 ---
 

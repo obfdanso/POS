@@ -132,8 +132,9 @@ export default function ProductFormPage() {
     if (!form.category_id) errs.category_id = 'Category is required'
     if (!form.price || parseFloat(form.price) <= 0) errs.price = 'Price must be greater than 0'
     if (form.cost_price && parseFloat(form.cost_price) < 0) errs.cost_price = 'Cost price cannot be negative'
-    if (form.quantity === '' || parseInt(form.quantity) < 0) errs.quantity = 'Quantity must be 0 or more'
-    if (form.low_stock_threshold === '' || parseInt(form.low_stock_threshold) < 0) errs.low_stock_threshold = 'Threshold must be 0 or more'
+    const isWholeAtLeastZero = (v) => v !== '' && Number.isInteger(Number(v)) && Number(v) >= 0
+    if (!isWholeAtLeastZero(form.quantity)) errs.quantity = 'Quantity must be a whole number, 0 or more'
+    if (!isWholeAtLeastZero(form.low_stock_threshold)) errs.low_stock_threshold = 'Threshold must be a whole number, 0 or more'
     setErrors(errs)
     return Object.keys(errs).length === 0
   }

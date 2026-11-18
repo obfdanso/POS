@@ -113,9 +113,11 @@ export default function InventoryPage() {
 
   function validateAdjustForm() {
     const errs = {}
-    const qty = parseInt(adjustForm.quantity)
+    const qty = Number(adjustForm.quantity)
     if (adjustForm.quantity === '' || isNaN(qty)) {
       errs.quantity = 'Quantity is required'
+    } else if (!Number.isInteger(qty)) {
+      errs.quantity = 'Quantity must be a whole number'
     } else if (adjustForm.type === 'RESTOCK' && qty <= 0) {
       errs.quantity = 'Restock quantity must be positive'
     } else if (adjustForm.type === 'ADJUSTMENT' && qty === 0) {

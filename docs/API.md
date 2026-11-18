@@ -96,21 +96,25 @@ Signs out every **other** session of this user. The response carries a new `acce
 ## Products
 
 ### GET /products — *sortable*
-**Query:** `page`, `per_page`, `search` (matches name, SKU, or barcode), `category_id`, `status` (`active` default, `inactive`, `all`; cashiers always get `active`).
+**Query:** `page`, `per_page`, `search` (matches name, SKU, or barcode), `category_id`, `status` (`active` default, `inactive`, `all`; cashiers always get `active`), `group_variants` (`true` lists only main products, each with its active `variants`; the till uses it for browsing). Every row includes `parent` (for a variant) and `_count.variants`.
 
 **Sort fields:** `name` (default), `sku`, `category`, `price`, `cost_price`, `quantity`, `is_active`, `created_at`.
 
 ### GET /products/:id
+Includes `parent` for a variant, and `variants` (all of them, by option name) for a main product.
+
 ### GET /products/barcode/:code
 Exact barcode lookup, used by the POS scanner. Inactive products return `404`.
 
 ### POST /products — ADMIN, MANAGER
 JSON, or `multipart/form-data` when uploading an `image` (JPG/PNG/WebP, max 5 MB).
 
-**Body:** `name`, `sku`, `category_id`, `price` (> 0) are required. Optional: `barcode`, `supplier_id`, `cost_price`, `quantity` (opening stock, logged as a `RESTOCK`), `low_stock_threshold`, `is_active`.
+**Body:** `name`, `sku`, `category_id`, `price` (> 0) are required. Optional: `barcode`, `supplier_id`, `cost_price`, `quantity` (opening stock, logged as a `RESTOCK`), `low_stock_threshold`, `is_active`, `variant_name`, `parent_id`.
+
+**Variants** (sizes, flavours) are products of their own, with their own SKU, barcode, price and stock, so sales, inventory, purchase orders and reports treat them like any product. Send `parent_id` (a main product, which can't itself be a variant) and `variant_name` (e.g. `"1.5L"`, max 50 characters) to create one. A variant must be in its main product's category. Option names are unique within a group, ignoring case (`409`); the main product can have one too. `422` for a missing name, a variant of a variant, another category, or a missing main product.
 
 ### PUT /products/:id — ADMIN, MANAGER
-Any of the create fields **except `quantity`**, which is rejected with `422`: stock only changes through the inventory endpoints, so every change is logged. Send `image_url: null` to remove the image, or upload a new `image`. Changing `is_active` is **ADMIN only**.
+Any of the create fields **except `quantity` and `parent_id`**, which are rejected with `422`: stock only changes through the inventory endpoints, so every change is logged, and a product's variant group is fixed when it is created. Send `image_url: null` to remove the image, or upload a new `image`. Changing `is_active` is **ADMIN only**. A variant's name can't be cleared and its category can't change; changing a main product's category moves its variants too.
 
 ### DELETE /products/:id — ADMIN
 Soft delete: sets `is_active = false`. Past sales keep their history.
@@ -242,7 +246,13 @@ Returns some or all of a sale. **Body (all optional):**
 - If the refunding user has an open shift, the refund is linked to it, and cash refunds reduce that drawer's expected cash.
 - A split sale's refunds are paid back in cash first, up to the cash the sale took (net of change) less cash already refunded; the rest goes back to the card or Mobile Money. Each refund records the cash part in `cash_amount`.
 - `422` when returning more than is left, an item from another sale, the same line twice, or a sale already fully refunded. Simultaneous returns against one sale are processed one at a time.
-- Card and Mobile Money money must be returned through Paystack separately; the system records the refund.
+- **Paystack refunds:** the card or Mobile Money part of a refund (all of it, or what isn't paid back in cash on a split sale) is sent back through Paystack's refund API once the return is saved, to the charge it came from, when `PAYSTACK_SECRET_KEY` is set (turn this off with `PAYSTACK_AUTO_REFUND=false`). The refund records `gateway_amount`, `gateway_reference`, `gateway_refund_id` and `gateway_status`: `NOT_SENT`, `PENDING`, `PROCESSING`, `PROCESSED` or `FAILED` (with `gateway_error`). A Paystack failure never undoes the return; it is kept as `FAILED` to retry. Cash refunds have no gateway status.
+
+### POST /sales/:id/refunds/:refundId/paystack — ADMIN, MANAGER
+Sends a `NOT_SENT` or `FAILED` refund to Paystack, or asks Paystack how a `PENDING` / `PROCESSING` one is going. Returns the sale. `409` while it is already being sent; `422` for a cash refund or one no single charge covers (send it from the Paystack dashboard); `503` when Paystack isn't set up. Sending is audited (`PAYSTACK_REFUND_SENT` / `PAYSTACK_REFUND_FAILED`).
+
+### POST /paystack/webhook — Paystack only
+Paystack's `refund.pending`, `refund.processing`, `refund.processed` and `refund.failed` events update the matching refund. The body must carry a valid `x-paystack-signature` (HMAC-SHA512 of the body with the secret key), or `401`. A refund already `PROCESSED` is never moved back. Set this URL in the Paystack dashboard under Settings → API Keys & Webhooks.
 
 ---
 

@@ -74,8 +74,8 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
     ])
   }
   const taxableAmount = round2(subtotal - discountAmt)
-  const taxAmount = parseFloat((taxableAmount * (taxRate / 100)).toFixed(2))
-  const totalAmount = parseFloat((taxableAmount + taxAmount).toFixed(2))
+  const taxAmount = round2(taxableAmount * (taxRate / 100))
+  const totalAmount = round2(taxableAmount + taxAmount)
 
   // Validate payment
   // Non-cash payments are verified against the total, so record that instead of the client's figure
@@ -129,7 +129,7 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
     logger.info(`Paystack verification successful: Ref ${reference}, Amount ${paystackAmountPesewas} pesewas, Channel ${paystackRes.data.channel || 'unknown'}`);
   }
 
-  const changeGiven = payment_method === 'CASH' ? parseFloat((amountPaid - totalAmount).toFixed(2)) : 0
+  const changeGiven = payment_method === 'CASH' ? round2(amountPaid - totalAmount) : 0
 
   // Loyalty points (1 point per <loyalty rate> GHS); stored on the sale so a refund reverses exactly this
   const loyaltyRate = customer_id ? await getNumericSetting('loyalty_points_rate', 10) : 0
@@ -382,8 +382,9 @@ async function getReceiptData(saleId) {
   }
 }
 
+// Half-up to 2 decimals; EPSILON stops values like 1.005 (stored as 1.00499…) rounding down
 function round2(n) {
-  return Math.round(n * 100) / 100
+  return Math.round((n + Number.EPSILON) * 100) / 100
 }
 
 async function getSettingValue(key, defaultValue) {

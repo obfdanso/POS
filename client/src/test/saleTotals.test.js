@@ -23,6 +23,11 @@ describe('calculateTotals (must match the server)', () => {
     expect(calculateTotals([{ price: 5, quantity: 1 }], 50, 3)).toMatchObject({ discount: 5, total: 0 })
   })
 
+  it('rounds half a pesewa of tax up', () => {
+    // 8.04 × 12.5% = 1.005 exactly, which is stored as 1.00499… in floating point
+    expect(calculateTotals([{ price: '8.04', quantity: 1 }], 0, 12.5)).toMatchObject({ taxAmount: 1.01, total: 9.05 })
+  })
+
   it('computes a line total from string prices', () => {
     expect(lineTotal('2.35', 3, 0.05)).toBe(7)
   })

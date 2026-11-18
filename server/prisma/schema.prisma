@@ -103,16 +103,25 @@ model Product {
   low_stock_threshold Int      @default(10)
   image_url           String?
   is_active           Boolean  @default(true)
+  // Variants (sizes, flavours) are products of their own, with their own SKU, price and stock,
+  // grouped under a main product. Only one level: a variant can't have variants
+  parent_id           String?
+  // The option's label, e.g. "1.5L"; required for variants, optional for the main product
+  variant_name        String?
   created_at          DateTime @default(now())
   updated_at          DateTime @updatedAt
 
   category             Category            @relation(fields: [category_id], references: [id])
   supplier             Supplier?           @relation(fields: [supplier_id], references: [id])
+  parent               Product?            @relation("ProductVariants", fields: [parent_id], references: [id], onDelete: Restrict)
+  variants             Product[]           @relation("ProductVariants")
   sale_items           SaleItem[]
   inventory_logs       InventoryLog[]
   purchase_order_items PurchaseOrderItem[]
   promotions           Promotion[]
 
+  @@unique([parent_id, variant_name])
+  @@index([parent_id])
   @@index([barcode])
   @@index([sku])
 }

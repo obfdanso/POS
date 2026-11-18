@@ -87,7 +87,7 @@ Update your own profile. **Body (any of):** `full_name`, `email`.
 ### POST /auth/change-password
 **Body:** `{ "current_password": "…", "new_password": "at least 6 chars" }`
 
-Signs out every **other** session of this user. The response carries a new `accessToken` and sets a new refresh cookie, so the current device stays signed in.
+Signs out every **other** session of this user. The response carries a new `accessToken` and sets a new refresh cookie, so the current device stays signed in. A wrong `current_password` returns `422` with a `current_password` field error.
 
 ---
 
@@ -108,7 +108,7 @@ JSON, or `multipart/form-data` when uploading an `image` (JPG/PNG/WebP, max 5 MB
 **Body:** `name`, `sku`, `category_id`, `price` (> 0) are required. Optional: `barcode`, `supplier_id`, `cost_price`, `quantity` (opening stock, logged as a `RESTOCK`), `low_stock_threshold`, `is_active`.
 
 ### PUT /products/:id — ADMIN, MANAGER
-Any of the create fields **except `quantity`**: stock only changes through the inventory endpoints, so every change is logged. Send `image_url: null` to remove the image, or upload a new `image`. Changing `is_active` is **ADMIN only**.
+Any of the create fields **except `quantity`**, which is rejected with `422`: stock only changes through the inventory endpoints, so every change is logged. Send `image_url: null` to remove the image, or upload a new `image`. Changing `is_active` is **ADMIN only**.
 
 ### DELETE /products/:id — ADMIN
 Soft delete: sets `is_active = false`. Past sales keep their history.

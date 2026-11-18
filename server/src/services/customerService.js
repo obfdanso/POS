@@ -2,6 +2,13 @@ const prisma = require('../utils/prismaClient')
 const { buildOrderBy } = require('../middleware/sorting')
 const { NotFoundError, ConflictError } = require('../utils/errors')
 
+// Sales the customer kept at least part of
+const KEPT_STATUSES = ['COMPLETED', 'PARTIALLY_REFUNDED']
+
+function round2(n) {
+  return Math.round((n + Number.EPSILON) * 100) / 100
+}
+
 const CUSTOMER_SORTS = {
   name: (dir) => ({ name: dir }),
   phone: (dir) => ({ phone: { sort: dir, nulls: 'last' } }),
@@ -34,13 +41,15 @@ async function listCustomers({ page = 1, per_page = 20, search, sort, order } = 
     prisma.customer.count({ where }),
   ])
 
-  // Lifetime spend for this page of customers, aggregated in SQL (refunded sales excluded)
+  // Lifetime spend for this page of customers, aggregated in SQL, net of returns
   const totals = await prisma.sale.groupBy({
     by: ['customer_id'],
-    where: { customer_id: { in: customers.map((c) => c.id) }, payment_status: 'COMPLETED' },
-    _sum: { total_amount: true },
+    where: { customer_id: { in: customers.map((c) => c.id) }, payment_status: { in: KEPT_STATUSES } },
+    _sum: { total_amount: true, refunded_amount: true },
   })
-  const spentById = new Map(totals.map((t) => [t.customer_id, parseFloat(t._sum.total_amount || 0)]))
+  const spentById = new Map(
+    totals.map((t) => [t.customer_id, round2(parseFloat(t._sum.total_amount || 0) - parseFloat(t._sum.refunded_amount || 0))])
+  )
   const withTotals = customers.map((c) => ({ ...c, total_purchases: spentById.get(c.id) ?? 0 }))
 
   return { customers: withTotals, total, page, per_page: take, total_pages: Math.ceil(total / take) }
@@ -55,21 +64,21 @@ async function getCustomerById(id) {
   })
   if (!customer) throw new NotFoundError('Customer not found')
 
-  // Purchase history summary (refunded sales excluded)
+  // Purchase history summary, net of returns (fully refunded sales excluded)
   const stats = await prisma.sale.aggregate({
-    where: { customer_id: id, payment_status: 'COMPLETED' },
-    _sum: { total_amount: true },
-    _avg: { total_amount: true },
+    where: { customer_id: id, payment_status: { in: KEPT_STATUSES } },
+    _sum: { total_amount: true, refunded_amount: true },
     _count: { id: true },
     _max: { created_at: true },
   })
+  const totalSpent = round2(parseFloat(stats._sum.total_amount || 0) - parseFloat(stats._sum.refunded_amount || 0))
 
   return {
     ...customer,
     purchase_summary: {
-      total_spent: parseFloat(stats._sum.total_amount || 0),
+      total_spent: totalSpent,
       purchase_count: stats._count.id,
-      average_purchase: parseFloat(stats._avg.total_amount || 0),
+      average_purchase: stats._count.id > 0 ? round2(totalSpent / stats._count.id) : 0,
       last_purchase_at: stats._max.created_at,
     },
   }

@@ -1,6 +1,8 @@
 const prisma = require('../utils/prismaClient')
 // Product/category/profit revenue is net sales: each line's share of its sale after the cart
 // discount, excluding tax. Profit cost uses the cost price recorded at the time of sale.
+// Returns are netted out: sale totals subtract refunded_amount and lines count only the units kept,
+// so a partly refunded sale still counts, and a fully refunded one (status REFUNDED) drops out.
 const { ValidationError } = require('../utils/errors')
 const { buildDateRange } = require('../utils/dateRange')
 
@@ -28,18 +30,24 @@ function dateRange(start_date, end_date) {
 
 async function getSalesSummary({ start_date, end_date }) {
   const range = dateRange(start_date, end_date)
-  const result = await prisma.sale.aggregate({
-    where: { created_at: range, payment_status: 'COMPLETED' },
-    _sum: { total_amount: true, discount_amount: true, tax_amount: true },
-    _count: { id: true },
-    _avg: { total_amount: true },
-  })
+  // Tax is scaled by the share of each sale that wasn't refunded
+  const [result] = await prisma.$queryRaw`
+    SELECT
+      COUNT(*)::int AS transaction_count,
+      COALESCE(SUM(total_amount - refunded_amount), 0)::float AS total_revenue,
+      COALESCE(SUM(discount_amount), 0)::float AS total_discount,
+      COALESCE(ROUND(SUM(tax_amount * (total_amount - refunded_amount) / NULLIF(total_amount, 0)), 2), 0)::float AS total_tax
+    FROM "Sale"
+    WHERE created_at >= ${range.gte} AND created_at <= ${range.lte}
+      AND payment_status IN ('COMPLETED', 'PARTIALLY_REFUNDED')
+  `
+  const revenue = parseFloat(result.total_revenue || 0)
   return {
-    total_revenue: parseFloat(result._sum.total_amount || 0),
-    transaction_count: result._count.id,
-    average_sale: parseFloat(result._avg.total_amount || 0),
-    total_discount: parseFloat(result._sum.discount_amount || 0),
-    total_tax: parseFloat(result._sum.tax_amount || 0),
+    total_revenue: revenue,
+    transaction_count: result.transaction_count,
+    average_sale: result.transaction_count > 0 ? Math.round((revenue / result.transaction_count) * 100) / 100 : 0,
+    total_discount: parseFloat(result.total_discount || 0),
+    total_tax: parseFloat(result.total_tax || 0),
   }
 }
 
@@ -50,11 +58,11 @@ async function getSalesByDay({ start_date, end_date }) {
     SELECT
       to_char(d.day, 'YYYY-MM-DD') AS label,
       COUNT(s.id)::int AS transactions,
-      COALESCE(SUM(s.total_amount), 0)::float AS value
+      COALESCE(SUM(s.total_amount - s.refunded_amount), 0)::float AS value
     FROM generate_series(${range.gte}::timestamp::date, ${range.lte}::timestamp::date, interval '1 day') AS d(day)
     LEFT JOIN "Sale" s
       ON DATE(s.created_at) = d.day
-      AND s.payment_status = 'COMPLETED'
+      AND s.payment_status IN ('COMPLETED', 'PARTIALLY_REFUNDED')
       AND s.created_at >= ${range.gte} AND s.created_at <= ${range.lte}
     GROUP BY d.day
     ORDER BY d.day ASC
@@ -70,13 +78,13 @@ async function getTopProducts({ start_date, end_date, limit = 10, by = 'revenue'
   if (by === 'quantity') {
     results = await prisma.$queryRaw`
       SELECT p.id, p.name, p.sku,
-        SUM(si.quantity)::int as total_quantity,
-        ROUND(SUM(si.total * (s.subtotal - s.discount_amount) / NULLIF(s.subtotal, 0)), 2)::float as total_revenue
+        SUM(si.quantity - si.refunded_quantity)::int as total_quantity,
+        ROUND(SUM(si.total * (si.quantity - si.refunded_quantity) / si.quantity * (s.subtotal - s.discount_amount) / NULLIF(s.subtotal, 0)), 2)::float as total_revenue
       FROM "SaleItem" si
       JOIN "Product" p ON p.id = si.product_id
       JOIN "Sale" s ON s.id = si.sale_id
       WHERE s.created_at >= ${range.gte} AND s.created_at <= ${range.lte}
-        AND s.payment_status = 'COMPLETED'
+        AND s.payment_status IN ('COMPLETED', 'PARTIALLY_REFUNDED')
       GROUP BY p.id, p.name, p.sku
       ORDER BY total_quantity DESC
       LIMIT ${lim}
@@ -84,13 +92,13 @@ async function getTopProducts({ start_date, end_date, limit = 10, by = 'revenue'
   } else {
     results = await prisma.$queryRaw`
       SELECT p.id, p.name, p.sku,
-        SUM(si.quantity)::int as total_quantity,
-        ROUND(SUM(si.total * (s.subtotal - s.discount_amount) / NULLIF(s.subtotal, 0)), 2)::float as total_revenue
+        SUM(si.quantity - si.refunded_quantity)::int as total_quantity,
+        ROUND(SUM(si.total * (si.quantity - si.refunded_quantity) / si.quantity * (s.subtotal - s.discount_amount) / NULLIF(s.subtotal, 0)), 2)::float as total_revenue
       FROM "SaleItem" si
       JOIN "Product" p ON p.id = si.product_id
       JOIN "Sale" s ON s.id = si.sale_id
       WHERE s.created_at >= ${range.gte} AND s.created_at <= ${range.lte}
-        AND s.payment_status = 'COMPLETED'
+        AND s.payment_status IN ('COMPLETED', 'PARTIALLY_REFUNDED')
       GROUP BY p.id, p.name, p.sku
       ORDER BY total_revenue DESC
       LIMIT ${lim}
@@ -111,14 +119,14 @@ async function getCategoryPerformance({ start_date, end_date }) {
     SELECT
       c.id,
       c.name as label,
-      SUM(si.quantity)::int as total_quantity,
-      ROUND(SUM(si.total * (s.subtotal - s.discount_amount) / NULLIF(s.subtotal, 0)), 2)::float as value
+      SUM(si.quantity - si.refunded_quantity)::int as total_quantity,
+      ROUND(SUM(si.total * (si.quantity - si.refunded_quantity) / si.quantity * (s.subtotal - s.discount_amount) / NULLIF(s.subtotal, 0)), 2)::float as value
     FROM "SaleItem" si
     JOIN "Product" p ON p.id = si.product_id
     JOIN "Category" c ON c.id = p.category_id
     JOIN "Sale" s ON s.id = si.sale_id
     WHERE s.created_at >= ${range.gte} AND s.created_at <= ${range.lte}
-      AND s.payment_status = 'COMPLETED'
+      AND s.payment_status IN ('COMPLETED', 'PARTIALLY_REFUNDED')
     GROUP BY c.id, c.name
     ORDER BY value DESC
   `
@@ -133,11 +141,11 @@ async function getCashierPerformance({ start_date, end_date }) {
       u.full_name as label,
       u.username,
       COUNT(s.id)::int as transactions,
-      SUM(s.total_amount)::float as value
+      SUM(s.total_amount - s.refunded_amount)::float as value
     FROM "Sale" s
     JOIN "User" u ON u.id = s.user_id
     WHERE s.created_at >= ${range.gte} AND s.created_at <= ${range.lte}
-      AND s.payment_status = 'COMPLETED'
+      AND s.payment_status IN ('COMPLETED', 'PARTIALLY_REFUNDED')
     GROUP BY u.id, u.full_name, u.username
     ORDER BY value DESC
   `
@@ -194,14 +202,14 @@ async function getProfitReport({ start_date, end_date }) {
       p.id,
       p.name,
       p.sku,
-      ROUND(SUM(COALESCE(si.total * (s.subtotal - s.discount_amount) / NULLIF(s.subtotal, 0), 0)), 2)::float as revenue,
-      SUM(si.quantity * COALESCE(si.unit_cost, p.cost_price, 0))::float as cost,
-      ROUND(SUM(COALESCE(si.total * (s.subtotal - s.discount_amount) / NULLIF(s.subtotal, 0), 0) - (si.quantity * COALESCE(si.unit_cost, p.cost_price, 0))), 2)::float as profit
+      ROUND(SUM(COALESCE(si.total * (si.quantity - si.refunded_quantity) / si.quantity * (s.subtotal - s.discount_amount) / NULLIF(s.subtotal, 0), 0)), 2)::float as revenue,
+      SUM((si.quantity - si.refunded_quantity) * COALESCE(si.unit_cost, p.cost_price, 0))::float as cost,
+      ROUND(SUM(COALESCE(si.total * (si.quantity - si.refunded_quantity) / si.quantity * (s.subtotal - s.discount_amount) / NULLIF(s.subtotal, 0), 0) - ((si.quantity - si.refunded_quantity) * COALESCE(si.unit_cost, p.cost_price, 0))), 2)::float as profit
     FROM "SaleItem" si
     JOIN "Product" p ON p.id = si.product_id
     JOIN "Sale" s ON s.id = si.sale_id
     WHERE s.created_at >= ${range.gte} AND s.created_at <= ${range.lte}
-      AND s.payment_status = 'COMPLETED'
+      AND s.payment_status IN ('COMPLETED', 'PARTIALLY_REFUNDED')
     GROUP BY p.id, p.name, p.sku
     ORDER BY profit DESC
   `
@@ -228,19 +236,20 @@ async function getDashboardSummary() {
   todayEnd.setHours(23, 59, 59, 999)
 
   const [todaySales, lowStockCount, topProducts] = await Promise.all([
-    prisma.sale.aggregate({
-      where: { created_at: { gte: today, lte: todayEnd }, payment_status: 'COMPLETED' },
-      _sum: { total_amount: true },
-      _count: { id: true },
-    }),
+    prisma.$queryRaw`
+      SELECT COUNT(*)::int AS count, COALESCE(SUM(total_amount - refunded_amount), 0)::float AS revenue
+      FROM "Sale"
+      WHERE created_at >= ${today} AND created_at <= ${todayEnd}
+        AND payment_status IN ('COMPLETED', 'PARTIALLY_REFUNDED')
+    `,
     // Includes out-of-stock items, matching GET /inventory/low-stock
     prisma.$queryRaw`SELECT COUNT(*)::int as cnt FROM "Product" WHERE is_active = true AND quantity <= low_stock_threshold`,
     prisma.$queryRaw`
-      SELECT p.name, ROUND(SUM(si.total * (s.subtotal - s.discount_amount) / NULLIF(s.subtotal, 0)), 2)::float as revenue, SUM(si.quantity)::int as quantity
+      SELECT p.name, ROUND(SUM(si.total * (si.quantity - si.refunded_quantity) / si.quantity * (s.subtotal - s.discount_amount) / NULLIF(s.subtotal, 0)), 2)::float as revenue, SUM(si.quantity - si.refunded_quantity)::int as quantity
       FROM "SaleItem" si
       JOIN "Product" p ON p.id = si.product_id
       JOIN "Sale" s ON s.id = si.sale_id
-      WHERE s.payment_status = 'COMPLETED'
+      WHERE s.payment_status IN ('COMPLETED', 'PARTIALLY_REFUNDED')
       GROUP BY p.id, p.name
       ORDER BY revenue DESC
       LIMIT 5
@@ -248,8 +257,8 @@ async function getDashboardSummary() {
   ])
 
   return {
-    today_revenue: parseFloat(todaySales._sum.total_amount || 0),
-    today_transactions: todaySales._count.id,
+    today_revenue: parseFloat(todaySales[0].revenue || 0),
+    today_transactions: todaySales[0].count,
     low_stock_alerts: lowStockCount[0].cnt,
     top_products: topProducts.map((r) => ({ name: r.name, revenue: parseFloat(r.revenue || 0), quantity: r.quantity })),
   }
@@ -261,29 +270,22 @@ async function getCashierStats(userId) {
   const todayEnd = new Date()
   todayEnd.setHours(23, 59, 59, 999)
 
-  const [salesAgg, itemsAgg, recentSales] = await Promise.all([
-    prisma.sale.aggregate({
-      where: {
-        user_id: userId,
-        created_at: { gte: today, lte: todayEnd },
-        payment_status: 'COMPLETED',
-      },
-      _count: { id: true },
-      _sum: { total_amount: true },
-      _avg: { total_amount: true },
-    }),
-    prisma.saleItem.aggregate({
-      where: {
-        sale: {
-          user_id: userId,
-          created_at: { gte: today, lte: todayEnd },
-          payment_status: 'COMPLETED',
-        },
-      },
-      _sum: { quantity: true },
-    }),
+  const [[salesAgg], [itemsAgg], recentSales] = await Promise.all([
+    prisma.$queryRaw`
+      SELECT COUNT(*)::int AS count, COALESCE(SUM(total_amount - refunded_amount), 0)::float AS revenue
+      FROM "Sale"
+      WHERE user_id = ${userId} AND created_at >= ${today} AND created_at <= ${todayEnd}
+        AND payment_status IN ('COMPLETED', 'PARTIALLY_REFUNDED')
+    `,
+    prisma.$queryRaw`
+      SELECT COALESCE(SUM(si.quantity - si.refunded_quantity), 0)::int AS items
+      FROM "SaleItem" si
+      JOIN "Sale" s ON s.id = si.sale_id
+      WHERE s.user_id = ${userId} AND s.created_at >= ${today} AND s.created_at <= ${todayEnd}
+        AND s.payment_status IN ('COMPLETED', 'PARTIALLY_REFUNDED')
+    `,
     prisma.sale.findMany({
-      where: { user_id: userId, payment_status: 'COMPLETED' },
+      where: { user_id: userId, payment_status: { in: ['COMPLETED', 'PARTIALLY_REFUNDED'] } },
       orderBy: { created_at: 'desc' },
       take: 5,
       select: {
@@ -298,10 +300,10 @@ async function getCashierStats(userId) {
   ])
 
   return {
-    sales_count: salesAgg._count.id,
-    total_revenue: parseFloat(salesAgg._sum.total_amount || 0),
-    items_sold: itemsAgg._sum.quantity || 0,
-    average_sale: parseFloat(salesAgg._avg.total_amount || 0),
+    sales_count: salesAgg.count,
+    total_revenue: salesAgg.revenue,
+    items_sold: itemsAgg.items,
+    average_sale: salesAgg.count > 0 ? Math.round((salesAgg.revenue / salesAgg.count) * 100) / 100 : 0,
     recent_sales: recentSales.map((s) => ({
       id: s.id,
       transaction_id: s.transaction_id,

@@ -78,7 +78,8 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
   const totalAmount = parseFloat((taxableAmount + taxAmount).toFixed(2))
 
   // Validate payment
-  const amountPaid = parseFloat(amount_paid)
+  // Non-cash payments are verified against the total, so record that instead of the client's figure
+  const amountPaid = payment_method === 'CASH' ? parseFloat(amount_paid) : totalAmount
   if (payment_method === 'CASH' && amountPaid < totalAmount) {
     throw new ValidationError('Insufficient payment', [
       { field: 'amount_paid', message: `Amount paid (${amountPaid}) is less than total (${totalAmount})` },

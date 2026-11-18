@@ -99,6 +99,7 @@ async function login(username, password, ipAddress, userAgent) {
   }
 
   if (!user.is_active) {
+    await logAuthEvent(user.id, 'LOGIN_BLOCKED', ipAddress, userAgent, 'Account deactivated')
     throw new UnauthorizedError('Account is deactivated')
   }
 

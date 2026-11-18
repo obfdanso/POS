@@ -78,6 +78,18 @@ Log in at http://localhost:5173:
 | Manager | `manager` | `manager123` | Dashboard, without Users and Settings |
 | Cashier | `cashier` | `cashier123` | Cashier home, New Sale, My Sales |
 
+### Or run everything with Docker
+
+**Prerequisites:** Docker with Compose v2.
+
+```bash
+cp .env.docker.example .env                 # then set POSTGRES_PASSWORD and the two JWT secrets
+docker compose up --build -d                # database, API and web app
+docker compose exec server npx prisma db seed   # first run only: sample data
+```
+
+The app is at http://localhost:8080. Migrations run automatically each time the server container starts. Data and uploaded images are kept in the `pgdata` and `uploads` volumes. To reach it from tablets over plain HTTP on the shop network, set `COOKIE_SECURE=false` in `.env`.
+
 [docs/SETUP.md](docs/SETUP.md) covers the details: creating a dedicated database user, Paystack keys, every script, production deployment, and troubleshooting.
 
 ---
@@ -98,6 +110,7 @@ Log in at http://localhost:5173:
 | `CORS_ORIGIN` | | `http://localhost:5173` | The only origin allowed to call the API |
 | `PAYSTACK_SECRET_KEY` | for card/MoMo | — | Verifies Paystack payments server-side |
 | `TRUST_PROXY` | behind a proxy | — | `1` behind nginx/Caddy, so client IPs are correct |
+| `COOKIE_SECURE` | | follows `NODE_ENV` | `false` allows refresh cookies over plain HTTP on a private network |
 
 Generate a secret with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
 
@@ -132,7 +145,9 @@ cd server && npm test     # Jest + Supertest integration tests (uses the databas
 cd client && npm test     # Vitest component and utility tests
 ```
 
-145 backend tests cover every module: auth (lockout, token rotation), sales (payments, discounts, concurrent sales, refunds), inventory, products, customers, suppliers, reports (exact totals), users, and settings. Services have about 88% line coverage. The tests create and delete their own data, run one file at a time, and mock Paystack.
+158 backend tests cover every module: auth (lockout, token rotation), sales (payments, discounts, concurrent sales, refunds), inventory, products, customers, suppliers, reports (exact totals), users, and settings. Services have about 88% line coverage. The tests create and delete their own data, run one file at a time, and mock Paystack.
+
+GitHub Actions runs the server tests against a fresh PostgreSQL database, plus both linters, the client tests and a production build, on every push and pull request (`.github/workflows/ci.yml`).
 
 ---
 

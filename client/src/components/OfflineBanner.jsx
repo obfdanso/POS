@@ -6,7 +6,7 @@ export function OfflineBanner() {
   if (online) return null
   return (
     <div role="status" className="fixed bottom-0 inset-x-0 z-50 bg-warning-100 text-warning-800 border-t border-warning-300 text-sm font-medium text-center px-4 py-2">
-      You're offline. Sales and changes can't be saved until the connection is back.
+      You're offline. Cash sales are saved on this device and sent when the connection is back; other changes can't be saved until then.
     </div>
   )
 }

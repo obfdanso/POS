@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import { Button } from './Button'
+import { EmailReceiptForm } from './EmailReceiptForm'
 import { useSettings } from '../context/SettingsContext'
 import { formatCurrency } from '../utils/formatCurrency'
 import { escapeHtml, printDocument, RECEIPT_STYLES } from '../utils/print'
@@ -94,6 +96,7 @@ function Row({ label, value, className = '' }) {
 export function Receipt({ sale, onClose, actions }) {
   const settings = useSettings()
   const fmt = (v) => formatCurrency(v, settings.currency_symbol || 'GH₵')
+  const [isEmailing, setIsEmailing] = useState(false)
 
   if (!sale) return null
 
@@ -174,9 +177,19 @@ export function Receipt({ sale, onClose, actions }) {
         </div>
       </div>
 
-      <div className="flex justify-end gap-3 mt-4">
+      {isEmailing && <EmailReceiptForm sale={sale} onSent={() => setIsEmailing(false)} onCancel={() => setIsEmailing(false)} />}
+
+      <div className="flex flex-wrap justify-end gap-3 mt-4">
         {actions && <div className="mr-auto flex gap-3">{actions}</div>}
         <Button variant="secondary" onClick={onClose}>Close</Button>
+        {!isEmailing && (
+          <Button variant="secondary" onClick={() => setIsEmailing(true)}>
+            <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+            Email
+          </Button>
+        )}
         <Button variant="primary" onClick={handlePrint} autoFocus>
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />

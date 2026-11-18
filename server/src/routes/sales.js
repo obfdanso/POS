@@ -53,6 +53,7 @@ const saleValidation = [
     .trim()
     .withMessage('Payment reference is required for non-cash transactions'),
   body('notes').optional().trim().isLength({ max: 500 }).withMessage('Notes must be 500 characters or fewer'),
+  body('client_ref').optional().isUUID().withMessage('client_ref must be a UUID'),
 ]
 
 router.post('/', salesRateLimit, exactBody(saleValidation), validate, salesController.createSale)

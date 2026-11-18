@@ -13,9 +13,15 @@ const { buildReceiptSms } = require('../utils/receiptSms')
 const { activePromotionsFor, bestPromotionFor } = require('./promotionService')
 const { autoRefundsEnabled, planGatewayRefund, sendGatewayRefund } = require('./gatewayRefundService')
 
-async function createSale({ items, customer_id, payment_method, amount_paid, discount_amount = 0, redeem_points = 0, notes, reference, payments }, user) {
+async function createSale({ items, customer_id, payment_method, amount_paid, discount_amount = 0, redeem_points = 0, notes, reference, payments, client_ref }, user) {
   // Support legacy callers that pass userId as a string
   const userId = typeof user === 'string' ? user : user.id
+
+  // A sale the till already sent (e.g. queued offline and resent): return it instead of recording it again
+  if (client_ref) {
+    const existing = await findByClientRef(client_ref, userId)
+    if (existing) return existing
+  }
 
   // Checked up front (before any card charge is verified) and again inside the transaction
   const requireShift = (await getSettingValue('require_open_shift', 'false')) === 'true'
@@ -186,6 +192,7 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
         notes: notes || null,
         loyalty_points_earned: pointsEarned,
         shift_id: openShift?.id ?? null,
+        client_ref: client_ref || null,
       },
     })
 
@@ -255,6 +262,8 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
       sale = await runTx()
     } catch (err) {
       const target = err.code === 'P2002' ? String(err.meta?.target ?? '') : ''
+      // The same sale sent twice at once: the other request recorded it
+      if (target.includes('client_ref')) return findByClientRef(client_ref, userId)
       if (target.includes('reference')) {
         throw new ConflictError('This payment reference has already been used for another sale', 'reference')
       }
@@ -364,6 +373,13 @@ async function verifyCharge(reference, amount) {
   }
 
   logger.info(`Paystack verification successful: Ref ${reference}, Amount ${paystackAmountPesewas} pesewas, Channel ${paystackRes.data.channel || 'unknown'}`)
+}
+
+async function findByClientRef(clientRef, userId) {
+  const sale = await prisma.sale.findUnique({ where: { client_ref: clientRef }, select: { id: true, user_id: true } })
+  if (!sale) return null
+  if (sale.user_id !== userId) throw new ConflictError('This sale reference belongs to another user', 'client_ref')
+  return getSaleById(sale.id)
 }
 
 async function getSaleById(id) {

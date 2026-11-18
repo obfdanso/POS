@@ -131,9 +131,7 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
 
   // Work out the payment rows, then check every card and Mobile Money part with Paystack
   const paymentRows = planPayments({ payment_method, amount_paid, reference, payments }, totalAmount)
-  for (const row of paymentRows.filter((r) => r.reference)) {
-    await verifyCharge(row.reference, row.amount_paid)
-  }
+  await Promise.all(paymentRows.filter((r) => r.reference).map((row) => verifyCharge(row.reference, row.amount_paid)))
 
   // Loyalty points (1 point per <loyalty rate> GHS); stored on the sale so a refund reverses exactly this
   const loyaltyRate = customer_id ? await getNumericSetting('loyalty_points_rate', 10) : 0
@@ -629,7 +627,11 @@ async function processRefund(saleId, userId, { items, reason } = {}) {
   // The card / Mobile Money part goes back through Paystack once the return is safely recorded.
   // A failure is kept on the refund (FAILED, with the reason) for a manager to retry
   if (refund.gateway_reference && autoRefundsEnabled()) {
-    await sendGatewayRefund(refund.id, userId)
+    try {
+      await sendGatewayRefund(refund.id, userId)
+    } catch (err) {
+      logger.error(`Return ${refund.id} saved, but sending it to Paystack failed: ${err.message}`)
+    }
   }
 
   return getSaleById(saleId)
@@ -711,19 +713,27 @@ async function smsReceipt(sale, userId, phone) {
   if (!isAllowedDestination(to)) {
     throw new ValidationError('Phone number not allowed', [{ field: 'phone', message: 'Receipts can only be texted to local numbers' }])
   }
-  // Texts cost money, so one sale's receipt can only be texted a few times
-  const alreadySent = await prisma.auditLog.count({ where: { entity_id: sale.id, action: 'RECEIPT_TEXTED' } })
-  if (alreadySent >= MAX_TEXTS_PER_SALE) {
-    throw new AppError(`This receipt has already been texted ${MAX_TEXTS_PER_SALE} times.`, 429, 'SMS_LIMIT')
-  }
+  // Texts cost money, so one sale's receipt can only be texted a few times. Each text is recorded
+  // before it is sent, under a lock on the sale, so simultaneous requests can't pass the limit
+  const reservation = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Sale" WHERE id = ${sale.id} FOR UPDATE`
+    const alreadySent = await tx.auditLog.count({ where: { entity_id: sale.id, action: 'RECEIPT_TEXTED' } })
+    if (alreadySent >= MAX_TEXTS_PER_SALE) {
+      throw new AppError(`This receipt has already been texted ${MAX_TEXTS_PER_SALE} times.`, 429, 'SMS_LIMIT')
+    }
+    return tx.auditLog.create({
+      data: { user_id: userId, action: 'RECEIPT_TEXTED', entity: 'Sale', entity_id: sale.id, details: `${sale.transaction_id} to ${to}` },
+    })
+  })
   const [name, currency] = await Promise.all([getSettingValue('store_name', 'My Store'), getSettingValue('currency_symbol', 'GH₵')])
   try {
     await sendSms(to, buildReceiptSms(sale, { name, currency }))
   } catch (err) {
+    // Not sent, so it doesn't count towards the limit
+    await prisma.auditLog.delete({ where: { id: reservation.id } }).catch(() => {})
     logger.error(`Receipt SMS for ${sale.transaction_id} failed: ${err.message}`)
     throw new AppError('The text message could not be sent. Check the number and try again.', 502, 'SMS_FAILED')
   }
-  await recordAudit({ userId, action: 'RECEIPT_TEXTED', entity: 'Sale', entityId: sale.id, details: `${sale.transaction_id} to ${to}` })
   return { to }
 }
 

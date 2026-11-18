@@ -1,6 +1,6 @@
 import { createContext, useReducer, useContext, useCallback, useMemo } from 'react'
 import { useSettings } from './SettingsContext'
-import { calculateTotals, round2 } from '../utils/saleTotals'
+import { calculateTotals, maxRedeemablePoints, round2 } from '../utils/saleTotals'
 
 export const CartContext = createContext(null)
 
@@ -63,7 +63,10 @@ function cartReducer(state, action) {
     case 'SET_CART_DISCOUNT':
       return clampDiscounts({ ...state, cartDiscount: action.payload })
     case 'SET_CUSTOMER':
-      return { ...state, customer: action.payload }
+      // Points belong to the customer, so a different customer starts with none redeemed
+      return { ...state, customer: action.payload, redeemPoints: 0 }
+    case 'SET_REDEEM_POINTS':
+      return { ...state, redeemPoints: action.payload }
     case 'CLEAR_CART':
       return initialState
     default:
@@ -75,14 +78,27 @@ const initialState = {
   items: [],
   cartDiscount: 0,
   customer: null,
+  redeemPoints: 0,
 }
 
 export function CartProvider({ children }) {
   const [state, dispatch] = useReducer(cartReducer, initialState)
-  const { tax_rate } = useSettings()
+  const { tax_rate, loyalty_point_value } = useSettings()
 
   const taxRate = parseFloat(tax_rate) || 0
-  const { subtotal, taxAmount, total } = calculateTotals(state.items, state.cartDiscount, taxRate)
+  const pointValue = parseFloat(loyalty_point_value) || 0
+  // The requested points, capped by the balance and by what is left to pay as the cart changes
+  const cartSubtotal = calculateTotals(state.items, 0, 0).subtotal
+  const maxPoints = state.customer
+    ? maxRedeemablePoints(cartSubtotal, Math.min(state.cartDiscount || 0, cartSubtotal), state.customer.loyalty_points, pointValue)
+    : 0
+  const redeemPoints = Math.min(state.redeemPoints, maxPoints)
+  const { subtotal, taxAmount, total, pointsDiscount } = calculateTotals(
+    state.items,
+    state.cartDiscount,
+    taxRate,
+    round2(redeemPoints * pointValue)
+  )
 
   // Stable callbacks: POS keyboard/scanner listeners depend on them
   const addItem = useCallback((product) => {
@@ -93,12 +109,13 @@ export function CartProvider({ children }) {
   const updateDiscount = useCallback((product_id, discount) => dispatch({ type: 'UPDATE_DISCOUNT', payload: { product_id, discount } }), [])
   const setCartDiscount = useCallback((amount) => dispatch({ type: 'SET_CART_DISCOUNT', payload: amount }), [])
   const setCustomer = useCallback((customer) => dispatch({ type: 'SET_CUSTOMER', payload: customer }), [])
+  const setRedeemPoints = useCallback((points) => dispatch({ type: 'SET_REDEEM_POINTS', payload: Math.max(0, Math.floor(points) || 0) }), [])
   const clearCart = useCallback(() => dispatch({ type: 'CLEAR_CART' }), [])
   const syncItems = useCallback((updates) => dispatch({ type: 'SYNC_ITEMS', payload: updates }), [])
 
   const value = useMemo(
-    () => ({ ...state, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, clearCart, syncItems }),
-    [state, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, clearCart, syncItems]
+    () => ({ ...state, redeemPoints, maxPoints, pointValue, pointsDiscount, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, setRedeemPoints, clearCart, syncItems }),
+    [state, redeemPoints, maxPoints, pointValue, pointsDiscount, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, setRedeemPoints, clearCart, syncItems]
   )
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>

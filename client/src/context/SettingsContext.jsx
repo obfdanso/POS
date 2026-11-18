@@ -9,6 +9,7 @@ const DEFAULT_SETTINGS = {
   store_phone: '032-204-1234',
   tax_rate: '0',
   loyalty_points_rate: '10',
+  loyalty_point_value: '0',
   currency_symbol: 'GH₵',
   receipt_footer: 'Thank you for choosing QuickMart!',
 }

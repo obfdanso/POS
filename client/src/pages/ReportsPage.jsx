@@ -89,8 +89,17 @@ function KpiCard({ label, value }) {
   )
 }
 
+// Numbers pass through; text is quoted with inner quotes doubled, and text a spreadsheet
+// would run as a formula (= + - @, tab, CR) is prefixed with an apostrophe
+function csvCell(value) {
+  if (typeof value === 'number') return String(value)
+  let text = String(value ?? '')
+  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`
+  return `"${text.replace(/"/g, '""')}"`
+}
+
 function exportCsv(filename, headers, rows) {
-  const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n')
+  const csvContent = [headers, ...rows].map((r) => r.map(csvCell).join(',')).join('\n')
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
   const url = window.URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -183,17 +192,17 @@ export default function ReportsPage() {
     exportCsv(
       'top-products.csv',
       ['Rank', 'Product', 'Quantity Sold', 'Revenue'],
-      topData.map((p, i) => [i + 1, `"${p.name ?? p.label}"`, p.quantity_sold ?? p.quantity ?? 0, p.revenue ?? p.value ?? 0])
+      topData.map((p, i) => [i + 1, p.name ?? p.label,p.quantity_sold ?? p.quantity ?? 0, p.revenue ?? p.value ?? 0])
     )
   }
   function exportCategory() {
-    exportCsv('category-performance.csv', ['Category', 'Revenue'], catData.map((c) => [`"${c.label}"`, c.value ?? 0]))
+    exportCsv('category-performance.csv', ['Category', 'Revenue'], catData.map((c) => [c.label, c.value ?? 0]))
   }
   function exportCashier() {
     exportCsv(
       'cashier-performance.csv',
       ['Cashier', 'Transactions', 'Total Revenue'],
-      cashierData.map((c) => [`"${c.label}"`, c.transactions ?? 0, c.value ?? 0])
+      cashierData.map((c) => [c.label, c.transactions ?? 0, c.value ?? 0])
     )
   }
   function exportProfit() {
@@ -201,7 +210,7 @@ export default function ReportsPage() {
       'profit.csv',
       ['Product', 'Revenue', 'Cost', 'Profit', 'Margin %'],
       profitData.map((p) => [
-        `"${p.name ?? p.label}"`,
+        p.name ?? p.label,
         p.revenue ?? 0,
         p.cost ?? 0,
         p.profit ?? 0,

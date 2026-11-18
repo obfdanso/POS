@@ -19,7 +19,8 @@ A web-based point of sale system for a retail shop, built as a final-year capsto
 - **Promotions** apply automatically: a percentage off one product, a category, or the whole store, for a set period. Product cards show the deal, cart lines show the saving, and receipts name the promotion.
 - **Loyalty redemption.** Customers can spend their points as money off at the till (the point value is set by an admin). Returned goods give the points back.
 - Payment by cash (with one-tap "Exact" and rounded-up amount buttons, and change calculation), Mobile Money, or card. Mobile Money and card payments go through Paystack and are verified on the server.
-- An 80mm thermal receipt is printed with `window.print()`, or emailed to the customer (to the address on file or one typed at the till) when an SMTP server is configured.
+- **Split payments.** One sale can be paid partly by Mobile Money or card and the rest in cash, with change worked out from the cash part. Shifts count each part under its own method, and refunds give the cash back first.
+- An 80mm thermal receipt is printed with `window.print()`, emailed to the customer when an SMTP server is configured, or texted to their phone when an SMS provider (Arkesel or Twilio) is configured. Both default to the customer's address or number on file.
 - **Installable app.** QuickMart can be installed from the browser on a tablet or desktop and opens in its own window. Its screens load even when the connection drops, and a banner warns that nothing can be saved until it's back.
 - Keyboard shortcuts: **F1** search, **F2** pay, **F4** clear cart, **Enter** add / confirm.
 - **Cash drawer shifts.** Cashiers open a shift with a counted float and close it by counting the drawer. The system works out the expected cash (float + cash sales − cash refunds) and records whether the drawer was over or short. Admins can make an open shift required before selling.
@@ -120,6 +121,8 @@ The app is at http://localhost:8080. Migrations run automatically each time the 
 | `TRUST_PROXY` | behind a proxy | — | `1` behind nginx/Caddy, so client IPs are correct |
 | `COOKIE_SECURE` | | follows `NODE_ENV` | `false` allows refresh cookies over plain HTTP on a private network |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` | for emailed receipts | — | Any SMTP provider. Leave `SMTP_HOST` empty to turn email off |
+| `SMS_PROVIDER` (`arkesel` or `twilio`), `ARKESEL_API_KEY`, `SMS_SENDER_ID`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | for texted receipts | — | Leave `SMS_PROVIDER` empty to turn texts off |
+| `SMS_COUNTRY_CODE`, `SMS_ALLOWED_COUNTRY_CODES` | | `233`, — | Country code for local numbers; only that country can be texted unless more are listed |
 | `SENTRY_DSN` (server), `VITE_SENTRY_DSN` (client) | | — | Optional error reporting to Sentry. The browser SDK is only downloaded when set |
 
 Generate a secret with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
@@ -158,7 +161,7 @@ cd e2e && npm install && npm test   # Playwright: real browser against the real 
 
 The end-to-end tests start the API and a production build of the web app themselves (or reuse ones already running), sign in as the seeded users, and use the database in `server/.env`, which must be seeded. They cover sign-in and role access, a keyboard checkout from barcode scan to receipt, a partial return with its refund slip, a promotion from creation to the receipt, and a purchase order received in two deliveries. Locally they use your installed Chrome.
 
-222 backend tests cover every module: auth (lockout, token rotation), sales (payments, discounts, concurrent sales), promotions, purchase orders, loyalty redemption, emailed receipts, request IDs, readiness and error reporting, partial returns, cash drawer shifts, inventory, products, customers, suppliers, reports (exact totals), users, and settings. Services have about 90% line coverage. The tests create and delete their own data, run one file at a time, and mock Paystack.
+247 backend tests cover every module: auth (lockout, token rotation), sales (payments, discounts, concurrent sales), promotions, purchase orders, split payments, loyalty redemption, emailed and texted receipts, request IDs, readiness and error reporting, partial returns, cash drawer shifts, inventory, products, customers, suppliers, reports (exact totals), users, and settings. Services have about 90% line coverage. The tests create and delete their own data, run one file at a time, and mock Paystack.
 
 GitHub Actions runs the server tests against a fresh PostgreSQL database, both linters, the client tests, a production build, and the Playwright tests against a freshly seeded database, on every push and pull request (`.github/workflows/ci.yml`).
 

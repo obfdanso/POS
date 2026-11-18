@@ -13,7 +13,8 @@
 |---|---|
 | `Role` | `ADMIN`, `MANAGER`, `CASHIER` |
 | `PaymentMethod` | `CASH`, `MOBILE_MONEY`, `CARD` |
-| `PaymentStatus` | `COMPLETED`, `REFUNDED`, `PENDING` |
+| `PaymentStatus` | `COMPLETED`, `PARTIALLY_REFUNDED`, `REFUNDED`, `PENDING` |
+| `ShiftStatus` | `OPEN`, `CLOSED` |
 | `InventoryChangeType` | `SALE`, `RESTOCK`, `ADJUSTMENT`, `RETURN` |
 
 ---
@@ -86,9 +87,12 @@
 | `tax_amount` | Decimal(10,2) | Tax on (subtotal − discount), default 0 |
 | `total_amount` | Decimal(10,2) | subtotal − discount + tax |
 | `payment_method` | PaymentMethod | |
-| `payment_status` | PaymentStatus | Default `COMPLETED`, `REFUNDED` after a refund |
+| `payment_status` | PaymentStatus | Default `COMPLETED`; `PARTIALLY_REFUNDED` after a return, `REFUNDED` once every unit is back |
 | `notes` | String? | |
 | `loyalty_points_earned` | Int | Points awarded for this sale, so a refund reverses exactly that |
+| `refunded_amount` | Decimal(10,2) | Running total of refunds, default 0. `CHECK` between 0 and `total_amount`. Reports subtract it |
+| `loyalty_points_reversed` | Int | Points taken back by returns so far, default 0 |
+| `shift_id` | UUID FK? | → Shift it was rung up in, `ON DELETE SET NULL`. Indexed |
 
 All amounts have `CHECK >= 0`. Indexed on `transaction_id` and `created_at`.
 
@@ -103,6 +107,46 @@ All amounts have `CHECK >= 0`. Indexed on `transaction_id` and `created_at`.
 | `unit_cost` | Decimal(10,2)? | Cost price at the time of sale (used by the profit report) |
 | `discount` | Decimal(10,2) | Line discount, default 0 |
 | `total` | Decimal(10,2) | unit_price × quantity − discount |
+| `refunded_quantity` | Int | Units returned so far, default 0. `CHECK` between 0 and `quantity`. Reports count only `quantity − refunded_quantity` |
+
+### Refund
+One return against a sale.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | |
+| `sale_id` | UUID FK | → Sale, `ON DELETE CASCADE`. Indexed |
+| `user_id` | UUID FK | → User who processed it |
+| `shift_id` | UUID FK? | → that user's open shift, `ON DELETE SET NULL`. Cash refunds come out of its drawer. Indexed |
+| `amount` | Decimal(10,2) | Money paid back, `CHECK >= 0` |
+| `method` | PaymentMethod | The sale's payment method |
+| `reason` | String | Why the items came back |
+
+### RefundItem
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | |
+| `refund_id` | UUID FK | → Refund, `ON DELETE CASCADE` |
+| `sale_item_id` | UUID FK | → SaleItem, `ON DELETE CASCADE`. Indexed |
+| `quantity` | Int | Units returned, `CHECK > 0` |
+| `amount` | Decimal(10,2) | This line's share of the refund |
+| `restocked` | Boolean | `false` for damaged goods that didn't go back on the shelf |
+
+### Shift
+A cash drawer session.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | |
+| `user_id` | UUID FK | → User working the till. A partial unique index allows only one `OPEN` shift per user |
+| `status` | ShiftStatus | `OPEN` until counted and closed |
+| `opening_float` | Decimal(10,2) | Cash in the drawer at the start, `CHECK >= 0` |
+| `expected_cash` | Decimal(10,2)? | Set at close: float + cash sales − cash refunds |
+| `counted_cash` | Decimal(10,2)? | Set at close, `CHECK >= 0` |
+| `difference` | Decimal(10,2)? | counted − expected; negative means the drawer was short |
+| `opened_at` / `closed_at` | DateTime / DateTime? | |
+| `closed_by_id` | UUID FK? | → User who closed it (a manager can close a cashier's shift) |
+| `notes` | String? | Opening and closing notes |
 
 ### Payment
 | Column | Type | Notes |
@@ -164,6 +208,7 @@ Key–value store, edited on the Settings page.
 | `loyalty_points_rate` | GHS spent per loyalty point (0 turns loyalty off) |
 | `currency_symbol` | Shown before every amount, e.g. `GH₵` |
 | `receipt_footer` | Last line of the receipt |
+| `require_open_shift` | `true` makes cashiers open a shift before selling (default `false`) |
 
 ---
 

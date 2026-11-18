@@ -32,6 +32,7 @@ const saleValidation = [
     .withMessage('Payment method must be CASH, MOBILE_MONEY, or CARD'),
   body('amount_paid').isFloat({ min: 0, max: 1000000 }).withMessage('Amount paid must be between 0 and 1000000').toFloat(),
   body('discount_amount').optional().isFloat({ min: 0, max: 1000000 }).withMessage('Discount must be >= 0').toFloat(),
+  body('redeem_points').optional().isInt({ min: 0, max: 1000000 }).withMessage('Points to redeem must be a whole number, 0 or more').toInt(),
   body('customer_id').optional({ nullable: true }).isUUID().withMessage('Customer ID must be a valid UUID'),
   body('reference')
     .if(body('payment_method').isIn(['MOBILE_MONEY', 'CARD']))

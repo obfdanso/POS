@@ -7,7 +7,7 @@ const { logger } = require('../middleware/logger')
 const generateTransactionId = require('../utils/generateTransactionId')
 const { buildDateRange } = require('../utils/dateRange')
 
-async function createSale({ items, customer_id, payment_method, amount_paid, discount_amount = 0, notes, reference }, user) {
+async function createSale({ items, customer_id, payment_method, amount_paid, discount_amount = 0, redeem_points = 0, notes, reference }, user) {
   // Support legacy callers that pass userId as a string
   const userId = typeof user === 'string' ? user : user.id
 
@@ -16,6 +16,8 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
   if (requireShift && !(await prisma.shift.findFirst({ where: { user_id: userId, status: 'OPEN' }, select: { id: true } }))) {
     throw noOpenShiftError()
   }
+
+  let customerPoints = 0
 
   // Step 1: Validate all items exist and have sufficient stock
   const productIds = items.map((i) => i.product_id)
@@ -41,9 +43,25 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
   }
 
   if (customer_id) {
-    const customer = await prisma.customer.findUnique({ where: { id: customer_id }, select: { id: true } })
+    const customer = await prisma.customer.findUnique({ where: { id: customer_id }, select: { id: true, loyalty_points: true } })
     if (!customer) {
       throw new ValidationError('Customer not found', [{ field: 'customer_id', message: 'Customer does not exist' }])
+    }
+    customerPoints = customer.loyalty_points
+  }
+
+  // Loyalty points spent as money off; checked here, before any card charge, and again inside the transaction
+  const pointsToRedeem = parseInt(redeem_points, 10) || 0
+  const pointValue = pointsToRedeem > 0 ? await getNumericSetting('loyalty_point_value', 0) : 0
+  if (pointsToRedeem > 0) {
+    if (!customer_id) {
+      throw new ValidationError('Customer required', [{ field: 'redeem_points', message: 'Choose a customer to redeem points' }])
+    }
+    if (pointValue <= 0) {
+      throw new ValidationError('Redemption disabled', [{ field: 'redeem_points', message: 'Points redemption is turned off in settings' }])
+    }
+    if (pointsToRedeem > customerPoints) {
+      throw notEnoughPointsError(customerPoints)
     }
   }
 
@@ -79,7 +97,16 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
       { field: 'discount_amount', message: `Discount cannot exceed the subtotal (${subtotal.toFixed(2)})` },
     ])
   }
-  const taxableAmount = round2(subtotal - discountAmt)
+  const pointsDiscount = round2(pointsToRedeem * pointValue)
+  if (round2(discountAmt + pointsDiscount) > subtotal) {
+    const maxPoints = Math.floor(round2(subtotal - discountAmt) / pointValue + 1e-9)
+    throw new ValidationError('Too many points', [
+      { field: 'redeem_points', message: `Points can cover at most what is left after discounts; redeem ${maxPoints} or fewer` },
+    ])
+  }
+  // Redeemed points are a discount, so reports that net out discount_amount account for them too
+  const totalDiscount = round2(discountAmt + pointsDiscount)
+  const taxableAmount = round2(subtotal - totalDiscount)
   const taxAmount = round2(taxableAmount * (taxRate / 100))
   const totalAmount = round2(taxableAmount + taxAmount)
 
@@ -161,6 +188,18 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
     const openShift = await tx.shift.findFirst({ where: { user_id: userId, status: 'OPEN' }, select: { id: true } })
     if (!openShift && requireShift) throw noOpenShiftError()
 
+    // The balance guard stops two tills spending the same points at once
+    if (pointsToRedeem > 0) {
+      const { count } = await tx.customer.updateMany({
+        where: { id: customer_id, loyalty_points: { gte: pointsToRedeem } },
+        data: { loyalty_points: { decrement: pointsToRedeem } },
+      })
+      if (count === 0) {
+        const current = await tx.customer.findUnique({ where: { id: customer_id }, select: { loyalty_points: true } })
+        throw notEnoughPointsError(current?.loyalty_points ?? 0)
+      }
+    }
+
     // Create Sale
     const newSale = await tx.sale.create({
       data: {
@@ -168,7 +207,9 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
         user_id: userId,
         customer_id: customer_id || null,
         subtotal: parseFloat(subtotal.toFixed(2)),
-        discount_amount: discountAmt,
+        discount_amount: totalDiscount,
+        loyalty_points_redeemed: pointsToRedeem,
+        points_discount: pointsDiscount,
         tax_amount: taxAmount,
         total_amount: totalAmount,
         payment_method,
@@ -403,6 +444,21 @@ async function processRefund(saleId, userId, { items, reason } = {}) {
     const amount = Math.min(round2(refundItems.reduce((sum, i) => sum + i.amount, 0)), round2(total - alreadyRefunded))
     const refundedAfter = round2(alreadyRefunded + amount)
 
+    // Give back redeemed points in proportion to the value of goods returned so far (all of them once
+    // the whole sale is back). Computed before the lines' refunded quantities are updated below
+    let pointsToRestore = 0
+    if (sale.customer_id && sale.loyalty_points_redeemed > 0) {
+      const returning = new Map(refundItems.map((i) => [i.sale_item_id, i.quantity]))
+      const returnedValue = sale.sale_items.reduce(
+        (sum, si) => sum + (parseFloat(si.total) * (si.refunded_quantity + (returning.get(si.id) || 0))) / si.quantity,
+        0
+      )
+      const owed = completesSale || subtotal <= 0
+        ? sale.loyalty_points_redeemed
+        : Math.min(sale.loyalty_points_redeemed, Math.floor((sale.loyalty_points_redeemed * returnedValue) / subtotal + 1e-9))
+      pointsToRestore = Math.max(0, owed - sale.loyalty_points_restored)
+    }
+
     for (const item of refundItems) {
       await tx.saleItem.update({ where: { id: item.sale_item_id }, data: { refunded_quantity: { increment: item.quantity } } })
     }
@@ -467,6 +523,11 @@ async function processRefund(saleId, userId, { items, reason } = {}) {
       }
     }
 
+    if (pointsToRestore > 0) {
+      await tx.customer.update({ where: { id: sale.customer_id }, data: { loyalty_points: { increment: pointsToRestore } } })
+      await tx.sale.update({ where: { id: saleId }, data: { loyalty_points_restored: { increment: pointsToRestore } } })
+    }
+
     await recordAudit(
       {
         userId,
@@ -500,6 +561,12 @@ async function getReceiptData(saleId) {
 // Half-up to 2 decimals; EPSILON stops values like 1.005 (stored as 1.00499…) rounding down
 function noOpenShiftError() {
   return new ValidationError('No open shift', [{ field: 'shift', message: 'Open a cash drawer shift before making sales' }])
+}
+
+function notEnoughPointsError(balance) {
+  return new ValidationError('Not enough points', [
+    { field: 'redeem_points', message: `The customer only has ${balance} point${balance === 1 ? '' : 's'}` },
+  ])
 }
 
 function round2(n) {

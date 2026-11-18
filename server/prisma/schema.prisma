@@ -25,6 +25,11 @@ enum PaymentStatus {
   PENDING
 }
 
+enum ShiftStatus {
+  OPEN
+  CLOSED
+}
+
 enum InventoryChangeType {
   SALE
   RESTOCK
@@ -51,6 +56,8 @@ model User {
   inventory_logs InventoryLog[]
   auth_logs      AuthLog[]
   audit_logs     AuditLog[]
+  shifts         Shift[]        @relation("ShiftCashier")
+  closed_shifts  Shift[]        @relation("ShiftClosedBy")
 }
 
 model Category {
@@ -133,13 +140,44 @@ model Sale {
   created_at            DateTime      @default(now())
   updated_at            DateTime      @updatedAt
 
+  // The cash drawer shift the sale was rung up in
+  shift_id String?
+
   user       User       @relation(fields: [user_id], references: [id])
   customer   Customer?  @relation(fields: [customer_id], references: [id], onDelete: SetNull)
+  shift      Shift?     @relation(fields: [shift_id], references: [id], onDelete: SetNull)
   sale_items SaleItem[]
   payments   Payment[]
 
   @@index([transaction_id])
   @@index([created_at])
+  @@index([shift_id])
+}
+
+// A cashier's session at the till: opened with a cash float, closed by counting the drawer.
+// At most one OPEN shift per cashier (partial unique index in the migration).
+model Shift {
+  id            String      @id @default(uuid())
+  user_id       String
+  status        ShiftStatus @default(OPEN)
+  opening_float Decimal     @db.Decimal(10, 2)
+  // Set when the shift closes: what the drawer should hold, what was counted, and counted − expected
+  expected_cash Decimal?    @db.Decimal(10, 2)
+  counted_cash  Decimal?    @db.Decimal(10, 2)
+  difference    Decimal?    @db.Decimal(10, 2)
+  opened_at     DateTime    @default(now())
+  closed_at     DateTime?
+  closed_by_id  String?
+  notes         String?
+  created_at    DateTime    @default(now())
+  updated_at    DateTime    @updatedAt
+
+  user      User   @relation("ShiftCashier", fields: [user_id], references: [id])
+  closed_by User?  @relation("ShiftClosedBy", fields: [closed_by_id], references: [id])
+  sales     Sale[]
+
+  @@index([user_id, status])
+  @@index([opened_at])
 }
 
 model SaleItem {

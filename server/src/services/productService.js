@@ -39,8 +39,10 @@ async function listProducts({ page = 1, per_page = 20, search, category_id, stat
   if (status === 'active') where.is_active = true
   if (status === 'inactive') where.is_active = false
   if (category_id) where.category_id = category_id
-  if (group_variants) where.parent_id = null
+  // Variants of a deactivated main product stand on their own, so they stay on the till
+  if (group_variants) where.OR = [{ parent_id: null }, { parent: { is_active: false } }]
   if (search) {
+    where.AND = [{ OR: [...(where.OR || [])] }].filter((c) => c.OR.length)
     where.OR = [
       { name: { contains: search, mode: 'insensitive' } },
       { sku: { contains: search, mode: 'insensitive' } },

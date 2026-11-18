@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { DashboardLayout } from '../layouts/DashboardLayout'
 import { Modal } from '../components/Modal'
+import toast from 'react-hot-toast'
 import api from '../services/api'
 import { formatCurrency } from '../utils/formatCurrency'
 import { toISODate } from '../utils/date'
+import { getErrorMessage } from '../utils/apiErrors'
 
 function formatDateTime(dateStr) {
   return new Date(dateStr).toLocaleString('en-GH', { hour: '2-digit', minute: '2-digit' })
@@ -46,6 +48,8 @@ export default function CashierSalesPage() {
   const [detailLoading, setDetailLoading] = useState(false)
 
   const latestRequest = useRef(0)
+  // The sale whose details are wanted; null once the modal is closed
+  const openSaleId = useRef(null)
   const fetchSales = useCallback(async () => {
     // Only the newest request may update the list; an older one can finish later
     const requestId = ++latestRequest.current
@@ -56,9 +60,10 @@ export default function CashierSalesPage() {
       if (requestId !== latestRequest.current) return
       setSales(res.data.data || [])
       setMeta(res.data.meta || { page: 1, total_pages: 1, total: 0 })
-    } catch {
+    } catch (err) {
       if (requestId !== latestRequest.current) return
       setSales([])
+      toast.error(getErrorMessage(err, 'Failed to load your sales'))
     } finally {
       if (requestId === latestRequest.current) setLoading(false)
     }
@@ -72,21 +77,31 @@ export default function CashierSalesPage() {
     fetchSales()
   }, [fetchSales])
 
+  function closeSaleDetail() {
+    openSaleId.current = null
+    setSelectedSale(null)
+  }
+
   async function openSaleDetail(sale) {
+    openSaleId.current = sale.id
     setDetailLoading(true)
     setSelectedSale({ ...sale, _loading: true })
     try {
       const res = await api.get(`/sales/${sale.id}`)
+      // Skip if the modal was closed or another sale was opened meanwhile
+      if (openSaleId.current !== sale.id) return
       const data = res.data.data
       setSelectedSale({
         ...data,
         items: data.items ?? [],
         payment: data.payment ?? null,
       })
-    } catch {
-      setSelectedSale(null)
+    } catch (err) {
+      if (openSaleId.current !== sale.id) return
+      closeSaleDetail()
+      toast.error(getErrorMessage(err, 'Failed to load sale details'))
     } finally {
-      setDetailLoading(false)
+      if (openSaleId.current === sale.id || openSaleId.current === null) setDetailLoading(false)
     }
   }
 
@@ -212,7 +227,7 @@ export default function CashierSalesPage() {
       {/* Sale Detail Modal */}
       <Modal
         isOpen={!!selectedSale}
-        onClose={() => setSelectedSale(null)}
+        onClose={closeSaleDetail}
         title={selectedSale?.transaction_id || 'Sale Details'}
         size="md"
       >

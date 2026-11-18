@@ -6,6 +6,7 @@ import api from '../services/api'
 import { formatCurrency } from '../utils/formatCurrency'
 import { toISODate } from '../utils/date'
 import { getErrorMessage } from '../utils/apiErrors'
+import { methodLabel, paymentLines } from '../utils/payments'
 
 function formatDateTime(dateStr) {
   return new Date(dateStr).toLocaleString('en-GH', { hour: '2-digit', minute: '2-digit' })
@@ -15,6 +16,7 @@ const methodBadge = {
   CASH: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
   MOBILE_MONEY: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
   CARD: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
+  SPLIT: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
 }
 
 const DATE_FILTERS = [
@@ -95,6 +97,7 @@ export default function CashierSalesPage() {
         ...data,
         items: data.items ?? [],
         payment: data.payment ?? null,
+        payments: data.payments ?? [],
       })
     } catch (err) {
       if (openSaleId.current !== sale.id) return
@@ -243,7 +246,7 @@ export default function CashierSalesPage() {
             <div className="grid grid-cols-2 gap-2 text-gray-500 dark:text-gray-400">
               <div><span className="font-medium text-gray-700 dark:text-gray-300">Date:</span> {new Date(selectedSale.created_at).toLocaleString('en-GH')}</div>
               <div><span className="font-medium text-gray-700 dark:text-gray-300">Customer:</span> {selectedSale.customer?.name || 'Walk-in'}</div>
-              <div><span className="font-medium text-gray-700 dark:text-gray-300">Payment:</span> {selectedSale.payment_method?.replace('_', ' ')}</div>
+              <div><span className="font-medium text-gray-700 dark:text-gray-300">Payment:</span> {methodLabel(selectedSale.payment_method)}</div>
               <div><span className="font-medium text-gray-700 dark:text-gray-300">Status:</span> {selectedSale.payment_status}</div>
             </div>
 
@@ -289,15 +292,14 @@ export default function CashierSalesPage() {
             </div>
 
             {/* Payment info */}
-            {selectedSale.payment && (
+            {paymentLines(selectedSale).length > 0 && (
               <div className="space-y-1 text-gray-600 dark:text-gray-300 border-t border-gray-100 dark:border-gray-800 pt-3">
-                <div className="flex justify-between"><span>Amount Paid</span><span>{formatCurrency(selectedSale.payment.amount_paid)}</span></div>
-                {parseFloat(selectedSale.payment.change_given) > 0 && (
-                  <div className="flex justify-between"><span>Change</span><span>{formatCurrency(selectedSale.payment.change_given)}</span></div>
-                )}
-                {selectedSale.payment.reference && (
-                  <div className="flex justify-between"><span>Reference</span><span className="font-mono">{selectedSale.payment.reference}</span></div>
-                )}
+                {paymentLines(selectedSale).map((l) => (
+                  <div key={l.label} className="flex justify-between">
+                    <span>{l.label.replace(/:$/, '')}</span>
+                    <span className={l.text ? 'font-mono' : ''}>{l.text ?? formatCurrency(l.amount)}</span>
+                  </div>
+                ))}
               </div>
             )}
           </div>

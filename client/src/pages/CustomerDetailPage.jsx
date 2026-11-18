@@ -14,6 +14,7 @@ const PAYMENT_BADGE = {
   CASH: 'default',
   MOBILE_MONEY: 'primary',
   CARD: 'success',
+  SPLIT: 'warning',
 }
 
 function InfoRow({ label, value }) {

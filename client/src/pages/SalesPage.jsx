@@ -20,7 +20,7 @@ import { useSettings } from '../context/SettingsContext'
 
 const STATUS_BADGE = { COMPLETED: 'success', PARTIALLY_REFUNDED: 'warning', REFUNDED: 'danger', PENDING: 'default' }
 const STATUS_LABEL = { PARTIALLY_REFUNDED: 'PART REFUNDED' }
-const METHOD_BADGE = { CASH: 'default', MOBILE_MONEY: 'primary', CARD: 'success' }
+const METHOD_BADGE = { CASH: 'default', MOBILE_MONEY: 'primary', CARD: 'success', SPLIT: 'warning' }
 
 const selectClass =
   'block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
@@ -268,6 +268,7 @@ export default function SalesPage() {
                 <option value="CASH">Cash</option>
                 <option value="MOBILE_MONEY">Mobile Money</option>
                 <option value="CARD">Card</option>
+                <option value="SPLIT">Split</option>
               </select>
             </div>
             <div className="flex flex-col gap-1">

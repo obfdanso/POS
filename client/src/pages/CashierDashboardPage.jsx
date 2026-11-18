@@ -12,6 +12,7 @@ const methodBadge = {
   CASH: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
   MOBILE_MONEY: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
   CARD: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
+  SPLIT: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
 }
 
 function StatCard({ label, value, sub, icon }) {

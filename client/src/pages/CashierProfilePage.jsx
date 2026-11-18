@@ -3,6 +3,7 @@ import { DashboardLayout } from '../layouts/DashboardLayout'
 import { useAuth } from '../hooks/useAuth'
 import toast from 'react-hot-toast'
 import api, { setAccessToken } from '../services/api'
+import { getFieldErrors, getErrorMessage } from '../utils/apiErrors'
 
 // ─── Sub-components (mirrors SettingsPage style) ──────────────────────────────
 
@@ -121,7 +122,8 @@ export default function CashierProfilePage() {
       await refreshUser()
       toast.success('Profile updated successfully')
     } catch (err) {
-      toast.error(err.response?.data?.error?.message || 'Failed to update profile')
+      setProfileErrors(getFieldErrors(err))
+      toast.error(getErrorMessage(err, 'Failed to update profile'))
     } finally {
       setSavingProfile(false)
     }
@@ -159,7 +161,8 @@ export default function CashierProfilePage() {
       toast.success('Password changed. Other devices have been signed out.')
       setPwForm({ current_password: '', new_password: '', confirm_password: '' })
     } catch (err) {
-      toast.error(err.response?.data?.error?.message || 'Failed to change password')
+      setPwErrors(getFieldErrors(err))
+      toast.error(getErrorMessage(err, 'Failed to change password'))
     } finally {
       setSavingPw(false)
     }

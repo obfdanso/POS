@@ -145,6 +145,7 @@ export default function SettingsPage() {
     currency_symbol: 'GH₵',
     tax_rate: '0',
     loyalty_points_rate: '10',
+    loyalty_point_value: '0',
     receipt_footer: 'Thank you for your business!',
     require_open_shift: 'false',
   })
@@ -226,6 +227,10 @@ export default function SettingsPage() {
       const loyaltyRate = parseFloat(settings.loyalty_points_rate)
       if (isNaN(loyaltyRate) || loyaltyRate < 1) {
         errs.loyalty_points_rate = 'Loyalty rate must be at least 1'
+      }
+      const pointValue = parseFloat(settings.loyalty_point_value)
+      if (isNaN(pointValue) || pointValue < 0 || pointValue > 1000) {
+        errs.loyalty_point_value = 'Point value must be between 0 and 1000'
       }
     }
     return errs
@@ -390,6 +395,30 @@ export default function SettingsPage() {
                         min={1}
                         step={1}
                         error={!!errors.loyalty_points_rate}
+                      />
+                    </div>
+                    <span className="text-sm text-gray-500 dark:text-gray-400 flex-shrink-0">per point</span>
+                  </div>
+                </FieldRow>
+                <FieldRow
+                  label="Value of a Point"
+                  hint="Money off for each point a customer spends at checkout. Set 0 to stop customers redeeming points."
+                  error={errors.loyalty_point_value}
+                  half
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-500 dark:text-gray-400 flex-shrink-0">
+                      {settings.currency_symbol || 'GH₵'}
+                    </span>
+                    <div className="flex-1">
+                      <Input
+                        type="number"
+                        value={settings.loyalty_point_value ?? ''}
+                        onChange={(e) => handleChange('loyalty_point_value', e.target.value)}
+                        placeholder="0.10"
+                        min={0}
+                        step="0.01"
+                        error={!!errors.loyalty_point_value}
                       />
                     </div>
                     <span className="text-sm text-gray-500 dark:text-gray-400 flex-shrink-0">per point</span>

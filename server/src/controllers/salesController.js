@@ -1,4 +1,5 @@
 const salesService = require('../services/salesService')
+const gatewayRefundService = require('../services/gatewayRefundService')
 
 function normalizeSale(sale) {
   return {
@@ -108,4 +109,14 @@ async function smsReceipt(req, res, next) {
   }
 }
 
-module.exports = { createSale, listSales, getSale, processRefund, getReceipt, emailReceipt, smsReceipt }
+async function sendRefundToPaystack(req, res, next) {
+  try {
+    await gatewayRefundService.sendOrRefreshGatewayRefund(req.params.id, req.params.refundId, req.user.id)
+    const sale = await salesService.getSaleById(req.params.id)
+    res.json({ success: true, data: normalizeSale(sale) })
+  } catch (err) {
+    next(err)
+  }
+}
+
+module.exports = { createSale, listSales, getSale, processRefund, getReceipt, emailReceipt, smsReceipt, sendRefundToPaystack }

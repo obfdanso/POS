@@ -11,6 +11,7 @@ const { buildReceiptEmail } = require('../utils/receiptEmail')
 const { isSmsConfigured, normalizePhone, isAllowedDestination, sendSms } = require('../utils/sms')
 const { buildReceiptSms } = require('../utils/receiptSms')
 const { activePromotionsFor, bestPromotionFor } = require('./promotionService')
+const { autoRefundsEnabled, planGatewayRefund, sendGatewayRefund } = require('./gatewayRefundService')
 
 async function createSale({ items, customer_id, payment_method, amount_paid, discount_amount = 0, redeem_points = 0, notes, reference, payments }, user) {
   // Support legacy callers that pass userId as a string
@@ -442,7 +443,7 @@ async function listSales({ page = 1, per_page = 20, start_date, end_date, user_i
  * rounding never makes the refunds add up to more or less than the sale total.
  */
 async function processRefund(saleId, userId, { items, reason } = {}) {
-  await prisma.$transaction(async (tx) => {
+  const refund = await prisma.$transaction(async (tx) => {
     // Lock the sale so simultaneous returns against it are processed one after the other
     const locked = await tx.$queryRaw`SELECT id FROM "Sale" WHERE id = ${saleId} FOR UPDATE`
     if (locked.length === 0) throw new NotFoundError('Sale not found')
@@ -549,7 +550,8 @@ async function processRefund(saleId, userId, { items, reason } = {}) {
 
     const openShift = await tx.shift.findFirst({ where: { user_id: userId, status: 'OPEN' }, select: { id: true } })
     const refundReason = reason?.trim() || (completesSale && !items ? 'Full refund' : 'Return')
-    await tx.refund.create({
+    const gateway = await planGatewayRefund(tx, sale, amount, cashAmount)
+    const created = await tx.refund.create({
       data: {
         sale_id: saleId,
         user_id: userId,
@@ -558,6 +560,7 @@ async function processRefund(saleId, userId, { items, reason } = {}) {
         method: sale.payment_method,
         cash_amount: cashAmount,
         reason: refundReason,
+        ...gateway,
         items: {
           create: refundItems.map((i) => ({
             sale_item_id: i.sale_item_id,
@@ -620,7 +623,14 @@ async function processRefund(saleId, userId, { items, reason } = {}) {
       },
       tx
     )
+    return created
   })
+
+  // The card / Mobile Money part goes back through Paystack once the return is safely recorded.
+  // A failure is kept on the refund (FAILED, with the reason) for a manager to retry
+  if (refund.gateway_reference && autoRefundsEnabled()) {
+    await sendGatewayRefund(refund.id, userId)
+  }
 
   return getSaleById(saleId)
 }

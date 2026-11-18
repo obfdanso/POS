@@ -91,6 +91,17 @@ router.post(
   salesController.processRefund
 )
 
+// Sends a refund's card / Mobile Money part through Paystack, or checks on one already sent
+router.post(
+  '/:id/refunds/:refundId/paystack',
+  authorize(['ADMIN', 'MANAGER']),
+  param('id').isUUID(),
+  param('refundId').isUUID(),
+  exactBody([]),
+  validate,
+  salesController.sendRefundToPaystack
+)
+
 // Each receipt email goes to an outside address, so limit how many one user can send
 const emailRateLimit = rateLimit({
   windowMs: 60 * 1000,

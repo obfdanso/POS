@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import toast from 'react-hot-toast'
 import { DashboardLayout } from '../layouts/DashboardLayout'
 import { Button } from '../components/Button'
@@ -137,7 +137,11 @@ export default function SalesPage() {
       .catch(() => {}) // cashier filter just stays empty
   }, [])
 
+  // Only the newest request may update the list, so a slow older search can't overwrite it
+  const latestRequest = useRef(0)
+
   const fetchSales = useCallback(async () => {
+    const requestId = ++latestRequest.current
     setIsLoading(true)
     try {
       const params = { page, per_page: 20, sort: sort.key, order: sort.order }
@@ -145,12 +149,14 @@ export default function SalesPage() {
         if (value) params[key] = typeof value === 'string' ? value.trim() : value
       }
       const res = await salesService.list(params)
+      if (requestId !== latestRequest.current) return
       setSales(res.data?.data || [])
       setMeta(res.data?.meta || { page: 1, total_pages: 1, total: 0 })
     } catch (err) {
+      if (requestId !== latestRequest.current) return
       toast.error(getErrorMessage(err, 'Failed to load sales'))
     } finally {
-      setIsLoading(false)
+      if (requestId === latestRequest.current) setIsLoading(false)
     }
   }, [page, sort, filters])
 

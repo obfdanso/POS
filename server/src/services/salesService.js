@@ -145,9 +145,17 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
   const runTx = () => prisma.$transaction(async (tx) => {
     // Generate sequential human-readable transaction ID (spec: TXN-YYYYMMDD-NNNN)
     const now = new Date()
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    const todayCount = await tx.sale.count({ where: { created_at: { gte: startOfDay } } })
-    const transaction_id = generateTransactionId(now, todayCount + 1)
+    // Next number after the highest one issued today. Counting today's sales instead would reuse a
+    // number whenever one of them was removed (e.g. by the clear-sales script)
+    const todayPrefix = generateTransactionId(now, 0).replace(/0+$/, '')
+    const [latest] = await tx.$queryRaw`
+      SELECT transaction_id FROM "Sale"
+      WHERE transaction_id LIKE ${todayPrefix + '%'}
+      ORDER BY LENGTH(transaction_id) DESC, transaction_id DESC
+      LIMIT 1
+    `
+    const lastSequence = latest ? parseInt(latest.transaction_id.slice(todayPrefix.length), 10) : 0
+    const transaction_id = generateTransactionId(now, lastSequence + 1)
 
     // The sale belongs to the cashier's open shift, so the drawer count at close includes it
     const openShift = await tx.shift.findFirst({ where: { user_id: userId, status: 'OPEN' }, select: { id: true } })
@@ -235,8 +243,8 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
     return newSale
   })
 
-  // Concurrent sales can pick the same daily sequence number; each retry re-counts
-  // today's committed sales and so moves on to a free number
+  // Concurrent sales can pick the same daily sequence number; each retry re-reads the highest
+  // number committed today and so moves on to a free one
   const MAX_ATTEMPTS = 5
   let sale
   for (let attempt = 1; !sale; attempt++) {

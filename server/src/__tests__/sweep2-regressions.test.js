@@ -53,6 +53,14 @@ describe('Sales', () => {
     expect(parseFloat(res.body.data.payment.amount_paid)).toBe(10)
   })
 
+  it('does not reuse a transaction number after one of today\'s sales is removed', async () => {
+    const first = await sell(cashier, { items: [{ product_id: product.id, quantity: 1 }], payment_method: 'CASH', amount_paid: 10 })
+    await sell(cashier, { items: [{ product_id: product.id, quantity: 1 }], payment_method: 'CASH', amount_paid: 10 })
+    await prisma.sale.delete({ where: { id: first.body.data.id } })
+    const next = await sell(cashier, { items: [{ product_id: product.id, quantity: 1 }], payment_method: 'CASH', amount_paid: 10 })
+    expect(next.status).toBe(201)
+  })
+
   it('rounds half a pesewa of tax up', async () => {
     const cheap = await prisma.product.create({
       data: { name: 'Sweep2Test Cheap', sku: 'SWEEP2TEST-2', category_id: category.id, price: 8.04, quantity: 10 },

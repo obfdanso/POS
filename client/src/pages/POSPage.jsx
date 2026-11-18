@@ -7,7 +7,7 @@ import { customersService } from '../services/customers'
 import { shiftsService } from '../services/shifts'
 import { OpenShiftModal, CloseShiftModal } from '../components/ShiftModals'
 import { formatCurrency } from '../utils/formatCurrency'
-import { lineTotal, round2, calculateTotals } from '../utils/saleTotals'
+import { lineTotal, round2, calculateTotals, maxRedeemablePoints } from '../utils/saleTotals'
 import { Button } from '../components/Button'
 import { Input } from '../components/Input'
 import { Modal } from '../components/Modal'
@@ -371,7 +371,7 @@ export default function POSPage() {
   const { user } = useAuth()
   const { loyalty_points_rate, currency_symbol, refreshSettings, require_open_shift } = useSettings()
   const fmt = (v) => formatCurrency(v, currency_symbol || 'GH₵')
-  const { items, cartDiscount, customer, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, clearCart, syncItems } = useCart()
+  const { items, cartDiscount, customer, redeemPoints, maxPoints, pointValue, pointsDiscount, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, setRedeemPoints, clearCart, syncItems } = useCart()
 
   const [searchQuery, setSearchQuery] = useState('')
   const [products, setProducts] = useState([])
@@ -581,7 +581,14 @@ export default function POSPage() {
         toast.error(`Only ${shortItem.quantity_available} ${shortItem.name} left in stock — update the cart`)
         return false
       }
-      const latest = calculateTotals(refreshed, cartDiscount, parseFloat(latestSettings.tax_rate) || 0)
+      // Points are re-valued at the latest point value, capped the same way the cart caps them
+      const latestPointValue = parseFloat(latestSettings.loyalty_point_value) || 0
+      const refreshedSubtotal = calculateTotals(refreshed, 0, 0).subtotal
+      const latestPoints = Math.min(
+        redeemPoints,
+        maxRedeemablePoints(refreshedSubtotal, Math.min(cartDiscount || 0, refreshedSubtotal), customer?.loyalty_points, latestPointValue)
+      )
+      const latest = calculateTotals(refreshed, cartDiscount, parseFloat(latestSettings.tax_rate) || 0, round2(latestPoints * latestPointValue))
       if (latest.total !== total) {
         toast.error(`Prices or tax changed. The new total is ${formatCurrency(latest.total, currency_symbol)} — confirm again to charge it`)
         return false
@@ -606,6 +613,7 @@ export default function POSPage() {
         payment_method,
         amount_paid,
         discount_amount: cartDiscount || 0,
+        ...(customer && redeemPoints > 0 ? { redeem_points: redeemPoints } : {}),
         ...(reference ? { reference } : {}),
       }
       const res = await salesService.create(payload)
@@ -899,6 +907,34 @@ export default function POSPage() {
             </button>
           )}
 
+          {/* Loyalty points redemption, when the store has turned it on */}
+          {customer && pointValue > 0 && (customer.loyalty_points ?? 0) > 0 && (
+            <div className="flex items-center gap-3">
+              <label htmlFor="redeem-points" className="text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">Use Points</label>
+              <input
+                id="redeem-points"
+                type="number"
+                min={0}
+                max={maxPoints}
+                step="1"
+                value={redeemPoints || ''}
+                onChange={(e) => setRedeemPoints(Math.min(parseInt(e.target.value, 10) || 0, maxPoints))}
+                placeholder="0"
+                disabled={maxPoints === 0}
+                className="flex-1 min-w-0 text-right border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg py-1.5 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
+              />
+              <button
+                type="button"
+                onClick={() => setRedeemPoints(redeemPoints === maxPoints ? 0 : maxPoints)}
+                disabled={maxPoints === 0}
+                title={`Each point is worth ${fmt(pointValue)}`}
+                className="text-xs font-semibold text-primary-600 dark:text-primary-400 hover:underline disabled:opacity-50 disabled:no-underline whitespace-nowrap"
+              >
+                {redeemPoints > 0 && redeemPoints === maxPoints ? 'None' : `Max (${maxPoints})`}
+              </button>
+            </div>
+          )}
+
           {/* Cart discount */}
           <div className="flex items-center gap-3">
             <label htmlFor="cart-discount" className="text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">Cart Discount</label>
@@ -924,6 +960,12 @@ export default function POSPage() {
             <div className="flex justify-between text-sm text-danger-600">
               <span>Discount</span>
               <span>-{fmt(cartDiscount)}</span>
+            </div>
+          )}
+          {pointsDiscount > 0 && (
+            <div className="flex justify-between text-sm text-danger-600">
+              <span>Points ({redeemPoints} pts)</span>
+              <span>-{fmt(pointsDiscount)}</span>
             </div>
           )}
           {taxRate > 0 && (

@@ -182,19 +182,21 @@ function CustomerModal({ isOpen, onClose, onSelect }) {
   }, [isOpen])
 
   useEffect(() => {
-    if (!query.trim()) { setResults([]); return }
+    if (!query.trim()) { setResults([]); setIsLoading(false); return }
+    // Drop responses for an older query or a closed modal so the wrong customer can't be picked
+    let cancelled = false
     const id = setTimeout(async () => {
       setIsLoading(true)
       try {
         const res = await customersService.list({ search: query, per_page: 10 })
-        setResults(res.data?.data || [])
+        if (!cancelled) setResults(res.data?.data || [])
       } catch {
-        setResults([])
+        if (!cancelled) setResults([])
       } finally {
-        setIsLoading(false)
+        if (!cancelled) setIsLoading(false)
       }
     }, 300)
-    return () => clearTimeout(id)
+    return () => { cancelled = true; clearTimeout(id) }
   }, [query])
 
   return (

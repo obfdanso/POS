@@ -1,12 +1,7 @@
-import toast from 'react-hot-toast'
 import { Button } from './Button'
 import { useSettings } from '../context/SettingsContext'
 import { formatCurrency } from '../utils/formatCurrency'
-
-// Escape text before writing it into the print window's HTML
-function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
-}
+import { escapeHtml, printDocument, RECEIPT_STYLES } from '../utils/print'
 
 function formatMethod(method) {
   return method?.replace('_', ' ') ?? ''
@@ -37,15 +32,7 @@ function buildReceiptHtml(sale, settings, fmt) {
 <head>
   <meta charset="utf-8">
   <title>Receipt ${esc(transaction_id)}</title>
-  <style>
-    @page { size: 80mm auto; margin: 0; }
-    body { font-family: monospace; font-size: 12px; width: 72mm; margin: 0 auto; padding: 4mm; color: #000; }
-    table { width: 100%; border-collapse: collapse; }
-    th { text-align: left; }
-    .center { text-align: center; }
-    .bold { font-weight: bold; }
-    .dashed { border-top: 1px dashed #000; margin: 6px 0; }
-    .row { display: flex; justify-content: space-between; margin: 2px 0; }
+  <style>${RECEIPT_STYLES}
   </style>
 </head>
 <body>
@@ -116,17 +103,8 @@ export function Receipt({ sale, onClose, actions }) {
   const cartDiscount = Math.round((parseFloat(discount_amount) - pointsDiscount) * 100) / 100
 
   function handlePrint() {
-    const win = window.open('', '_blank', 'width=420,height=640')
-    if (!win) {
-      toast.error('Allow pop-ups for this site to print receipts')
-      return
-    }
     // Every user-provided value in the template is escaped by buildReceiptHtml
-    win.document.write(buildReceiptHtml(sale, settings, fmt))
-    win.document.close()
-    win.focus()
-    win.addEventListener('afterprint', () => win.close())
-    win.print()
+    printDocument(buildReceiptHtml(sale, settings, fmt))
   }
 
   return (

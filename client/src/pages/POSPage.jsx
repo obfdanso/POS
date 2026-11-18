@@ -296,6 +296,37 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
   )
 }
 
+// ─── Variant Picker ────────────────────────────────────────────────────────────
+// A product with sizes or flavours: the main product and each active variant are separate options
+function VariantPicker({ product, onClose, onPick, fmt }) {
+  const options = product ? [product, ...(product.variants || [])] : []
+  return (
+    <Modal isOpen={Boolean(product)} onClose={onClose} title={product ? `Choose ${product.name}` : ''} size="sm">
+      <div className="grid grid-cols-2 gap-2">
+        {options.map((option, index) => (
+          <button
+            key={option.id}
+            type="button"
+            onClick={() => onPick(option)}
+            disabled={option.quantity === 0}
+            autoFocus={index === 0}
+            className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 text-left transition hover:border-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{option.variant_name || option.name}</p>
+            <p className="text-xs text-gray-400 truncate">{option.sku}</p>
+            <div className="mt-1 flex items-center justify-between">
+              <span className="text-sm font-bold text-primary-600">{fmt(option.price)}</span>
+              <span className={`text-xs ${option.quantity === 0 ? 'text-danger-600' : 'text-gray-500 dark:text-gray-400'}`}>
+                {option.quantity === 0 ? 'Out' : `${option.quantity} left`}
+              </span>
+            </div>
+          </button>
+        ))}
+      </div>
+    </Modal>
+  )
+}
+
 // ─── Customer Search Modal ─────────────────────────────────────────────────────
 function CustomerModal({ isOpen, onClose, onSelect }) {
   const [query, setQuery] = useState('')
@@ -468,6 +499,8 @@ export default function POSPage() {
   const [categories, setCategories] = useState([])
   const [activeCategory, setActiveCategory] = useState('')
   const [showPaymentModal, setShowPaymentModal] = useState(false)
+  // The product whose sizes or flavours are being offered, or null
+  const [choosingVariant, setChoosingVariant] = useState(null)
   const [showReceiptModal, setShowReceiptModal] = useState(false)
   const [showCustomerModal, setShowCustomerModal] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
@@ -629,7 +662,9 @@ export default function POSPage() {
     const id = setTimeout(async () => {
       try {
         const params = { per_page: query ? 20 : 40 }
+        // Browsing shows one card per product with its variants; a search finds each variant directly
         if (query) params.search = query
+        else params.group_variants = true
         if (activeCategory) params.category_id = activeCategory
         const res = await productsService.list(params)
         if (!cancelled) setProducts(res.data?.data || [])
@@ -643,8 +678,18 @@ export default function POSPage() {
   }, [searchQuery, activeCategory])
 
   function handleAddProduct(product) {
+    if (product.variants?.length > 0) {
+      setChoosingVariant(product)
+      return
+    }
     tryAddProduct(product)
     setSearchQuery('')
+    searchRef.current?.focus()
+  }
+
+  function handlePickVariant(option) {
+    setChoosingVariant(null)
+    tryAddProduct(option)
     searchRef.current?.focus()
   }
 
@@ -722,10 +767,11 @@ export default function POSPage() {
       setShowReceiptModal(true)
       clearCart()
       // Reflect the sold quantities in the visible grid
-      setProducts((prev) => prev.map((p) => {
+      const afterSale = (p) => {
         const sold = sale.items?.find((i) => i.product_id === p.id)
         return sold ? { ...p, quantity: p.quantity - sold.quantity } : p
-      }))
+      }
+      setProducts((prev) => prev.map((p) => ({ ...afterSale(p), ...(p.variants && { variants: p.variants.map(afterSale) }) })))
 
       // Track in sessionStorage so the cashier dashboard shows this session's sales only
       try {
@@ -885,7 +931,7 @@ export default function POSPage() {
                 <button
                   key={product.id}
                   onClick={() => handleAddProduct(product)}
-                  disabled={product.quantity === 0}
+                  disabled={product.variants?.length > 0 ? [product, ...product.variants].every((o) => o.quantity === 0) : product.quantity === 0}
                   className="bg-white dark:bg-gray-900 rounded-xl p-3 text-left shadow-sm border border-gray-100 dark:border-gray-800 transition hover:shadow-md hover:border-primary-300 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {product.image_url ? (
@@ -909,12 +955,21 @@ export default function POSPage() {
                       )
                     })()}
                   </p>
-                  <div className="flex items-center justify-between mt-1">
-                    <span className="text-sm font-bold text-primary-600">{fmt(product.price)}</span>
-                    <Badge variant={product.quantity === 0 ? 'danger' : product.quantity <= product.low_stock_threshold ? 'warning' : 'success'}>
-                      {product.quantity === 0 ? 'Out' : `${product.quantity}`}
-                    </Badge>
-                  </div>
+                  {product.variants?.length > 0 ? (
+                    <div className="flex items-center justify-between mt-1">
+                      <span className="text-sm font-bold text-primary-600">
+                        from {fmt(Math.min(...[product, ...product.variants].map((o) => Number(o.price))))}
+                      </span>
+                      <Badge variant="primary">{product.variants.length + 1} options</Badge>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between mt-1">
+                      <span className="text-sm font-bold text-primary-600">{fmt(product.price)}</span>
+                      <Badge variant={product.quantity === 0 ? 'danger' : product.quantity <= product.low_stock_threshold ? 'warning' : 'success'}>
+                        {product.quantity === 0 ? 'Out' : `${product.quantity}`}
+                      </Badge>
+                    </div>
+                  )}
                 </button>
               ))}
             </div>
@@ -1120,6 +1175,13 @@ export default function POSPage() {
           onClosed={() => setCurrentShift(null)}
         />
       )}
+      <VariantPicker
+        product={choosingVariant}
+        onClose={() => { setChoosingVariant(null); searchRef.current?.focus() }}
+        onPick={handlePickVariant}
+        fmt={fmt}
+      />
+
       {/* Mounted only while open so each payment starts with fresh state */}
       {showPaymentModal && (
       <PaymentModal

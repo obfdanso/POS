@@ -34,3 +34,13 @@ createRoot(document.getElementById('root')).render(
     </BrowserRouter>
   </StrictMode>
 )
+
+// Installable app with screens that load offline. Production only: in development the service
+// worker's cache would serve stale code over Vite's hot reload
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      // Not supported here (e.g. plain HTTP on a non-local address); the app works the same without it
+    })
+  })
+}

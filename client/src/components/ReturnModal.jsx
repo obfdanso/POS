@@ -120,10 +120,10 @@ export function ReturnModal({ sale, onClose, onDone }) {
             Each item is refunded at its share of what the customer paid, after any discount.{' '}
             {cashBack
               ? <>Pay back {formatCurrency(cashBack.cash)} in cash from your open shift&apos;s drawer.
-                  {cashBack.other > 0 && <> The {formatCurrency(cashBack.other)} paid by {splitOtherMethods(sale)} goes back through Paystack; follow it under the sale.</>}</>
+                  {cashBack.other > 0 && <> The {formatCurrency(cashBack.other)} paid by {splitOtherMethods(sale)} is refunded through Paystack; check under the sale that it was sent.</>}</>
               : sale.payment_method === 'CASH'
                 ? <>Pay it back in cash; the system records it and takes it out of your open shift&apos;s drawer.</>
-                : <>It goes back to the customer&apos;s {method} through Paystack; follow it under the sale.</>}
+                : <>It is refunded to the customer&apos;s {method} through Paystack; check under the sale that it was sent.</>}
           </p>
         </div>
 

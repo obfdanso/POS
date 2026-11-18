@@ -1,16 +1,15 @@
 import { createContext, useReducer, useContext, useCallback, useMemo } from 'react'
 import { useSettings } from './SettingsContext'
-import { calculateTotals, maxRedeemablePoints, round2 } from '../utils/saleTotals'
+import { applyPromotions, calculateTotals, maxRedeemablePoints, round2 } from '../utils/saleTotals'
 
 export const CartContext = createContext(null)
 
-// Discounts can't exceed what they apply to; re-check them whenever quantities change
+// Discounts can't exceed what they apply to (a line's discount comes off what is left after its
+// promotion); re-check them whenever quantities, prices or promotions change
 function clampDiscounts(state) {
-  const items = state.items.map((i) => {
-    const lineGross = round2(parseFloat(i.price) * i.quantity)
-    return i.discount > lineGross ? { ...i, discount: lineGross } : i
-  })
-  const { subtotal } = calculateTotals(items, 0, 0)
+  const priced = applyPromotions(state.items, state.promotions)
+  const items = state.items.map((i, index) => (i.discount > priced[index].discount ? { ...i, discount: priced[index].discount } : i))
+  const { subtotal } = calculateTotals(priced, 0, 0)
   return { ...state, items, cartDiscount: Math.min(state.cartDiscount || 0, subtotal) }
 }
 
@@ -67,8 +66,11 @@ function cartReducer(state, action) {
       return { ...state, customer: action.payload, redeemPoints: 0 }
     case 'SET_REDEEM_POINTS':
       return { ...state, redeemPoints: action.payload }
+    case 'SET_PROMOTIONS':
+      return clampDiscounts({ ...state, promotions: action.payload })
     case 'CLEAR_CART':
-      return initialState
+      // Promotions belong to the store, not the sale, so they stay loaded
+      return { ...initialState, promotions: state.promotions }
     default:
       return state
   }
@@ -79,6 +81,8 @@ const initialState = {
   cartDiscount: 0,
   customer: null,
   redeemPoints: 0,
+  // Running promotions (GET /promotions/active), applied to every line automatically
+  promotions: [],
 }
 
 export function CartProvider({ children }) {
@@ -87,14 +91,16 @@ export function CartProvider({ children }) {
 
   const taxRate = parseFloat(tax_rate) || 0
   const pointValue = parseFloat(loyalty_point_value) || 0
+  // Lines priced with their promotions; `discount` on each stays the cashier's own discount
+  const pricedItems = useMemo(() => applyPromotions(state.items, state.promotions), [state.items, state.promotions])
   // The requested points, capped by the balance and by what is left to pay as the cart changes
-  const cartSubtotal = calculateTotals(state.items, 0, 0).subtotal
+  const cartSubtotal = calculateTotals(pricedItems, 0, 0).subtotal
   const maxPoints = state.customer
     ? maxRedeemablePoints(cartSubtotal, Math.min(state.cartDiscount || 0, cartSubtotal), state.customer.loyalty_points, pointValue)
     : 0
   const redeemPoints = Math.min(state.redeemPoints, maxPoints)
   const { subtotal, taxAmount, total, pointsDiscount } = calculateTotals(
-    state.items,
+    pricedItems,
     state.cartDiscount,
     taxRate,
     round2(redeemPoints * pointValue)
@@ -102,7 +108,10 @@ export function CartProvider({ children }) {
 
   // Stable callbacks: POS keyboard/scanner listeners depend on them
   const addItem = useCallback((product) => {
-    dispatch({ type: 'ADD_ITEM', payload: { product_id: product.id, name: product.name, price: product.price, sku: product.sku, quantity_available: product.quantity } })
+    dispatch({
+      type: 'ADD_ITEM',
+      payload: { product_id: product.id, category_id: product.category_id, name: product.name, price: product.price, sku: product.sku, quantity_available: product.quantity },
+    })
   }, [])
   const removeItem = useCallback((product_id) => dispatch({ type: 'REMOVE_ITEM', payload: product_id }), [])
   const updateQuantity = useCallback((product_id, quantity) => dispatch({ type: 'UPDATE_QUANTITY', payload: { product_id, quantity } }), [])
@@ -112,10 +121,11 @@ export function CartProvider({ children }) {
   const setRedeemPoints = useCallback((points) => dispatch({ type: 'SET_REDEEM_POINTS', payload: Math.max(0, Math.floor(points) || 0) }), [])
   const clearCart = useCallback(() => dispatch({ type: 'CLEAR_CART' }), [])
   const syncItems = useCallback((updates) => dispatch({ type: 'SYNC_ITEMS', payload: updates }), [])
+  const setPromotions = useCallback((promotions) => dispatch({ type: 'SET_PROMOTIONS', payload: promotions }), [])
 
   const value = useMemo(
-    () => ({ ...state, redeemPoints, maxPoints, pointValue, pointsDiscount, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, setRedeemPoints, clearCart, syncItems }),
-    [state, redeemPoints, maxPoints, pointValue, pointsDiscount, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, setRedeemPoints, clearCart, syncItems]
+    () => ({ ...state, items: pricedItems, redeemPoints, maxPoints, pointValue, pointsDiscount, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, setRedeemPoints, clearCart, syncItems, setPromotions }),
+    [state, pricedItems, redeemPoints, maxPoints, pointValue, pointsDiscount, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, setRedeemPoints, clearCart, syncItems, setPromotions]
   )
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>

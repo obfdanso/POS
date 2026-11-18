@@ -38,6 +38,8 @@ Every endpoint except `POST /auth/login` and `POST /auth/refresh` needs an acces
 ```
 `details` lists the fields at fault. It's present for validation errors and for conflicts on a single field, such as a duplicate SKU.
 
+**Request IDs.** Every response has an `X-Request-Id` header (a well-formed incoming `X-Request-Id`, up to 64 letters, digits, `.`, `_` or `-`, is reused). It appears in every log line for that request, and unexpected `500` errors include it as `error.request_id`, so a reported error can be matched to its log entry.
+
 ### Validation rules that apply everywhere
 
 - **Unexpected body fields are rejected.** A `POST`/`PUT` body may contain only the fields documented for that endpoint. Anything else returns `422` with `details: [{ "field": "<name>", "message": "Unexpected field \"<name>\"" }]`.
@@ -214,6 +216,9 @@ The full sale with `items`, `payment`, cashier, and customer. Cashiers can only 
 ### GET /sales/:id/receipt
 Receipt data for reprinting: `{ "store": { "name", "address", "phone" }, "sale": { … } }`.
 
+### POST /sales/:id/email-receipt
+Emails the receipt (HTML with a plain-text version) through the SMTP server in the environment. **Body:** `{ "email": "optional" }`; without it the receipt goes to the customer's email on file. Cashiers can only email their own sales (`403`). `422` when there is no address or it isn't valid; `503` (`EMAIL_NOT_CONFIGURED`) when `SMTP_HOST`/`MAIL_FROM` aren't set; `502` (`EMAIL_FAILED`) when the mail server refuses it. Limited to 10 per minute per user. Each send is written to the audit log (`RECEIPT_EMAILED`).
+
 ### POST /sales/:id/refund — ADMIN, MANAGER
 Returns some or all of a sale. **Body (all optional):**
 ```json
@@ -351,7 +356,10 @@ One shift with its `summary`. Cashiers can only view their own (`403`).
 ## Health
 
 ### GET /health
-`{ "data": { "status": "ok", "timestamp": "…" } }`. No auth required.
+`{ "data": { "status": "ok", "timestamp": "…" } }`. No auth required. Answers whenever the process is up.
+
+### GET /health/ready
+Checks the database too: `200` with `{ "status": "ready", "database": "ok", "database_ms", "uptime_s" }`, or `503` (`SERVICE_UNAVAILABLE`) when the database can't be reached. No auth required. Docker Compose uses it as the API container's healthcheck.
 
 ---
 

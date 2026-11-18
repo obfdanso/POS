@@ -119,10 +119,11 @@ export function ReturnModal({ sale, onClose, onDone }) {
           <p className="text-xs text-gray-500 dark:text-gray-400">
             Each item is refunded at its share of what the customer paid, after any discount.{' '}
             {cashBack
-              ? <>Pay back {formatCurrency(cashBack.cash)} in cash{cashBack.other > 0 && <> and {formatCurrency(cashBack.other)} by {splitOtherMethods(sale)}</>} yourself;
-                  the system records it and takes the cash out of your open shift&apos;s drawer.</>
-              : <>Pay it back via {method} yourself;
-                  the system records it{sale.payment_method === 'CASH' ? ' and takes it out of your open shift\'s drawer' : ''}.</>}
+              ? <>Pay back {formatCurrency(cashBack.cash)} in cash from your open shift&apos;s drawer.
+                  {cashBack.other > 0 && <> The {formatCurrency(cashBack.other)} paid by {splitOtherMethods(sale)} goes back through Paystack; follow it under the sale.</>}</>
+              : sale.payment_method === 'CASH'
+                ? <>Pay it back in cash; the system records it and takes it out of your open shift&apos;s drawer.</>
+                : <>It goes back to the customer&apos;s {method} through Paystack; follow it under the sale.</>}
           </p>
         </div>
 

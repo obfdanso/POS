@@ -61,6 +61,7 @@ export function buildRefundReceiptHtml(sale, refund, settings, fmt) {
     ? `<div class="row"><span>In cash:</span><span>${fmt(refund.cash_amount)}</span></div>
   ${parseFloat(refund.amount) > parseFloat(refund.cash_amount) ? `<div class="row"><span>By ${esc(splitOtherMethods(sale))}:</span><span>${fmt(parseFloat(refund.amount) - parseFloat(refund.cash_amount))}</span></div>` : ''}`
     : `<div class="row"><span>Paid back by:</span><span>${esc(method)}</span></div>`}
+  ${refund.gateway_status && refund.gateway_status !== 'NOT_SENT' ? '<div class="center" style="margin-top:4px;">Card and Mobile Money refunds can take a few days to arrive.</div>' : ''}
   ${isLast ? `<div class="row"><span>Sale total refunded:</span><span>${fmt(sale.refunded_amount)} of ${fmt(sale.total_amount)}</span></div>` : ''}
   <div class="dashed"></div>
   <div class="center">Customer signature</div>

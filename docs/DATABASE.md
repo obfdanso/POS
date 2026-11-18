@@ -12,7 +12,7 @@
 | Enum | Values |
 |---|---|
 | `Role` | `ADMIN`, `MANAGER`, `CASHIER` |
-| `PaymentMethod` | `CASH`, `MOBILE_MONEY`, `CARD` |
+| `PaymentMethod` | `CASH`, `MOBILE_MONEY`, `CARD`, `SPLIT` (sales and refunds only; a `CHECK` keeps it off `Payment` rows) |
 | `PaymentStatus` | `COMPLETED`, `PARTIALLY_REFUNDED`, `REFUNDED`, `PENDING` |
 | `ShiftStatus` | `OPEN`, `CLOSED` |
 | `PurchaseOrderStatus` | `ORDERED`, `PARTIALLY_RECEIVED`, `RECEIVED`, `CANCELLED` |
@@ -126,6 +126,7 @@ One return against a sale.
 | `shift_id` | UUID FK? | → that user's open shift, `ON DELETE SET NULL`. Cash refunds come out of its drawer. Indexed |
 | `amount` | Decimal(10,2) | Money paid back, `CHECK >= 0` |
 | `method` | PaymentMethod | The sale's payment method |
+| `cash_amount` | Decimal(10,2) | The part paid back in cash from the drawer: all of a cash refund, cash first on a split sale. `CHECK` between 0 and `amount` |
 | `reason` | String | Why the items came back |
 
 ### RefundItem

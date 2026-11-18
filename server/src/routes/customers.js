@@ -27,7 +27,7 @@ function customerValidation({ nameRequired }) {
 
 router.get(
   '/',
-  [...paginationRules, ...sortRules(Object.keys(CUSTOMER_SORTS)), query('search').optional().trim()],
+  [...paginationRules, ...sortRules(Object.keys(CUSTOMER_SORTS)), query('search').optional().isString().withMessage('Search must be text').trim().isLength({ max: 100 })],
   validate,
   customerController.listCustomers
 )

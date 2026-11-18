@@ -65,6 +65,7 @@ function listProductsValidation() {
   return [
     query('page').optional().isInt({ min: 1 }).withMessage('Page must be >= 1'),
     query('per_page').optional().isInt({ min: 1, max: 100 }).withMessage('Per page must be 1-100'),
+    query('search').optional().isString().withMessage('Search must be text').trim().isLength({ max: 100 }),
     query('category_id').optional().isUUID().withMessage('Invalid category ID'),
     query('status').optional().isIn(['active', 'inactive', 'all']).withMessage('Status must be active, inactive, or all'),
     ...sortRules(Object.keys(PRODUCT_SORTS)),

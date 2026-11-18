@@ -19,7 +19,7 @@ router.get(
     ...paginationRules,
     ...sortRules(Object.keys(INVENTORY_SORTS)),
     query('status').optional().isIn(['out']).withMessage('Status must be "out"'),
-    query('search').optional().trim(),
+    query('search').optional().isString().withMessage('Search must be text').trim().isLength({ max: 100 }),
   ],
   validate,
   inventoryController.listInventory

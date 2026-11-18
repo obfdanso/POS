@@ -51,7 +51,7 @@ const listSalesValidation = [
   query('customer_id').optional().isUUID().withMessage('Invalid customer ID'),
   query('payment_status').optional().isIn(['COMPLETED', 'REFUNDED', 'PENDING']).withMessage('Invalid payment status'),
   query('payment_method').optional().isIn(['CASH', 'MOBILE_MONEY', 'CARD']).withMessage('Invalid payment method'),
-  query('search').optional().trim().isLength({ max: 50 }),
+  query('search').optional().isString().withMessage('Search must be text').trim().isLength({ max: 50 }),
   ...sortRules(Object.keys(SALE_SORTS)),
 ]
 

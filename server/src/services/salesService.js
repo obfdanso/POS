@@ -509,6 +509,13 @@ async function processRefund(saleId, userId, { items, reason } = {}) {
       })
     }
 
+    // Give redeemed points back first, so taking back earned points below draws on them rather than
+    // being cut short at a zero balance
+    if (pointsToRestore > 0) {
+      await tx.customer.update({ where: { id: sale.customer_id }, data: { loyalty_points: { increment: pointsToRestore } } })
+      await tx.sale.update({ where: { id: saleId }, data: { loyalty_points_restored: { increment: pointsToRestore } } })
+    }
+
     // Keep only the points the customer is still owed for what they kept, never going below zero
     if (sale.customer_id && sale.loyalty_points_earned > 0) {
       const pointsKept = total > 0 ? Math.floor((sale.loyalty_points_earned * (total - refundedAfter)) / total) : 0
@@ -521,11 +528,6 @@ async function processRefund(saleId, userId, { items, reason } = {}) {
         `
         await tx.sale.update({ where: { id: saleId }, data: { loyalty_points_reversed: { increment: toReverse } } })
       }
-    }
-
-    if (pointsToRestore > 0) {
-      await tx.customer.update({ where: { id: sale.customer_id }, data: { loyalty_points: { increment: pointsToRestore } } })
-      await tx.sale.update({ where: { id: saleId }, data: { loyalty_points_restored: { increment: pointsToRestore } } })
     }
 
     await recordAudit(
@@ -558,7 +560,6 @@ async function getReceiptData(saleId) {
   }
 }
 
-// Half-up to 2 decimals; EPSILON stops values like 1.005 (stored as 1.00499…) rounding down
 function noOpenShiftError() {
   return new ValidationError('No open shift', [{ field: 'shift', message: 'Open a cash drawer shift before making sales' }])
 }
@@ -569,6 +570,7 @@ function notEnoughPointsError(balance) {
   ])
 }
 
+// Half-up to 2 decimals; EPSILON stops values like 1.005 (stored as 1.00499…) rounding down
 function round2(n) {
   return Math.round((n + Number.EPSILON) * 100) / 100
 }

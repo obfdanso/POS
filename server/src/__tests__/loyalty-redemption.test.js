@@ -119,4 +119,15 @@ describe('Redeeming loyalty points at checkout', () => {
     // 300 − 200 spent + floor(10 / 10) earned
     expect(await pointsOf(shopper)).toBe(101)
   })
+
+  it('takes back earned points from restored points when the balance has since been spent', async () => {
+    const regular = await prisma.customer.create({ data: { name: 'RedeemTest Regular', loyalty_points: 100 } })
+    // 50 − 100 points = 40 paid, earning 4: balance 4
+    const res = await sell({ items: cart(), customer_id: regular.id, redeem_points: 100, payment_method: 'CASH', amount_paid: 40 })
+    expect(res.status).toBe(201)
+    await prisma.customer.update({ where: { id: regular.id }, data: { loyalty_points: 0 } }) // spent elsewhere
+    expect((await refund(res.body.data.id, {})).status).toBe(200)
+    // The 100 spent come back, less the 4 earned on goods that were returned
+    expect(await pointsOf(regular)).toBe(96)
+  })
 })

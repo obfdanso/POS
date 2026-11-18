@@ -2,7 +2,7 @@ const crypto = require('crypto')
 const bcrypt = require('bcrypt')
 const jwt = require('jsonwebtoken')
 const prisma = require('../utils/prismaClient')
-const { UnauthorizedError, NotFoundError } = require('../utils/errors')
+const { UnauthorizedError, NotFoundError, ValidationError } = require('../utils/errors')
 
 const MAX_FAILED_ATTEMPTS = 5
 // Locked accounts stay locked until an admin unlocks them (POST /api/users/:id/unlock).
@@ -199,7 +199,12 @@ async function changePassword(userId, currentPassword, newPassword, currentRefre
   if (!user) throw new NotFoundError('User not found')
 
   const valid = await bcrypt.compare(currentPassword, user.password_hash)
-  if (!valid) throw new UnauthorizedError('Current password is incorrect')
+  // 422, not 401: the session is fine, and a 401 would make the client refresh its token and retry
+  if (!valid) {
+    throw new ValidationError('Current password is incorrect', [
+      { field: 'current_password', message: 'Current password is incorrect' },
+    ])
+  }
 
   const password_hash = await bcrypt.hash(newPassword, 12)
   // Sign out every existing session, then hand this device fresh tokens so it stays signed in

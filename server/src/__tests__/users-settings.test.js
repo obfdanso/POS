@@ -123,7 +123,8 @@ describe('Own profile and password', () => {
   it('changes password only with the correct current password', async () => {
     const wrong = await request(app).post('/api/auth/change-password').set(auth(manager))
       .send({ current_password: 'wrong', new_password: 'newpass123' })
-    expect(wrong.status).toBe(401)
+    expect(wrong.status).toBe(422)
+    expect(wrong.body.error.details[0].field).toBe('current_password')
 
     const ok = await request(app).post('/api/auth/change-password').set(auth(manager))
       .send({ current_password: 'testpass123', new_password: 'newpass123' })

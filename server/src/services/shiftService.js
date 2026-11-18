@@ -43,7 +43,9 @@ async function getShiftTotals(shift, db = prisma) {
   const sales_count = Object.values(by_method).reduce((n, m) => n + m.count, 0)
   const sales_total = round2(Object.values(by_method).reduce((sum, m) => sum + m.total, 0))
   const cash_sales = by_method.CASH.total
-  const cash_refunds = 0
+  // Cash paid back to customers from this drawer (refunds processed while this shift was open)
+  const cashRefunds = await db.refund.aggregate({ where: { shift_id: shift.id, method: 'CASH' }, _sum: { amount: true } })
+  const cash_refunds = parseFloat(cashRefunds._sum.amount || 0)
   const expected_cash = round2(parseFloat(shift.opening_float) + cash_sales - cash_refunds)
 
   return { sales_count, sales_total, by_method, cash_sales, cash_refunds, expected_cash }

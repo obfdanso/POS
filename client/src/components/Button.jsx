@@ -18,8 +18,9 @@ export function Button({ children, variant = 'primary', size = 'md', className =
   return (
     <button
       className={`${base} ${variants[variant]} ${sizes[size]} ${className}`}
-      disabled={isLoading || props.disabled}
       {...props}
+      // After the spread, so an explicit disabled={false} can't re-enable a loading button
+      disabled={isLoading || props.disabled}
     >
       {isLoading && (
         <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">

@@ -56,4 +56,9 @@ describe('Button component', () => {
     const svg = document.querySelector('svg.animate-spin')
     expect(svg).not.toBeNull()
   })
+
+  it('stays disabled while loading even when disabled={false} is passed', () => {
+    render(<Button isLoading disabled={false}>Save</Button>)
+    expect(screen.getByRole('button')).toBeDisabled()
+  })
 })

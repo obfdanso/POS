@@ -189,7 +189,8 @@ Processes the whole sale in one database transaction: validate stock, calculate 
 ```
 
 - **Totals:** subtotal = Σ(unit price × qty − item discount). Tax = configured rate × (subtotal − cart discount). Every step is rounded to 2 dp, and the client's cart uses the same arithmetic.
-- **Discounts:** an item discount can't exceed its line total, and the cart discount can't exceed the subtotal.
+- **Promotions:** each line gets the biggest running promotion that applies to its product, its category, or the whole store (on a tie, the most specific). Its share is `round(line gross × percent / 100)`. The item `discount` sent by the till is the cashier's extra discount and comes off what is left. The sale line stores the combined `discount`, plus `promotion_id` and `promotion_discount`.
+- **Discounts:** an item discount can't exceed its line total after any promotion, and the cart discount can't exceed the subtotal.
 - **Loyalty points:** `redeem_points` spends that many of the customer's points at the `loyalty_point_value` setting each, after the cart discount and before tax. It needs a `customer_id`, redemption turned on (point value above 0), enough points, and points worth no more than what is left after discounts; otherwise `422` with a `redeem_points` field error, before any payment verification. The points are deducted in the sale's transaction, so two tills can't spend the same points. The sale records `loyalty_points_redeemed` and `points_discount`, and `discount_amount` includes the points' value.
 - **Limits:** 1–200 items per sale, 1–100,000 units per line, amounts up to GH₵ 1,000,000.
 - **customer_id**, if given, must exist (`422` otherwise). This is checked before any payment verification.
@@ -305,6 +306,49 @@ Every user, with an `is_locked` flag.
 
 ### POST /users/:id/unlock
 Clears the lockout and failed-attempt counter. Recorded in the auth log.
+
+---
+
+## Purchase orders — ADMIN, MANAGER
+
+Stock ordered from a supplier. Each order has a `po_number` (`PO-YYYYMMDD-NNNN`), a `status` (`ORDERED`, `PARTIALLY_RECEIVED`, `RECEIVED`, `CANCELLED`), `total_cost` (Σ quantity × unit cost), and `items` with `quantity_ordered`, `quantity_received` and `quantity_outstanding`. Creating, receiving and cancelling are audited.
+
+### GET /purchase-orders — *sortable*
+**Query:** `page`, `per_page`, `status`, `supplier_id`, `search` (order number), `start_date`, `end_date`, `sort` (`created_at`, `po_number`, `status`, `total_cost`, `expected_at`, `supplier`), `order`. Rows include `item_count`, `units_ordered`, `units_received`.
+
+### GET /purchase-orders/suggestions?supplier_id=
+The supplier's active products at or below their low-stock level, with `suggested_quantity` = twice the threshold minus stock minus anything already on open orders, and the last `unit_cost`.
+
+### GET /purchase-orders/:id
+
+### POST /purchase-orders
+**Body:** `{ "supplier_id", "items": [{ "product_id", "quantity", "unit_cost" }], "expected_at"?, "notes"? }`. Each product once; products must be active.
+
+### POST /purchase-orders/:id/receive
+**Body (all optional):** `{ "items": [{ "item_id", "quantity" }], "update_cost": true, "notes" }`. Adds each quantity to stock with a `RESTOCK` inventory log ("Received on PO-…"). Without `items`, everything outstanding is received. `update_cost` (default `true`) sets each product's cost price to the order's unit cost. The order becomes `PARTIALLY_RECEIVED` or `RECEIVED`. `422` for more than is outstanding, an item from another order, or a closed order. The order row is locked, so the same delivery can't be received twice at once.
+
+### POST /purchase-orders/:id/cancel
+**Body:** `{ "reason"? }`. Only open orders. Goods already received stay in stock.
+
+---
+
+## Promotions
+
+Automatic percentage discounts. `product_id` targets one product, `category_id` every product in a category, neither the whole store. A promotion runs while `is_active` is true, after `starts_at`, and before `ends_at` (if set). Responses include `status`: `ACTIVE`, `SCHEDULED`, `ENDED` or `OFF`.
+
+### GET /promotions/active — any role
+The running promotions (`id`, `name`, `percent_off`, `product_id`, `category_id`, `ends_at`), so the till can price the cart exactly as the server will.
+
+### GET /promotions — ADMIN, MANAGER
+Every promotion with its product or category, `status`, and `times_used` (sale lines it was applied to). **Query:** `status`.
+
+### GET /promotions/:id — ADMIN, MANAGER
+
+### POST /promotions — ADMIN, MANAGER
+**Body:** `{ "name", "percent_off" (0.01–100), "product_id"?, "category_id"?, "starts_at"? (default now), "ends_at"?, "is_active"? }`. Not both `product_id` and `category_id`; `ends_at` must be after `starts_at`.
+
+### PUT /promotions/:id — ADMIN, MANAGER
+Any of the create fields, e.g. `{ "is_active": false }` to switch one off. Past sales keep the discount they got.
 
 ---
 

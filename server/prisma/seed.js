@@ -220,6 +220,7 @@ async function main() {
       { key: 'store_phone', value: '032-204-1234' },
       { key: 'tax_rate', value: String(TAX_RATE) },
       { key: 'loyalty_points_rate', value: String(LOYALTY_RATE) },
+      { key: 'loyalty_point_value', value: '0.10' },
       { key: 'currency_symbol', value: 'GH₵' },
       { key: 'receipt_footer', value: 'Thank you for choosing QuickMart!' },
       { key: 'require_open_shift', value: 'true' },

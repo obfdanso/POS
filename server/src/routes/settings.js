@@ -16,6 +16,8 @@ const DEFAULT_SETTINGS = {
   store_phone: '',
   tax_rate: '0',
   loyalty_points_rate: '10',
+  // Money off per loyalty point at checkout; 0 turns redemption off
+  loyalty_point_value: '0',
   currency_symbol: 'GH₵',
   receipt_footer: 'Thank you for your business!',
   // 'true' makes cashiers open a cash drawer shift before they can sell
@@ -35,6 +37,10 @@ const settingsValidation = [
     .optional()
     .isFloat({ min: 0 })
     .withMessage('Loyalty rate must be 0 or greater'),
+  body('loyalty_point_value')
+    .optional()
+    .isFloat({ min: 0, max: 1000 })
+    .withMessage('Point value must be between 0 and 1000'),
   body('receipt_footer').optional().trim().isLength({ max: 200 }).withMessage('Receipt footer must be 200 characters or less'),
   body('require_open_shift').optional().isIn(['true', 'false', true, false]).withMessage('require_open_shift must be true or false'),
 ]

@@ -14,14 +14,14 @@ router.use(authenticate)
 
 // Built per route: validation chains are mutable, so create and update must not share instances
 function customerValidation({ nameRequired }) {
-  const name = body('name').trim()
+  const name = body('name').isString().withMessage('Name must be text').trim()
   return [
     nameRequired
       ? name.notEmpty().withMessage('Name is required')
       : name.optional().notEmpty().withMessage('Name cannot be empty'),
-    body('phone').optional({ values: 'falsy' }).trim(),
+    body('phone').optional({ values: 'falsy' }).isString().withMessage('Phone must be text').trim(),
     body('email').optional({ values: 'falsy' }).trim().isEmail().withMessage('Valid email required'),
-    body('address').optional({ values: 'falsy' }).trim(),
+    body('address').optional({ values: 'falsy' }).isString().withMessage('Address must be text').trim(),
   ]
 }
 

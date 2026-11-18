@@ -14,6 +14,9 @@ import { usersService } from '../services/users'
 import { formatCurrency } from '../utils/formatCurrency'
 import { daysFromToday } from '../utils/date'
 import { getErrorMessage } from '../utils/apiErrors'
+import { printDocument } from '../utils/print'
+import { buildRefundReceiptHtml } from '../utils/refundReceipt'
+import { useSettings } from '../context/SettingsContext'
 
 const STATUS_BADGE = { COMPLETED: 'success', PARTIALLY_REFUNDED: 'warning', REFUNDED: 'danger', PENDING: 'default' }
 const STATUS_LABEL = { PARTIALLY_REFUNDED: 'PART REFUNDED' }
@@ -30,6 +33,8 @@ function formatDateTime(value) {
 function SaleDetailModal({ saleId, onClose, onRefunded }) {
   const [sale, setSale] = useState(null)
   const [isReturning, setIsReturning] = useState(false)
+  const settings = useSettings()
+  const fmt = (v) => formatCurrency(v, settings.currency_symbol || 'GH₵')
 
   useEffect(() => {
     salesService.get(saleId)
@@ -69,13 +74,22 @@ function SaleDetailModal({ saleId, onClose, onRefunded }) {
           {sale.refunds?.length > 0 && (
             <div className="rounded-lg border border-warning-100 bg-warning-50 dark:bg-warning-900/20 px-4 py-3">
               <p className="text-sm font-semibold text-warning-700 dark:text-warning-400 mb-1">
-                Refunded {formatCurrency(sale.refunded_amount)} of {formatCurrency(sale.total_amount)}
+                Refunded {fmt(sale.refunded_amount)} of {fmt(sale.total_amount)}
               </p>
               <ul className="space-y-1 text-xs text-gray-600 dark:text-gray-300">
                 {sale.refunds.map((r) => (
-                  <li key={r.id}>
-                    {formatDateTime(r.created_at)} · {formatCurrency(r.amount)} · {r.items.reduce((n, i) => n + i.quantity, 0)} item(s) · {r.reason}
-                    {r.user && <span className="text-gray-400"> · {r.user.full_name}</span>}
+                  <li key={r.id} className="flex items-start justify-between gap-2">
+                    <span>
+                      {formatDateTime(r.created_at)} · {fmt(r.amount)} · {r.items.reduce((n, i) => n + i.quantity, 0)} item(s) · {r.reason}
+                      {r.user && <span className="text-gray-400"> · {r.user.full_name}</span>}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => printDocument(buildRefundReceiptHtml(sale, r, settings, fmt))}
+                      className="flex-shrink-0 font-semibold text-primary-600 dark:text-primary-400 hover:underline"
+                    >
+                      Print slip
+                    </button>
                   </li>
                 ))}
               </ul>

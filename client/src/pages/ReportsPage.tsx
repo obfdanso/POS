@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import {
   ResponsiveContainer,
   BarChart,
@@ -22,10 +22,30 @@ import { formatCurrency } from '../utils/formatCurrency'
 import { useSettings } from '../context/SettingsContext'
 import { daysFromToday } from '../utils/date'
 import { useBranch } from '../hooks/useBranch'
+import { defineColumns } from '../utils/tableColumns'
+import type {
+  BranchPerformanceRow,
+  CashierPerformanceRow,
+  CategoryPerformanceRow,
+  ProfitRow,
+  SalesByDayRow,
+  SalesSummaryReport,
+  TopProductRow,
+} from '../types'
+
+type TabId = 'summary' | 'daily' | 'top-products' | 'category' | 'cashier' | 'profit' | 'branches'
+
+/** A top-product row with its place in the list; older report shapes named its fields name / quantity_sold / revenue */
+type TopProduct = TopProductRow & { rank: number; name?: string; quantity_sold?: number; revenue?: number }
+
+/** A profit row; older report shapes named the product `label` */
+type ProfitReportRow = ProfitRow & { label?: string }
+
+type CsvValue = string | number | null | undefined
 
 const PIE_COLORS = ['#2563EB', '#16A34A', '#D97706', '#DC2626', '#7C3AED', '#0891B2']
 
-const TABS = [
+const TABS: { id: TabId; label: string }[] = [
   { id: 'summary', label: 'Sales Summary' },
   { id: 'daily', label: 'Daily Sales' },
   { id: 'top-products', label: 'Top Products' },
@@ -35,35 +55,35 @@ const TABS = [
 ]
 
 // Report tables sort in the browser: each report is a single, unpaginated result set
-const money = (v) => <span className="font-medium text-gray-900 dark:text-gray-100">{formatCurrency(v ?? 0)}</span>
+const money = (v: number | null | undefined) => <span className="font-medium text-gray-900 dark:text-gray-100">{formatCurrency(v ?? 0)}</span>
 
-const topProductColumns = [
+const topProductColumns = defineColumns<TopProduct>()([
   { key: 'rank', label: '#', render: (_, row) => row.rank },
   { key: 'label', label: 'Product', sortable: true },
   { key: 'quantity', label: 'Qty Sold', sortable: true },
   { key: 'value', label: 'Revenue', sortable: true, render: money },
-]
+])
 
-const categoryColumns = [
+const categoryColumns = defineColumns<CategoryPerformanceRow>()([
   { key: 'label', label: 'Category', sortable: true },
   { key: 'quantity', label: 'Units Sold', sortable: true },
   { key: 'value', label: 'Revenue', sortable: true, render: money },
-]
+])
 
-const branchColumns = [
+const branchColumns = defineColumns<BranchPerformanceRow>()([
   { key: 'label', label: 'Branch', sortable: true },
   { key: 'transactions', label: 'Transactions', sortable: true },
   { key: 'refunds', label: 'Returned', sortable: true, render: money },
   { key: 'value', label: 'Revenue (after returns)', sortable: true, render: money },
-]
+])
 
-const cashierColumns = [
+const cashierColumns = defineColumns<CashierPerformanceRow>()([
   { key: 'label', label: 'Cashier', sortable: true },
   { key: 'transactions', label: 'Transactions', sortable: true },
   { key: 'value', label: 'Total Revenue', sortable: true, render: money },
-]
+])
 
-const profitColumns = [
+const profitColumns = defineColumns<ProfitReportRow>()([
   { key: 'name', label: 'Product', sortable: true },
   { key: 'revenue', label: 'Revenue', sortable: true, render: money },
   { key: 'cost', label: 'Cost', sortable: true, render: money },
@@ -76,7 +96,7 @@ const profitColumns = [
     ),
   },
   { key: 'margin', label: 'Margin %', sortable: true, render: (v) => (v != null ? `${v.toFixed(1)}%` : '—') },
-]
+])
 
 function Spinner() {
   return (
@@ -89,7 +109,12 @@ function Spinner() {
   )
 }
 
-function KpiCard({ label, value }) {
+export interface KpiCardProps {
+  label: string
+  value: ReactNode
+}
+
+function KpiCard({ label, value }: KpiCardProps) {
   return (
     <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl p-5 shadow-sm">
       <p className="text-sm text-gray-500 dark:text-gray-400">{label}</p>
@@ -100,14 +125,14 @@ function KpiCard({ label, value }) {
 
 // Numbers pass through; text is quoted with inner quotes doubled, and text a spreadsheet
 // would run as a formula (= + - @, tab, CR) is prefixed with an apostrophe
-function csvCell(value) {
+function csvCell(value: CsvValue) {
   if (typeof value === 'number') return String(value)
   let text = String(value ?? '')
   if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`
   return `"${text.replace(/"/g, '""')}"`
 }
 
-function exportCsv(filename, headers, rows) {
+function exportCsv(filename: string, headers: string[], rows: CsvValue[][]) {
   const csvContent = [headers, ...rows].map((r) => r.map(csvCell).join(',')).join('\n')
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
   const url = window.URL.createObjectURL(blob)
@@ -122,25 +147,25 @@ export default function ReportsPage() {
   const { currency_symbol } = useSettings()
   // Comparing branches only makes sense when an admin is looking at all of them
   const { isAllBranches } = useBranch()
-  const tabs = isAllBranches ? [...TABS, { id: 'branches', label: 'Branches' }] : TABS
-  const [branchData, setBranchData] = useState([])
-  const [activeTab, setActiveTab] = useState('summary')
+  const tabs: typeof TABS = isAllBranches ? [...TABS, { id: 'branches', label: 'Branches' }] : TABS
+  const [branchData, setBranchData] = useState<BranchPerformanceRow[]>([])
+  const [activeTab, setActiveTab] = useState<TabId>('summary')
   // Defaults to the last 30 days on every visit
   const [startDate, setStartDate] = useState(() => daysFromToday(-29))
   const [endDate, setEndDate] = useState(() => daysFromToday(0))
   const [loading, setLoading] = useState(false)
 
-  const [summaryData, setSummaryData] = useState(null)
-  const [dailyData, setDailyData] = useState([])
-  const [topData, setTopData] = useState([])
-  const [catData, setCatData] = useState([])
-  const [cashierData, setCashierData] = useState([])
-  const [profitData, setProfitData] = useState([])
+  const [summaryData, setSummaryData] = useState<SalesSummaryReport | null>(null)
+  const [dailyData, setDailyData] = useState<SalesByDayRow[]>([])
+  const [topData, setTopData] = useState<TopProduct[]>([])
+  const [catData, setCatData] = useState<CategoryPerformanceRow[]>([])
+  const [cashierData, setCashierData] = useState<CashierPerformanceRow[]>([])
+  const [profitData, setProfitData] = useState<ProfitReportRow[]>([])
   // Only the newest request may update the page, so quick date edits or tab switches can't show stale data
   const latestRequest = useRef(0)
 
   const fetchTab = useCallback(
-    async (tab) => {
+    async (tab: TabId) => {
       if (!startDate || !endDate) return
       const requestId = ++latestRequest.current
       const isStale = () => requestId !== latestRequest.current
@@ -150,11 +175,11 @@ export default function ReportsPage() {
         if (tab === 'summary') {
           const res = await reportsService.salesSummary(params)
           if (isStale()) return
-          setSummaryData(res.data?.data ?? res.data)
+          setSummaryData(res.data?.data ?? null)
         } else if (tab === 'daily') {
           const res = await reportsService.salesByDay(params)
           if (isStale()) return
-          setDailyData(res.data?.data ?? res.data ?? [])
+          setDailyData(res.data?.data ?? [])
         } else if (tab === 'top-products') {
           const res = await reportsService.topProducts({ ...params, limit: 50 })
           if (isStale()) return
@@ -162,11 +187,11 @@ export default function ReportsPage() {
         } else if (tab === 'category') {
           const res = await reportsService.categoryPerformance(params)
           if (isStale()) return
-          setCatData(res.data?.data ?? res.data ?? [])
+          setCatData(res.data?.data ?? [])
         } else if (tab === 'cashier') {
           const res = await reportsService.cashierPerformance(params)
           if (isStale()) return
-          setCashierData(res.data?.data ?? res.data ?? [])
+          setCashierData(res.data?.data ?? [])
         } else if (tab === 'branches') {
           const res = await reportsService.branchPerformance(params)
           if (isStale()) return
@@ -174,7 +199,7 @@ export default function ReportsPage() {
         } else if (tab === 'profit') {
           const res = await reportsService.profit(params)
           if (isStale()) return
-          setProfitData(res.data?.data ?? res.data ?? [])
+          setProfitData(res.data?.data ?? [])
         }
       } catch (err) {
         if (!isStale()) toast.error(getErrorMessage(err, 'Failed to load report data.'))
@@ -189,7 +214,7 @@ export default function ReportsPage() {
     fetchTab(activeTab)
   }, [activeTab, fetchTab])
 
-  function handleTabChange(tab) {
+  function handleTabChange(tab: TabId) {
     setActiveTab(tab)
   }
 
@@ -350,7 +375,7 @@ export default function ReportsPage() {
                       <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                       <XAxis dataKey="label" tick={{ fontSize: 12 }} tickLine={false} />
                       <YAxis tickFormatter={(v) => `${currency_symbol || 'GH₵'}${v}`} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={72} />
-                      <Tooltip formatter={(v) => [formatCurrency(v), 'Revenue']} />
+                      <Tooltip formatter={(v) => [formatCurrency(String(v)), 'Revenue']} />
                       <Bar dataKey="value" fill="#2563EB" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
@@ -404,7 +429,7 @@ export default function ReportsPage() {
                             <Cell key={index} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                           ))}
                         </Pie>
-                        <Tooltip formatter={(v) => formatCurrency(v)} />
+                        <Tooltip formatter={(v) => formatCurrency(String(v))} />
                         <Legend iconType="circle" iconSize={10} wrapperStyle={{ fontSize: 12 }} />
                       </PieChart>
                     </ResponsiveContainer>
@@ -438,7 +463,7 @@ export default function ReportsPage() {
                         <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                         <XAxis dataKey="code" interval={0} tick={{ fontSize: 12 }} tickLine={false} />
                         <YAxis tickFormatter={(v) => `${currency_symbol || 'GH₵'}${v}`} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={72} />
-                        <Tooltip formatter={(v) => [formatCurrency(v), 'Revenue']} labelFormatter={(code) => branchData.find((b) => b.code === code)?.label ?? code} />
+                        <Tooltip formatter={(v) => [formatCurrency(String(v)), 'Revenue']} labelFormatter={(code) => branchData.find((b) => b.code === code)?.label ?? code} />
                         <Bar dataKey="value" fill="#0d9488" radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>

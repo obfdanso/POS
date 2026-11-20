@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import {
@@ -21,6 +21,10 @@ import { inventoryService } from '../services/inventory'
 import { toISODate, daysFromToday } from '../utils/date'
 import { formatCurrency } from '../utils/formatCurrency'
 import { useSettings } from '../context/SettingsContext'
+import type { BranchPerformanceRow, CategoryPerformanceRow, DashboardReport, Product, SalesByDayRow, TopProductRow } from '../types'
+
+/** A top-product row; older report shapes named its fields name / quantity_sold / revenue */
+type TopProduct = TopProductRow & { name?: string; quantity_sold?: number; revenue?: number }
 
 const PIE_COLORS = ['#0d9488', '#16A34A', '#D97706', '#DC2626', '#7C3AED', '#0891B2']
 
@@ -34,7 +38,15 @@ function SkeletonCard() {
   )
 }
 
-function KpiCard({ title, value, subtitle, icon, color }) {
+export interface KpiCardProps {
+  title: string
+  value: ReactNode
+  subtitle?: string
+  icon: ReactNode
+  color: string
+}
+
+function KpiCard({ title, value, subtitle, icon, color }: KpiCardProps) {
   return (
     <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 border border-gray-100 dark:border-gray-800 shadow-sm flex items-start gap-4">
       <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${color}`}>
@@ -52,25 +64,25 @@ function KpiCard({ title, value, subtitle, icon, color }) {
 export default function DashboardPage() {
   const { currency_symbol } = useSettings()
   const { isAllBranches, currentBranch } = useBranch()
-  const [branchToday, setBranchToday] = useState([])
+  const [branchToday, setBranchToday] = useState<BranchPerformanceRow[]>([])
   const today = toISODate()
   const sevenDaysAgo = daysFromToday(-6)
 
-  const [summary, setSummary] = useState(null)
-  const [dailySales, setDailySales] = useState([])
-  const [topProducts, setTopProducts] = useState([])
-  const [categories, setCategories] = useState([])
-  const [lowStockItems, setLowStockItems] = useState([])
+  const [summary, setSummary] = useState<DashboardReport | null>(null)
+  const [dailySales, setDailySales] = useState<SalesByDayRow[]>([])
+  const [topProducts, setTopProducts] = useState<TopProduct[]>([])
+  const [categories, setCategories] = useState<CategoryPerformanceRow[]>([])
+  const [lowStockItems, setLowStockItems] = useState<Product[]>([])
 
   const [loadingSummary, setLoadingSummary] = useState(true)
   const [loadingCharts, setLoadingCharts] = useState(true)
   const [loadingInventory, setLoadingInventory] = useState(true)
-  const [error, setError] = useState(null)
+  const [error, setError] = useState<string | null>(null)
 
   // Today's KPIs: revenue, transaction count, and low-stock alert count
   useEffect(() => {
     reportsService.dashboard()
-      .then((res) => setSummary(res.data?.data))
+      .then((res) => setSummary(res.data?.data ?? null))
       .catch(() => setError('Failed to load summary data.'))
       .finally(() => setLoadingSummary(false))
   }, [])
@@ -204,7 +216,7 @@ export default function DashboardPage() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
                 <XAxis dataKey="label" tick={{ fontSize: 12 }} tickLine={false} />
                 <YAxis tickFormatter={(v) => `${currency_symbol || 'GH₵'}${v}`} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={70} />
-                <Tooltip formatter={(v) => [formatCurrency(v), 'Revenue']} />
+                <Tooltip formatter={(v) => [formatCurrency(String(v)), 'Revenue']} />
                 <Line type="monotone" dataKey="value" stroke="#0d9488" strokeWidth={2.5} dot={{ r: 4 }} activeDot={{ r: 6 }} />
               </LineChart>
             </ResponsiveContainer>
@@ -271,7 +283,7 @@ export default function DashboardPage() {
                       <Cell key={index} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(v) => formatCurrency(v)} />
+                  <Tooltip formatter={(v) => formatCurrency(String(v))} />
                   <Legend iconType="circle" iconSize={10} wrapperStyle={{ fontSize: 11 }} />
                 </PieChart>
               </ResponsiveContainer>

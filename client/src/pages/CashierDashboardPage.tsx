@@ -1,21 +1,47 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
 import { DashboardLayout } from '../layouts/DashboardLayout'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 import { formatCurrency } from '../utils/formatCurrency'
+import type { ApiSuccess, Money, PaymentMethod } from '../types'
 
-function formatTime(dateStr) {
+/** `GET /reports/cashier-stats`: the signed-in cashier's takings today */
+interface CashierStats {
+  sales_count: number
+  total_revenue: number
+  items_sold: number
+  average_sale: number
+}
+
+/** A sale the POS screen recorded in sessionStorage ('pos_session_sales') */
+interface SessionSale {
+  id: string
+  transaction_id: string
+  created_at: string
+  customer_name: string | null
+  payment_method: PaymentMethod
+  total_amount: Money
+}
+
+function formatTime(dateStr: string) {
   return new Date(dateStr).toLocaleTimeString('en-GH', { hour: '2-digit', minute: '2-digit' })
 }
 
-const methodBadge = {
+const methodBadge: Record<PaymentMethod, string> = {
   CASH: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
   MOBILE_MONEY: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
   CARD: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
   SPLIT: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
 }
 
-function StatCard({ label, value, sub, icon }) {
+export interface StatCardProps {
+  label: string
+  value: ReactNode
+  sub?: string
+  icon: ReactNode
+}
+
+function StatCard({ label, value, sub, icon }: StatCardProps) {
   return (
     <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6 flex items-start gap-4 shadow-sm">
       <div className="w-12 h-12 rounded-full bg-teal-50 dark:bg-teal-900/30 flex items-center justify-center text-teal-600 dark:text-teal-400 flex-shrink-0">
@@ -31,10 +57,10 @@ function StatCard({ label, value, sub, icon }) {
 }
 
 export default function CashierDashboardPage() {
-  const [stats, setStats] = useState(null)
+  const [stats, setStats] = useState<CashierStats | null>(null)
   const [loading, setLoading] = useState(true)
   // Sales made during this browser session only
-  const [sessionSales] = useState(() => {
+  const [sessionSales] = useState<SessionSale[]>(() => {
     try {
       return JSON.parse(sessionStorage.getItem('pos_session_sales') || '[]')
     } catch {
@@ -43,7 +69,7 @@ export default function CashierDashboardPage() {
   })
 
   useEffect(() => {
-    api.get('/reports/cashier-stats')
+    api.get<ApiSuccess<CashierStats>>('/reports/cashier-stats')
       .then((res) => setStats(res.data.data))
       .catch(() => toast.error("Failed to load today's stats"))
       .finally(() => setLoading(false))

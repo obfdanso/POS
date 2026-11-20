@@ -13,20 +13,28 @@ import { usersService } from '../services/users'
 import { formatCurrency } from '../utils/formatCurrency'
 import { daysFromToday } from '../utils/date'
 import { getErrorMessage } from '../utils/apiErrors'
+import { defineColumns, type TableColumn, type TableSort } from '../utils/tableColumns'
+import type { PaginationMeta, QueryParams, Shift, ShiftWithSummary, User } from '../types'
 import { useBranch } from '../hooks/useBranch'
 
 const selectClass =
   'block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
 
-function formatDateTime(value) {
+function formatDateTime(value: string | null | undefined) {
   return value
     ? new Date(value).toLocaleString('en-GH', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
     : '—'
 }
 
 // Shows a shift's takings and drawer count; managers can close a shift a cashier left open
-function ShiftDetailModal({ shiftId, onClose, onChanged }) {
-  const [shift, setShift] = useState(null)
+export interface ShiftDetailModalProps {
+  shiftId: string
+  onClose: () => void
+  onChanged: () => void
+}
+
+function ShiftDetailModal({ shiftId, onClose, onChanged }: ShiftDetailModalProps) {
+  const [shift, setShift] = useState<ShiftWithSummary | null>(null)
   const [isClosing, setIsClosing] = useState(false)
 
   useEffect(() => {
@@ -52,7 +60,7 @@ function ShiftDetailModal({ shiftId, onClose, onChanged }) {
   }
 
   return (
-    <Modal isOpen onClose={onClose} title={shift ? `Shift · ${shift.user.full_name}` : 'Shift'} size="sm">
+    <Modal isOpen onClose={onClose} title={shift ? `Shift · ${shift.user?.full_name}` : 'Shift'} size="sm">
       {!shift ? (
         <div className="space-y-2 py-2">
           {[0, 1, 2, 3].map((i) => <div key={i} className="h-4 bg-gray-100 dark:bg-gray-800 rounded animate-pulse" />)}
@@ -70,7 +78,7 @@ function ShiftDetailModal({ shiftId, onClose, onChanged }) {
                 {shift.status === 'OPEN' ? <Badge variant="success">Open</Badge> : formatDateTime(shift.closed_at)}
               </p>
             </div>
-            {shift.closed_by && shift.closed_by.id !== shift.user.id && (
+            {shift.closed_by && shift.closed_by.id !== shift.user?.id && (
               <div className="col-span-2">
                 <p className="text-xs text-gray-400">Closed by</p>
                 <p className="text-gray-800 dark:text-gray-200">{shift.closed_by.full_name}</p>
@@ -105,19 +113,19 @@ function ShiftDetailModal({ shiftId, onClose, onChanged }) {
 
 export default function ShiftsPage() {
   const { isAllBranches } = useBranch()
-  const [shifts, setShifts] = useState([])
-  const [meta, setMeta] = useState({ page: 1, total_pages: 1, total: 0 })
+  const [shifts, setShifts] = useState<Shift[]>([])
+  const [meta, setMeta] = useState<Pick<PaginationMeta, 'page' | 'total_pages' | 'total'>>({ page: 1, total_pages: 1, total: 0 })
   const [isLoading, setIsLoading] = useState(true)
   const [page, setPage] = useState(1)
-  const [sort, setSort] = useState({ key: 'opened_at', order: 'desc' })
-  const [staff, setStaff] = useState([])
+  const [sort, setSort] = useState<TableSort>({ key: 'opened_at', order: 'desc' })
+  const [staff, setStaff] = useState<Pick<User, 'id' | 'full_name' | 'role'>[]>([])
   const [filters, setFilters] = useState(() => ({
     start_date: daysFromToday(-29),
     end_date: daysFromToday(0),
     user_id: '',
     status: '',
   }))
-  const [selectedShiftId, setSelectedShiftId] = useState(null)
+  const [selectedShiftId, setSelectedShiftId] = useState<string | null>(null)
   const latestRequest = useRef(0)
 
   useEffect(() => {
@@ -130,7 +138,7 @@ export default function ShiftsPage() {
     const requestId = ++latestRequest.current
     setIsLoading(true)
     try {
-      const params = { page, per_page: 20, sort: sort.key, order: sort.order }
+      const params: QueryParams = { page, per_page: 20, sort: sort.key, order: sort.order }
       for (const [key, value] of Object.entries(filters)) if (value) params[key] = value
       const res = await shiftsService.list(params)
       if (requestId !== latestRequest.current) return
@@ -148,23 +156,26 @@ export default function ShiftsPage() {
     fetchShifts()
   }, [fetchShifts])
 
-  function setFilter(key, value) {
+  function setFilter(key: keyof typeof filters, value: string) {
     setFilters((prev) => ({ ...prev, [key]: value }))
     setPage(1)
   }
 
   const closeDetail = useCallback(() => setSelectedShiftId(null), [])
 
-  const columns = [
-    { key: 'opened_at', label: 'Opened', sortable: true, render: (v) => formatDateTime(v) },
-    ...(isAllBranches ? [{ key: 'branch', label: 'Branch', render: (v) => v?.name ?? '—' }] : []),
-    { key: 'user', label: 'Cashier', sortable: true, sortKey: 'cashier', render: (v) => v?.full_name ?? '—' },
-    { key: 'closed_at', label: 'Closed', sortable: true, render: (v, row) => (row.status === 'OPEN' ? <Badge variant="success">Open</Badge> : formatDateTime(v)) },
-    { key: 'sales_count', label: 'Sales' },
-    { key: 'opening_float', label: 'Float', render: (v) => formatCurrency(v) },
-    { key: 'expected_cash', label: 'Expected', render: (v) => (v == null ? '—' : formatCurrency(v)) },
-    { key: 'counted_cash', label: 'Counted', render: (v) => (v == null ? '—' : formatCurrency(v)) },
-    { key: 'difference', label: 'Over / short', sortable: true, render: (v) => (v == null ? '—' : <CashDifference difference={v} />) },
+  const shiftColumns = defineColumns<Shift>()
+  const columns: TableColumn<Shift>[] = [
+    ...shiftColumns([{ key: 'opened_at', label: 'Opened', sortable: true, render: (v) => formatDateTime(v) }]),
+    ...(isAllBranches ? shiftColumns([{ key: 'branch', label: 'Branch', render: (v) => v?.name ?? '—' }]) : []),
+    ...shiftColumns([
+      { key: 'user', label: 'Cashier', sortable: true, sortKey: 'cashier', render: (v) => v?.full_name ?? '—' },
+      { key: 'closed_at', label: 'Closed', sortable: true, render: (v, row) => (row.status === 'OPEN' ? <Badge variant="success">Open</Badge> : formatDateTime(v)) },
+      { key: 'sales_count', label: 'Sales' },
+      { key: 'opening_float', label: 'Float', render: (v) => formatCurrency(v) },
+      { key: 'expected_cash', label: 'Expected', render: (v) => (v == null ? '—' : formatCurrency(v)) },
+      { key: 'counted_cash', label: 'Counted', render: (v) => (v == null ? '—' : formatCurrency(v)) },
+      { key: 'difference', label: 'Over / short', sortable: true, render: (v) => (v == null ? '—' : <CashDifference difference={v} />) },
+    ]),
   ]
 
   return (

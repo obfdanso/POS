@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, type FormEvent } from 'react'
 import toast from 'react-hot-toast'
 import { DashboardLayout } from '../layouts/DashboardLayout'
 import { Button } from '../components/Button'
@@ -6,7 +6,7 @@ import { Input } from '../components/Input'
 import { Modal } from '../components/Modal'
 import { Table } from '../components/Table'
 import { Pagination } from '../components/Pagination'
-import { Badge } from '../components/Badge'
+import { Badge, type BadgeVariant } from '../components/Badge'
 import { Receipt } from '../components/Receipt'
 import { ReturnModal } from '../components/ReturnModal'
 import { useBranch } from '../hooks/useBranch'
@@ -14,32 +14,41 @@ import { salesService } from '../services/sales'
 import { usersService } from '../services/users'
 import { formatCurrency } from '../utils/formatCurrency'
 import { daysFromToday } from '../utils/date'
-import { getErrorMessage } from '../utils/apiErrors'
+import { errorStatus, getErrorMessage } from '../utils/apiErrors'
 import { printDocument } from '../utils/print'
 import { buildRefundReceiptHtml } from '../utils/refundReceipt'
 import { GATEWAY_STATUS } from '../utils/payments'
 import { useSettings } from '../context/SettingsContext'
+import { defineColumns, type TableColumn, type TableSort } from '../utils/tableColumns'
+import type { MoneyLike, PaginationMeta, PaymentMethod, PaymentStatus, QueryParams, Refund, Sale, User } from '../types'
 
-const STATUS_BADGE = { COMPLETED: 'success', PARTIALLY_REFUNDED: 'warning', REFUNDED: 'danger', PENDING: 'default' }
-const STATUS_LABEL = { PARTIALLY_REFUNDED: 'PART REFUNDED' }
-const METHOD_BADGE = { CASH: 'default', MOBILE_MONEY: 'primary', CARD: 'success', SPLIT: 'warning' }
+const STATUS_BADGE: Record<PaymentStatus, BadgeVariant> = { COMPLETED: 'success', PARTIALLY_REFUNDED: 'warning', REFUNDED: 'danger', PENDING: 'default' }
+const STATUS_LABEL: Partial<Record<PaymentStatus, string>> = { PARTIALLY_REFUNDED: 'PART REFUNDED' }
+const METHOD_BADGE: Record<PaymentMethod, BadgeVariant> = { CASH: 'default', MOBILE_MONEY: 'primary', CARD: 'success', SPLIT: 'warning' }
 
 const selectClass =
   'block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
 
-function formatDateTime(value) {
+function formatDateTime(value: string) {
   return new Date(value).toLocaleString('en-GH', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 // Shows a sale's receipt with reprint, its returns so far, and lets managers/admins return items.
 // `initialSale` is a sale already loaded (one found at another branch by its transaction ID)
-function SaleDetailModal({ saleId, initialSale = null, onClose, onRefunded }) {
-  const [sale, setSale] = useState(initialSale)
+export interface SaleDetailModalProps {
+  saleId?: string
+  initialSale?: Sale | null
+  onClose: () => void
+  onRefunded: () => void
+}
+
+function SaleDetailModal({ saleId, initialSale = null, onClose, onRefunded }: SaleDetailModalProps) {
+  const [sale, setSale] = useState<Sale | null>(initialSale)
   const [isReturning, setIsReturning] = useState(false)
   // The refund being sent to (or checked with) Paystack
-  const [sendingRefundId, setSendingRefundId] = useState(null)
+  const [sendingRefundId, setSendingRefundId] = useState<string | null>(null)
   const settings = useSettings()
-  const fmt = (v) => formatCurrency(v, settings.currency_symbol || 'GH₵')
+  const fmt = (v: MoneyLike | null | undefined) => formatCurrency(v, settings.currency_symbol || 'GH₵')
 
   useEffect(() => {
     if (!saleId) return
@@ -53,15 +62,15 @@ function SaleDetailModal({ saleId, initialSale = null, onClose, onRefunded }) {
 
   const canReturn = sale && ['COMPLETED', 'PARTIALLY_REFUNDED'].includes(sale.payment_status)
 
-  async function sendToPaystack(refund) {
+  async function sendToPaystack(sale: Sale, refund: Refund) {
     setSendingRefundId(refund.id)
     try {
       const res = await salesService.sendRefundToPaystack(sale.id, refund.id)
       const updated = res.data.data
       setSale(updated)
-      const status = updated.refunds.find((r) => r.id === refund.id)?.gateway_status
+      const status = updated.refunds?.find((r) => r.id === refund.id)?.gateway_status
       if (status === 'FAILED') toast.error('Paystack did not accept the refund. See the reason under it.')
-      else toast.success(GATEWAY_STATUS[status]?.label || 'Updated')
+      else toast.success((status && GATEWAY_STATUS[status]?.label) || 'Updated')
     } catch (err) {
       toast.error(getErrorMessage(err, 'Could not reach Paystack'))
     } finally {
@@ -72,7 +81,7 @@ function SaleDetailModal({ saleId, initialSale = null, onClose, onRefunded }) {
   if (isReturning && sale) {
     return (
       <ReturnModal
-        sale={sale}
+        sale={{ ...sale, items: sale.items ?? [] }}
         onClose={() => setIsReturning(false)}
         onDone={(updated) => {
           setSale(updated)
@@ -93,7 +102,7 @@ function SaleDetailModal({ saleId, initialSale = null, onClose, onRefunded }) {
         </div>
       ) : (
         <div className="space-y-4">
-          {sale.refunds?.length > 0 && (
+          {sale.refunds && sale.refunds.length > 0 && (
             <div className="rounded-lg border border-warning-100 bg-warning-50 dark:bg-warning-900/20 px-4 py-3">
               <p className="text-sm font-semibold text-warning-700 dark:text-warning-400 mb-1">
                 Refunded {fmt(sale.refunded_amount)} of {fmt(sale.total_amount)}
@@ -118,7 +127,7 @@ function SaleDetailModal({ saleId, initialSale = null, onClose, onRefunded }) {
                           {GATEWAY_STATUS[r.gateway_status].action && (r.gateway_reference || r.has_gateway_reference) && (
                             <button
                               type="button"
-                              onClick={() => sendToPaystack(r)}
+                              onClick={() => sendToPaystack(sale, r)}
                               disabled={sendingRefundId === r.id}
                               className="font-semibold text-primary-600 dark:text-primary-400 hover:underline disabled:opacity-50"
                             >
@@ -158,14 +167,19 @@ function SaleDetailModal({ saleId, initialSale = null, onClose, onRefunded }) {
 }
 
 // Finds a sale from any branch by the transaction ID on its receipt, so its items can be returned here
-function FindSaleModal({ onClose, onFound }) {
+export interface FindSaleModalProps {
+  onClose: () => void
+  onFound: (sale: Sale) => void
+}
+
+function FindSaleModal({ onClose, onFound }: FindSaleModalProps) {
   const [txn, setTxn] = useState('')
   const [total, setTotal] = useState('')
   const [error, setError] = useState('')
   const [totalError, setTotalError] = useState('')
   const [isFinding, setIsFinding] = useState(false)
 
-  async function handleSubmit(e) {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const value = txn.trim().toUpperCase()
     const amount = Number(total)
@@ -179,7 +193,7 @@ function FindSaleModal({ onClose, onFound }) {
       const res = await salesService.lookup(value, amount)
       onFound(res.data.data)
     } catch (err) {
-      setError(err?.response?.status === 404 ? 'No sale with that transaction ID and total' : getErrorMessage(err, 'Could not look up the sale'))
+      setError(errorStatus(err) === 404 ? 'No sale with that transaction ID and total' : getErrorMessage(err, 'Could not look up the sale'))
     } finally {
       setIsFinding(false)
     }
@@ -206,14 +220,14 @@ function FindSaleModal({ onClose, onFound }) {
 export default function SalesPage() {
   const { isAllBranches } = useBranch()
   const [isFinding, setIsFinding] = useState(false)
-  const [foundSale, setFoundSale] = useState(null)
-  const [sales, setSales] = useState([])
-  const [meta, setMeta] = useState({ page: 1, total_pages: 1, total: 0 })
+  const [foundSale, setFoundSale] = useState<Sale | null>(null)
+  const [sales, setSales] = useState<Sale[]>([])
+  const [meta, setMeta] = useState<Pick<PaginationMeta, 'page' | 'total_pages' | 'total'>>({ page: 1, total_pages: 1, total: 0 })
   const [isLoading, setIsLoading] = useState(true)
-  const [staff, setStaff] = useState([])
+  const [staff, setStaff] = useState<Pick<User, 'id' | 'full_name' | 'role'>[]>([])
 
   const [page, setPage] = useState(1)
-  const [sort, setSort] = useState({ key: 'created_at', order: 'desc' })
+  const [sort, setSort] = useState<TableSort>({ key: 'created_at', order: 'desc' })
   const [filters, setFilters] = useState(() => ({
     start_date: daysFromToday(-29),
     end_date: daysFromToday(0),
@@ -222,7 +236,7 @@ export default function SalesPage() {
     user_id: '',
     search: '',
   }))
-  const [selectedSaleId, setSelectedSaleId] = useState(null)
+  const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null)
 
   useEffect(() => {
     usersService.staff()
@@ -237,7 +251,7 @@ export default function SalesPage() {
     const requestId = ++latestRequest.current
     setIsLoading(true)
     try {
-      const params = { page, per_page: 20, sort: sort.key, order: sort.order }
+      const params: QueryParams = { page, per_page: 20, sort: sort.key, order: sort.order }
       for (const [key, value] of Object.entries(filters)) {
         if (value) params[key] = typeof value === 'string' ? value.trim() : value
       }
@@ -259,57 +273,62 @@ export default function SalesPage() {
     return () => clearTimeout(id)
   }, [fetchSales])
 
-  function setFilter(key, value) {
+  function setFilter(key: keyof typeof filters, value: string) {
     setFilters((prev) => ({ ...prev, [key]: value }))
     setPage(1)
   }
 
-  function handleSortChange(next) {
+  function handleSortChange(next: TableSort) {
     setSort(next)
     setPage(1)
   }
 
   const closeDetail = useCallback(() => setSelectedSaleId(null), [])
 
-  const columns = [
-    { key: 'created_at', label: 'Date', sortable: true, render: (v) => formatDateTime(v) },
-    {
-      key: 'transaction_id',
-      label: 'Transaction',
-      sortable: true,
-      render: (v) => <span className="font-mono text-xs font-medium text-primary-700 dark:text-primary-400">{v}</span>,
-    },
-    ...(isAllBranches ? [{ key: 'branch', label: 'Branch', render: (v) => v?.name ?? '—' }] : []),
-    { key: 'user', label: 'Cashier', sortable: true, sortKey: 'cashier', render: (v) => v?.full_name ?? '—' },
-    {
-      key: 'customer',
-      label: 'Customer',
-      sortable: true,
-      render: (v) => v?.name ?? <span className="text-gray-400 italic">Walk-in</span>,
-    },
-    { key: 'items_count', label: 'Items' },
-    {
-      key: 'payment_method',
-      label: 'Payment',
-      sortable: true,
-      render: (v) => <Badge variant={METHOD_BADGE[v] ?? 'default'}>{v.replace('_', ' ')}</Badge>,
-    },
-    {
-      key: 'total_amount',
-      label: 'Total',
-      sortable: true,
-      render: (v, row) => (
-        <span className={`font-semibold ${row.payment_status === 'REFUNDED' ? 'line-through text-gray-400' : 'text-gray-900 dark:text-gray-100'}`}>
-          {formatCurrency(v)}
-        </span>
-      ),
-    },
-    {
-      key: 'payment_status',
-      label: 'Status',
-      sortable: true,
-      render: (v) => <Badge variant={STATUS_BADGE[v] ?? 'default'}>{STATUS_LABEL[v] ?? v}</Badge>,
-    },
+  const saleColumns = defineColumns<Sale>()
+  const columns: TableColumn<Sale>[] = [
+    ...saleColumns([
+      { key: 'created_at', label: 'Date', sortable: true, render: (v) => formatDateTime(v) },
+      {
+        key: 'transaction_id',
+        label: 'Transaction',
+        sortable: true,
+        render: (v) => <span className="font-mono text-xs font-medium text-primary-700 dark:text-primary-400">{v}</span>,
+      },
+    ]),
+    ...(isAllBranches ? saleColumns([{ key: 'branch', label: 'Branch', render: (v) => v?.name ?? '—' }]) : []),
+    ...saleColumns([
+      { key: 'user', label: 'Cashier', sortable: true, sortKey: 'cashier', render: (v) => v?.full_name ?? '—' },
+      {
+        key: 'customer',
+        label: 'Customer',
+        sortable: true,
+        render: (v) => v?.name ?? <span className="text-gray-400 italic">Walk-in</span>,
+      },
+      { key: 'items_count', label: 'Items' },
+      {
+        key: 'payment_method',
+        label: 'Payment',
+        sortable: true,
+        render: (v) => <Badge variant={METHOD_BADGE[v] ?? 'default'}>{v.replace('_', ' ')}</Badge>,
+      },
+      {
+        key: 'total_amount',
+        label: 'Total',
+        sortable: true,
+        render: (v, row) => (
+          <span className={`font-semibold ${row.payment_status === 'REFUNDED' ? 'line-through text-gray-400' : 'text-gray-900 dark:text-gray-100'}`}>
+            {formatCurrency(v)}
+          </span>
+        ),
+      },
+      {
+        key: 'payment_status',
+        label: 'Status',
+        sortable: true,
+        render: (v) => <Badge variant={STATUS_BADGE[v] ?? 'default'}>{STATUS_LABEL[v] ?? v}</Badge>,
+      },
+    ]),
   ]
 
   return (

@@ -7,25 +7,31 @@ import { formatCurrency } from '../utils/formatCurrency'
 import { toISODate } from '../utils/date'
 import { getErrorMessage } from '../utils/apiErrors'
 import { methodLabel, paymentLines } from '../utils/payments'
+import type { ApiPaginated, ApiSuccess, PaginationMeta, PaymentMethod, Sale } from '../types'
 
-function formatDateTime(dateStr) {
+type DateFilter = 'today' | 'week' | 'month'
+
+/** The sale shown in the detail modal; a list row stands in (`_loading`) until its details arrive */
+type SelectedSale = Sale & { _loading?: boolean }
+
+function formatDateTime(dateStr: string) {
   return new Date(dateStr).toLocaleString('en-GH', { hour: '2-digit', minute: '2-digit' })
 }
 
-const methodBadge = {
+const methodBadge: Record<PaymentMethod, string> = {
   CASH: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
   MOBILE_MONEY: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
   CARD: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
   SPLIT: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
 }
 
-const DATE_FILTERS = [
+const DATE_FILTERS: { label: string; value: DateFilter }[] = [
   { label: 'Today', value: 'today' },
   { label: 'This Week', value: 'week' },
   { label: 'This Month', value: 'month' },
 ]
 
-function getDateRange(filter) {
+function getDateRange(filter: DateFilter) {
   const now = new Date()
   const end = toISODate(now)
   if (filter === 'today') {
@@ -41,24 +47,24 @@ function getDateRange(filter) {
 }
 
 export default function CashierSalesPage() {
-  const [dateFilter, setDateFilter] = useState('today')
-  const [sales, setSales] = useState([])
-  const [meta, setMeta] = useState({ page: 1, total_pages: 1, total: 0 })
+  const [dateFilter, setDateFilter] = useState<DateFilter>('today')
+  const [sales, setSales] = useState<Sale[]>([])
+  const [meta, setMeta] = useState<Pick<PaginationMeta, 'page' | 'total_pages' | 'total'>>({ page: 1, total_pages: 1, total: 0 })
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
-  const [selectedSale, setSelectedSale] = useState(null)
+  const [selectedSale, setSelectedSale] = useState<SelectedSale | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
 
   const latestRequest = useRef(0)
   // The sale whose details are wanted; null once the modal is closed
-  const openSaleId = useRef(null)
+  const openSaleId = useRef<string | null>(null)
   const fetchSales = useCallback(async () => {
     // Only the newest request may update the list; an older one can finish later
     const requestId = ++latestRequest.current
     setLoading(true)
     try {
       const { start_date, end_date } = getDateRange(dateFilter)
-      const res = await api.get('/sales', { params: { start_date, end_date, page, per_page: 15 } })
+      const res = await api.get<ApiPaginated<Sale>>('/sales', { params: { start_date, end_date, page, per_page: 15 } })
       if (requestId !== latestRequest.current) return
       setSales(res.data.data || [])
       setMeta(res.data.meta || { page: 1, total_pages: 1, total: 0 })
@@ -84,12 +90,12 @@ export default function CashierSalesPage() {
     setSelectedSale(null)
   }
 
-  async function openSaleDetail(sale) {
+  async function openSaleDetail(sale: Sale) {
     openSaleId.current = sale.id
     setDetailLoading(true)
     setSelectedSale({ ...sale, _loading: true })
     try {
-      const res = await api.get(`/sales/${sale.id}`)
+      const res = await api.get<ApiSuccess<Sale>>(`/sales/${sale.id}`)
       // Skip if the modal was closed or another sale was opened meanwhile
       if (openSaleId.current !== sale.id) return
       const data = res.data.data

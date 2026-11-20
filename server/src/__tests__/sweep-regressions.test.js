@@ -1,15 +1,15 @@
 // Regression tests for issues found in the codebase sweep
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
-const { app, prisma, request, createUserWithToken, deleteTestUsers } = require('./helpers')
+const { app, prisma, request, createUserWithToken, deleteTestUsers, inTestBranch, testBranch } = require('./helpers')
 const { verifyPaystackPayment } = require('../utils/paystack')
 
 jest.mock('../utils/paystack', () => ({ verifyPaystackPayment: jest.fn() }))
 
 const PREFIX = 'sweeptest'
-const TEST_SETTINGS = { tax_rate: '0', loyalty_points_rate: '10' }
+const TEST_SETTINGS = { tax_rate: '0', loyalty_points_rate: '10', require_open_shift: 'false' }
 let admin, manager, cashier, otherCashier, category, product, customer, originalSettings
 
-const auth = (who) => ({ Authorization: `Bearer ${who.token}` })
+const auth = (who) => who.headers
 const paystackOk = (amountGhs, currency = 'GHS') =>
   verifyPaystackPayment.mockResolvedValueOnce({ status: true, data: { status: 'success', amount: Math.round(amountGhs * 100), currency } })
 const sell = (who, body) => request(app).post('/api/sales').set(auth(who)).send(body)
@@ -27,7 +27,7 @@ beforeAll(async () => {
   otherCashier = await createUserWithToken('CASHIER', `${PREFIX}2`)
   category = await prisma.category.create({ data: { name: 'SweepTest Category' } })
   product = await prisma.product.create({
-    data: { name: 'SweepTest Item', sku: 'SWEEPTEST-1', category_id: category.id, price: 10, cost_price: 6, quantity: 500 },
+    data: { name: 'SweepTest Item', sku: 'SWEEPTEST-1', category_id: category.id, price: 10, cost_price: 6, stocks: inTestBranch(500) },
   })
   customer = await prisma.customer.create({ data: { name: 'SweepTest Customer', loyalty_points: 0 } })
 })
@@ -124,6 +124,7 @@ describe('Reports', () => {
   it('product revenue is after the cart discount, matching the sales summary', async () => {
     await prisma.sale.create({
       data: {
+        branch_id: (await testBranch()).id,
         transaction_id: 'TXN-SWEEPTEST-DISC',
         user_id: cashier.user.id,
         subtotal: 100,

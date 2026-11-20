@@ -5,14 +5,14 @@ jest.mock('../utils/sms', () => {
   return { ...actual, isSmsConfigured: jest.fn(() => true), sendSms: jest.fn(async () => {}) }
 })
 const sms = require('../utils/sms')
-const { app, prisma, request, createUserWithToken, deleteTestUsers } = require('./helpers')
+const { app, prisma, request, createUserWithToken, deleteTestUsers, inTestBranch } = require('./helpers')
 const { buildReceiptSms } = require('../utils/receiptSms')
 
 const PREFIX = 'smstest'
 const TEST_SETTINGS = { tax_rate: '0', require_open_shift: 'false', loyalty_points_rate: '10' }
 let cashier, otherCashier, category, product, customer, sale, walkInSale, originalSettings
 
-const auth = (who) => ({ Authorization: `Bearer ${who.token}` })
+const auth = (who) => who.headers
 const textReceipt = (id, body = {}, who = cashier) => request(app).post(`/api/sales/${id}/sms-receipt`).set(auth(who)).send(body)
 
 beforeAll(async () => {
@@ -24,7 +24,7 @@ beforeAll(async () => {
   otherCashier = await createUserWithToken('CASHIER', `${PREFIX}2`)
   category = await prisma.category.create({ data: { name: 'SmsTest Category' } })
   product = await prisma.product.create({
-    data: { name: 'SmsTest Soap', sku: 'SMSTEST-SOAP', category_id: category.id, price: 12.5, quantity: 50 },
+    data: { name: 'SmsTest Soap', sku: 'SMSTEST-SOAP', category_id: category.id, price: 12.5, stocks: inTestBranch(50) },
   })
   customer = await prisma.customer.create({ data: { name: 'SmsTest Customer', phone: '024-555-0199' } })
   const sell = (body) => request(app).post('/api/sales').set(auth(cashier)).send({ items: [{ product_id: product.id, quantity: 2 }], payment_method: 'CASH', amount_paid: 30, ...body })

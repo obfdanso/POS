@@ -1,15 +1,15 @@
 // Regression tests for issues found in the second codebase sweep
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
-const { app, prisma, request, createUserWithToken, deleteTestUsers } = require('./helpers')
+const { app, prisma, request, createUserWithToken, deleteTestUsers, inTestBranch, testBranch } = require('./helpers')
 const { verifyPaystackPayment } = require('../utils/paystack')
 
 jest.mock('../utils/paystack', () => ({ verifyPaystackPayment: jest.fn() }))
 
 const PREFIX = 'sweep2test'
-const TEST_SETTINGS = { tax_rate: '0', loyalty_points_rate: '10' }
+const TEST_SETTINGS = { tax_rate: '0', loyalty_points_rate: '10', require_open_shift: 'false' }
 let manager, cashier, category, product, originalSettings
 
-const auth = (who) => ({ Authorization: `Bearer ${who.token}` })
+const auth = (who) => who.headers
 const sell = (who, body) => request(app).post('/api/sales').set(auth(who)).send(body)
 const setTaxRate = (value) => prisma.settings.update({ where: { key: 'tax_rate' }, data: { value } })
 
@@ -21,7 +21,7 @@ beforeAll(async () => {
   [manager, cashier] = await Promise.all([createUserWithToken('MANAGER', PREFIX), createUserWithToken('CASHIER', PREFIX)])
   category = await prisma.category.create({ data: { name: 'Sweep2Test Category' } })
   product = await prisma.product.create({
-    data: { name: 'Sweep2Test Item', sku: 'SWEEP2TEST-1', category_id: category.id, price: 10, cost_price: 6, quantity: 500 },
+    data: { name: 'Sweep2Test Item', sku: 'SWEEP2TEST-1', category_id: category.id, price: 10, cost_price: 6, stocks: inTestBranch(500) },
   })
 })
 
@@ -63,7 +63,7 @@ describe('Sales', () => {
 
   it('rounds half a pesewa of tax up', async () => {
     const cheap = await prisma.product.create({
-      data: { name: 'Sweep2Test Cheap', sku: 'SWEEP2TEST-2', category_id: category.id, price: 8.04, quantity: 10 },
+      data: { name: 'Sweep2Test Cheap', sku: 'SWEEP2TEST-2', category_id: category.id, price: 8.04, stocks: inTestBranch(10) },
     })
     await setTaxRate('12.5')
     try {
@@ -82,6 +82,7 @@ describe('Reports', () => {
   it('counts the cost of fully discounted items in profit', async () => {
     await prisma.sale.create({
       data: {
+        branch_id: (await testBranch()).id,
         transaction_id: 'TXN-SWEEP2-0001',
         user_id: cashier.user.id,
         subtotal: 0,

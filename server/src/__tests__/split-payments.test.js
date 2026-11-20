@@ -1,5 +1,5 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
-const { app, prisma, request, createUserWithToken, deleteTestUsers } = require('./helpers')
+const { app, prisma, request, createUserWithToken, deleteTestUsers, inTestBranch } = require('./helpers')
 const { verifyPaystackPayment } = require('../utils/paystack')
 
 jest.mock('../utils/paystack', () => ({ verifyPaystackPayment: jest.fn() }))
@@ -8,7 +8,7 @@ const PREFIX = 'splittest'
 const TEST_SETTINGS = { tax_rate: '0', require_open_shift: 'false' }
 let manager, cashier, category, product, originalSettings
 
-const auth = (who) => ({ Authorization: `Bearer ${who.token}` })
+const auth = (who) => who.headers
 const paystackOk = (amountGhs) =>
   verifyPaystackPayment.mockResolvedValueOnce({ status: true, data: { status: 'success', amount: Math.round(amountGhs * 100), currency: 'GHS' } })
 // Product costs 10.00, so 5 units are 50.00
@@ -26,7 +26,7 @@ beforeAll(async () => {
   cashier = await createUserWithToken('CASHIER', `${PREFIX}2`)
   category = await prisma.category.create({ data: { name: 'SplitTest Category' } })
   product = await prisma.product.create({
-    data: { name: 'SplitTest Item', sku: 'SPLITTEST-1', category_id: category.id, price: 10, quantity: 500 },
+    data: { name: 'SplitTest Item', sku: 'SPLITTEST-1', category_id: category.id, price: 10, stocks: inTestBranch(500) },
   })
 })
 

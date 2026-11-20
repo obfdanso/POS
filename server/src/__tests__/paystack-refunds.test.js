@@ -7,7 +7,7 @@ jest.mock('../utils/paystack', () => {
 })
 const paystack = require('../utils/paystack')
 const { AppError } = require('../utils/errors')
-const { app, prisma, request, createUserWithToken, deleteTestUsers } = require('./helpers')
+const { app, prisma, request, createUserWithToken, deleteTestUsers, inTestBranch } = require('./helpers')
 
 const PREFIX = 'gwrefund'
 const TEST_SETTINGS = { tax_rate: '0', require_open_shift: 'false' }
@@ -15,7 +15,7 @@ const SECRET = 'sk_test_gateway_refunds'
 let manager, cashier, category, product, originalSettings
 const savedEnv = { key: process.env.PAYSTACK_SECRET_KEY, auto: process.env.PAYSTACK_AUTO_REFUND }
 
-const auth = (who) => ({ Authorization: `Bearer ${who.token}` })
+const auth = (who) => who.headers
 let refCounter = 0
 const ref = () => `GW-REF-${Date.now()}-${++refCounter}`
 const paystackOk = (amountGhs) =>
@@ -44,7 +44,7 @@ beforeAll(async () => {
   manager = await createUserWithToken('MANAGER', PREFIX)
   cashier = await createUserWithToken('CASHIER', `${PREFIX}2`)
   category = await prisma.category.create({ data: { name: 'GwRefund Category' } })
-  product = await prisma.product.create({ data: { name: 'GwRefund Item', sku: 'GWREFUND-1', category_id: category.id, price: 10, quantity: 500 } })
+  product = await prisma.product.create({ data: { name: 'GwRefund Item', sku: 'GWREFUND-1', category_id: category.id, price: 10, stocks: inTestBranch(500) } })
 })
 
 afterAll(async () => {

@@ -1,11 +1,11 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
-const { app, prisma, request, createUserWithToken, deleteTestUsers } = require('./helpers')
+const { app, prisma, request, createUserWithToken, deleteTestUsers, inTestBranch } = require('./helpers')
 
 const PREFIX = 'redeemtest'
 const TEST_SETTINGS = { tax_rate: '0', loyalty_points_rate: '10', loyalty_point_value: '0.10', require_open_shift: 'false' }
 let manager, cashier, category, pen, book, customer, originalSettings
 
-const auth = (who) => ({ Authorization: `Bearer ${who.token}` })
+const auth = (who) => who.headers
 const sell = (body) => request(app).post('/api/sales').set(auth(cashier)).send(body)
 const refund = (saleId, body) => request(app).post(`/api/sales/${saleId}/refund`).set(auth(manager)).send(body)
 const lineFor = (sale, product) => sale.items.find((i) => i.product_id === product.id)
@@ -19,8 +19,8 @@ beforeAll(async () => {
   manager = await createUserWithToken('MANAGER', PREFIX)
   cashier = await createUserWithToken('CASHIER', PREFIX)
   category = await prisma.category.create({ data: { name: 'RedeemTest Category' } })
-  pen = await prisma.product.create({ data: { name: 'RedeemTest Pen', sku: 'REDEEMTEST-PEN', category_id: category.id, price: 10, quantity: 200 } })
-  book = await prisma.product.create({ data: { name: 'RedeemTest Book', sku: 'REDEEMTEST-BOOK', category_id: category.id, price: 20, quantity: 200 } })
+  pen = await prisma.product.create({ data: { name: 'RedeemTest Pen', sku: 'REDEEMTEST-PEN', category_id: category.id, price: 10, stocks: inTestBranch(200) } })
+  book = await prisma.product.create({ data: { name: 'RedeemTest Book', sku: 'REDEEMTEST-BOOK', category_id: category.id, price: 20, stocks: inTestBranch(200) } })
   customer = await prisma.customer.create({ data: { name: 'RedeemTest Customer', loyalty_points: 500 } })
 })
 

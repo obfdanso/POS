@@ -1,11 +1,11 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
-const { app, prisma, request, createUserWithToken, deleteTestUsers } = require('./helpers')
+const { app, prisma, request, createUserWithToken, deleteTestUsers, inTestBranch } = require('./helpers')
 
 const PREFIX = 'promotest'
 const TEST_SETTINGS = { tax_rate: '0', loyalty_points_rate: '10', require_open_shift: 'false' }
 let manager, cashier, drinks, snacks, cola, juice, chips, originalSettings
 
-const auth = (who) => ({ Authorization: `Bearer ${who.token}` })
+const auth = (who) => who.headers
 const createPromo = (body, who = manager) => request(app).post('/api/promotions').set(auth(who)).send(body)
 const sell = (items) => request(app).post('/api/sales').set(auth(cashier)).send({ items, payment_method: 'CASH', amount_paid: 10000 })
 const lineFor = (sale, product) => sale.items.find((i) => i.product_id === product.id)
@@ -20,7 +20,7 @@ beforeAll(async () => {
   cashier = await createUserWithToken('CASHIER', PREFIX)
   drinks = await prisma.category.create({ data: { name: 'PromoTest Drinks' } })
   snacks = await prisma.category.create({ data: { name: 'PromoTest Snacks' } })
-  const make = (name, sku, category, price) => prisma.product.create({ data: { name, sku, category_id: category.id, price, quantity: 500 } })
+  const make = (name, sku, category, price) => prisma.product.create({ data: { name, sku, category_id: category.id, price, stocks: inTestBranch(500) } })
   cola = await make('PromoTest Cola', 'PROMOTEST-COLA', drinks, 10)
   juice = await make('PromoTest Juice', 'PROMOTEST-JUICE', drinks, 7.99)
   chips = await make('PromoTest Chips', 'PROMOTEST-CHIPS', snacks, 5)

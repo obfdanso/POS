@@ -1,5 +1,5 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
-const { app, prisma, request, createUserWithToken, deleteTestUsers } = require('./helpers')
+const { app, prisma, request, createUserWithToken, deleteTestUsers, inTestBranch, testBranch } = require('./helpers')
 
 const PREFIX = 'reptest'
 // A quiet date range in the past, so the report totals below come only from this file's data
@@ -10,6 +10,7 @@ async function createSale(n, { day, items, status = 'COMPLETED', user }) {
   const subtotal = items.reduce((sum, i) => sum + i.qty * i.price, 0)
   return prisma.sale.create({
     data: {
+      branch_id: (await testBranch()).id,
       transaction_id: `TXN-REPTEST-${n}`,
       user_id: user.id,
       subtotal,
@@ -30,8 +31,8 @@ beforeAll(async () => {
   [manager, cashier] = await Promise.all([createUserWithToken('MANAGER', PREFIX), createUserWithToken('CASHIER', PREFIX)])
   catA = await prisma.category.create({ data: { name: 'RepTest Writing' } })
   catB = await prisma.category.create({ data: { name: 'RepTest Paper' } })
-  pen = await prisma.product.create({ data: { name: 'RepTest Pen', sku: 'REPTEST-PEN', category_id: catA.id, price: 2, cost_price: 1, quantity: 100 } })
-  book = await prisma.product.create({ data: { name: 'RepTest Book', sku: 'REPTEST-BOOK', category_id: catB.id, price: 10, cost_price: 6, quantity: 100 } })
+  pen = await prisma.product.create({ data: { name: 'RepTest Pen', sku: 'REPTEST-PEN', category_id: catA.id, price: 2, cost_price: 1, stocks: inTestBranch(100) } })
+  book = await prisma.product.create({ data: { name: 'RepTest Book', sku: 'REPTEST-BOOK', category_id: catB.id, price: 10, cost_price: 6, stocks: inTestBranch(100) } })
 
   const mar5 = new Date(2001, 2, 5, 12)
   const mar7 = new Date(2001, 2, 7, 12)
@@ -51,7 +52,7 @@ afterAll(async () => {
   await prisma.$disconnect()
 })
 
-const get = (path, who = manager) => request(app).get(`/api/reports/${path}`).set('Authorization', `Bearer ${who.token}`)
+const get = (path, who = manager) => request(app).get(`/api/reports/${path}`).set(who.headers)
 
 describe('Report endpoints (completed sales only, aggregated in SQL)', () => {
   it('sales-summary', async () => {

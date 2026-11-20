@@ -2,14 +2,14 @@ require('dotenv').config({ path: require('path').join(__dirname, '../../.env') }
 
 jest.mock('../utils/mailer', () => ({ isEmailConfigured: jest.fn(() => true), sendMail: jest.fn(async () => ({})) }))
 const mailer = require('../utils/mailer')
-const { app, prisma, request, createUserWithToken, deleteTestUsers } = require('./helpers')
+const { app, prisma, request, createUserWithToken, deleteTestUsers, inTestBranch } = require('./helpers')
 const { buildReceiptEmail } = require('../utils/receiptEmail')
 
 const PREFIX = 'mailtest'
 const TEST_SETTINGS = { tax_rate: '0', require_open_shift: 'false' }
 let cashier, otherCashier, category, product, customer, sale, walkInSale, originalSettings
 
-const auth = (who) => ({ Authorization: `Bearer ${who.token}` })
+const auth = (who) => who.headers
 const emailReceipt = (id, body = {}, who = cashier) => request(app).post(`/api/sales/${id}/email-receipt`).set(auth(who)).send(body)
 
 beforeAll(async () => {
@@ -21,7 +21,7 @@ beforeAll(async () => {
   otherCashier = await createUserWithToken('CASHIER', `${PREFIX}2`)
   category = await prisma.category.create({ data: { name: 'MailTest Category' } })
   product = await prisma.product.create({
-    data: { name: 'MailTest <b>Bold</b> Soap', sku: 'MAILTEST-SOAP', category_id: category.id, price: 12.5, quantity: 50 },
+    data: { name: 'MailTest <b>Bold</b> Soap', sku: 'MAILTEST-SOAP', category_id: category.id, price: 12.5, stocks: inTestBranch(50) },
   })
   customer = await prisma.customer.create({ data: { name: 'MailTest Customer', email: 'mailtest.customer@example.com' } })
   const sell = (body) => request(app).post('/api/sales').set(auth(cashier)).send({ items: [{ product_id: product.id, quantity: 2 }], payment_method: 'CASH', amount_paid: 30, ...body })

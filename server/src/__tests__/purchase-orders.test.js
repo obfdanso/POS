@@ -1,17 +1,18 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
-const { app, prisma, request, createUserWithToken, deleteTestUsers } = require('./helpers')
+const { app, prisma, request, createUserWithToken, deleteTestUsers, stockAt } = require('./helpers')
 
 const PREFIX = 'potest'
 let manager, cashier, supplier, otherSupplier, category, rice, oil, soap
 
-const auth = (who) => ({ Authorization: `Bearer ${who.token}` })
+const auth = (who) => who.headers
 const api = {
   create: (body, who = manager) => request(app).post('/api/purchase-orders').set(auth(who)).send(body),
   receive: (id, body = {}) => request(app).post(`/api/purchase-orders/${id}/receive`).set(auth(manager)).send(body),
   cancel: (id, body = {}) => request(app).post(`/api/purchase-orders/${id}/cancel`).set(auth(manager)).send(body),
   get: (id) => request(app).get(`/api/purchase-orders/${id}`).set(auth(manager)),
 }
-const product = (id) => prisma.product.findUnique({ where: { id } })
+// A product with its stock at the test branch
+const product = async (id) => ({ ...(await prisma.product.findUnique({ where: { id } })), quantity: await stockAt(id) })
 
 beforeAll(async () => {
   manager = await createUserWithToken('MANAGER', PREFIX)

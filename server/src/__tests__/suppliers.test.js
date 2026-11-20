@@ -21,7 +21,7 @@ afterAll(async () => {
   await prisma.$disconnect()
 })
 
-const auth = (who) => ({ Authorization: `Bearer ${who.token}` })
+const auth = (who) => who.headers
 
 describe('Suppliers', () => {
   let supplierId

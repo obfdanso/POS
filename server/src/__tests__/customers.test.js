@@ -1,5 +1,5 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
-const { app, prisma, request, createUserWithToken, deleteTestUsers } = require('./helpers')
+const { app, prisma, request, createUserWithToken, deleteTestUsers, inTestBranch, testBranch } = require('./helpers')
 
 const PREFIX = 'custtest'
 let manager, cashier, customer, category, product
@@ -10,7 +10,7 @@ beforeAll(async () => {
     data: { name: 'CustTest Ama', phone: '099-000-1001', email: 'custtest.ama@test.local', loyalty_points: 40 },
   })
   category = await prisma.category.create({ data: { name: 'CustTest Category' } })
-  product = await prisma.product.create({ data: { name: 'CustTest Item', sku: 'CUSTTEST-1', category_id: category.id, price: 10, quantity: 50 } })
+  product = await prisma.product.create({ data: { name: 'CustTest Item', sku: 'CUSTTEST-1', category_id: category.id, price: 10, stocks: inTestBranch(50) } })
 
   // Two completed purchases and one refunded, inserted directly so totals are known
   const sales = [
@@ -21,6 +21,7 @@ beforeAll(async () => {
   for (const [i, s] of sales.entries()) {
     await prisma.sale.create({
       data: {
+        branch_id: (await testBranch()).id,
         transaction_id: `TXN-CUSTTEST-${i}`,
         user_id: cashier.user.id,
         customer_id: customer.id,
@@ -45,7 +46,7 @@ afterAll(async () => {
   await prisma.$disconnect()
 })
 
-const auth = (who) => ({ Authorization: `Bearer ${who.token}` })
+const auth = (who) => who.headers
 
 describe('GET /api/customers', () => {
   it('searches by name, phone, or email and includes lifetime spend (refunds excluded)', async () => {

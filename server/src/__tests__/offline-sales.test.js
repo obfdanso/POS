@@ -1,11 +1,11 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
 const crypto = require('crypto')
-const { app, prisma, request, createUserWithToken, deleteTestUsers } = require('./helpers')
+const { app, prisma, request, createUserWithToken, deleteTestUsers, inTestBranch, stockAt } = require('./helpers')
 
 const PREFIX = 'offlinetest'
 const TEST_SETTINGS = { tax_rate: '0', require_open_shift: 'false' }
 let cashier, other, category, product, originalSettings
-const auth = (who) => ({ Authorization: `Bearer ${who.token}` })
+const auth = (who) => who.headers
 const sell = (who, client_ref) => request(app).post('/api/sales').set(auth(who))
   .send({ items: [{ product_id: product.id, quantity: 1 }], payment_method: 'CASH', amount_paid: 10, client_ref })
 
@@ -17,7 +17,7 @@ beforeAll(async () => {
   cashier = await createUserWithToken('CASHIER', PREFIX)
   other = await createUserWithToken('CASHIER', `${PREFIX}2`)
   category = await prisma.category.create({ data: { name: 'OfflineTest Category' } })
-  product = await prisma.product.create({ data: { name: 'OfflineTest Item', sku: 'OFFLINETEST-1', category_id: category.id, price: 10, quantity: 100 } })
+  product = await prisma.product.create({ data: { name: 'OfflineTest Item', sku: 'OFFLINETEST-1', category_id: category.id, price: 10, stocks: inTestBranch(100) } })
 })
 
 afterAll(async () => {
@@ -41,7 +41,7 @@ describe('Resending a sale with client_ref', () => {
     expect([a.status, b.status, c.status]).toEqual([201, 201, 201])
     expect(new Set([a.body.data.id, b.body.data.id, c.body.data.id]).size).toBe(1)
     expect(await prisma.sale.count({ where: { client_ref: ref } })).toBe(1)
-    expect((await prisma.product.findUnique({ where: { id: product.id } })).quantity).toBe(99)
+    expect((await stockAt(product.id))).toBe(99)
   })
 
   it("won't hand one cashier another cashier's sale, and rejects a bad reference", async () => {

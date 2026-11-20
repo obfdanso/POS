@@ -6,7 +6,7 @@ async function listInventory(req, res, next) {
     const per_page = parseInt(req.query.per_page) || 20
     const { search, status } = req.query
 
-    const result = await inventoryService.listInventory({ page, per_page, search, status, sort: req.query.sort, order: req.query.order })
+    const result = await inventoryService.listInventory({ page, per_page, search, status, sort: req.query.sort, order: req.query.order, branchId: req.branchId })
 
     res.json({
       success: true,
@@ -20,7 +20,7 @@ async function listInventory(req, res, next) {
 
 async function getLowStock(req, res, next) {
   try {
-    const items = await inventoryService.getLowStock()
+    const items = await inventoryService.getLowStock(req.branchId)
     res.json({ success: true, data: items })
   } catch (err) {
     next(err)
@@ -35,7 +35,8 @@ async function adjustStock(req, res, next) {
       quantity_change,
       'ADJUSTMENT',
       req.user.id,
-      notes
+      notes,
+      req.branchId
     )
     res.json({ success: true, data: result, message: 'Stock adjusted successfully' })
   } catch (err) {
@@ -46,7 +47,7 @@ async function adjustStock(req, res, next) {
 async function restockProduct(req, res, next) {
   try {
     const { product_id, quantity, notes } = req.body
-    const result = await inventoryService.restockProduct(product_id, quantity, req.user.id, notes)
+    const result = await inventoryService.restockProduct(product_id, quantity, req.user.id, notes, req.branchId)
     res.json({ success: true, data: result, message: 'Product restocked successfully' })
   } catch (err) {
     next(err)
@@ -57,7 +58,7 @@ async function getInventoryLog(req, res, next) {
   try {
     const page = parseInt(req.query.page) || 1
     const per_page = parseInt(req.query.per_page) || 20
-    const result = await inventoryService.getInventoryLog(req.params.productId, { page, per_page })
+    const result = await inventoryService.getInventoryLog(req.params.productId, { page, per_page, branchId: req.branchId })
     res.json({
       success: true,
       data: result.logs,

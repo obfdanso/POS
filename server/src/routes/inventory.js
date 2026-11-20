@@ -2,6 +2,7 @@ const express = require('express')
 const { body, param, query } = require('express-validator')
 const inventoryController = require('../controllers/inventoryController')
 const { authenticate, authorize } = require('../middleware/auth')
+const { requireBranch } = require('../middleware/branch')
 const validate = require('../middleware/validate')
 const exactBody = require('../middleware/exactBody')
 const paginationRules = require('../middleware/pagination')
@@ -34,6 +35,7 @@ router.get('/log/:productId',
 router.post(
   '/adjust',
   authorize(['ADMIN', 'MANAGER']),
+  requireBranch,
   exactBody([
     body('product_id').isUUID().withMessage('Valid product ID required'),
     body('quantity_change')
@@ -50,6 +52,7 @@ router.post(
 router.post(
   '/restock',
   authorize(['ADMIN', 'MANAGER']),
+  requireBranch,
   exactBody([
     body('product_id').isUUID().withMessage('Valid product ID required'),
     body('quantity').isInt({ min: 1, max: 100000 }).withMessage('Quantity must be between 1 and 100000').toInt(),

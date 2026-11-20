@@ -141,4 +141,32 @@ describe('Shifts', () => {
     expect(all.body.data).toHaveLength(1)
     expect(all.body.meta.total).toBe(1)
   })
+
+  it('counts a cash refund by someone with no shift against the sale\'s own open drawer', async () => {
+    const drawer = (await request(app).get('/api/shifts/current').set(auth(otherCashier))).body.data
+    const sale = (await sell(otherCashier, { items: [{ product_id: product.id, quantity: 3 }], payment_method: 'CASH', amount_paid: 30 })).body.data
+    const lineId = sale.items[0].id
+    const giveBack = (who) => request(app).post(`/api/sales/${sale.id}/refund`).set(auth(who)).send({ items: [{ sale_item_id: lineId, quantity: 1 }] })
+
+    expect((await giveBack(manager)).status).toBe(200)
+    const first = await prisma.refund.findFirst({ where: { sale_id: sale.id }, orderBy: { created_at: 'desc' } })
+    expect(first.shift_id).toBe(drawer.id)
+    const current = await request(app).get('/api/shifts/current').set(auth(otherCashier))
+    expect(current.body.data.summary.expected_cash).toBe(20 + 30 - 10)
+
+    await closeShift(otherCashier, drawer.id, { counted_cash: 40 })
+    await setSetting('require_open_shift', 'true')
+    try {
+      const blocked = await giveBack(manager)
+      expect(blocked.status).toBe(422)
+      expect(blocked.body.error.details[0].field).toBe('shift')
+
+      const managerShift = (await openShift(manager, { opening_float: 50 })).body.data
+      expect((await giveBack(manager)).status).toBe(200)
+      const second = await prisma.refund.findFirst({ where: { sale_id: sale.id }, orderBy: { created_at: 'desc' } })
+      expect(second.shift_id).toBe(managerShift.id)
+    } finally {
+      await setSetting('require_open_shift', 'false')
+    }
+  })
 })

@@ -5,20 +5,39 @@
 // row is claimed (NOT_SENT/FAILED → PENDING) before calling Paystack, so it can't be sent twice
 // at once. Paystack refunds take time: it reports progress through its webhook or a status check.
 
-const prisma = require('../utils/prismaClient').default
-const { refundPaystackPayment, fetchPaystackRefund } = require('../utils/paystack')
-const { recordAudit } = require('../utils/audit')
-const { logger } = require('../middleware/logger')
-const { AppError, ConflictError, NotFoundError, ValidationError } = require('../utils/errors')
+import type { GatewayRefundStatus, Payment, PaymentMethod, Prisma, Refund } from '@prisma/client'
+import prisma from '../utils/prismaClient'
+import { refundPaystackPayment, fetchPaystackRefund } from '../utils/paystack'
+import { recordAudit } from '../utils/audit'
+import { logger } from '../middleware/logger'
+import { AppError, ConflictError, NotFoundError, ValidationError } from '../utils/errors'
 
-const PAYSTACK_STATUS = { pending: 'PENDING', processing: 'PROCESSING', processed: 'PROCESSED', failed: 'FAILED' }
+/** The sale fields `planGatewayRefund` reads: how it was paid, and its charges. */
+export interface GatewayRefundSale {
+  payment_method: PaymentMethod
+  payments: Pick<Payment, 'method' | 'reference' | 'amount_paid'>[]
+}
+
+/** The Refund columns for its Paystack part ({} when nothing goes back through Paystack). */
+export type GatewayRefundPlan = Pick<
+  Prisma.RefundUncheckedCreateInput,
+  'gateway_status' | 'gateway_amount' | 'gateway_reference' | 'gateway_error'
+>
+
+/** A Paystack webhook body. It comes from outside, so any field may be missing. */
+export interface RefundWebhookEvent {
+  event?: unknown
+  data?: { id?: unknown; transaction_reference?: unknown; amount?: unknown } | null
+}
+
+const PAYSTACK_STATUS: Partial<Record<string, GatewayRefundStatus>> = { pending: 'PENDING', processing: 'PROCESSING', processed: 'PROCESSED', failed: 'FAILED' }
 
 /** Paystack refunds are sent automatically when a secret key is set, unless turned off. */
-function autoRefundsEnabled() {
+export function autoRefundsEnabled(): boolean {
   return Boolean(process.env.PAYSTACK_SECRET_KEY) && process.env.PAYSTACK_AUTO_REFUND !== 'false'
 }
 
-function round2(n) {
+function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100
 }
 
@@ -27,7 +46,12 @@ function round2(n) {
  * charge it goes back to (one with enough left that earlier refunds haven't claimed). Returns the
  * Refund columns to set, or {} when nothing goes back through Paystack.
  */
-async function planGatewayRefund(tx, sale, amount, cashAmount) {
+export async function planGatewayRefund(
+  tx: Prisma.TransactionClient,
+  sale: GatewayRefundSale,
+  amount: number,
+  cashAmount: number
+): Promise<GatewayRefundPlan> {
   const gatewayAmount = round2(amount - cashAmount)
   if (sale.payment_method === 'CASH' || gatewayAmount <= 0) return {}
 
@@ -36,7 +60,7 @@ async function planGatewayRefund(tx, sale, amount, cashAmount) {
   if (charges.length === 0) return {}
   for (const charge of charges) {
     const claimed = await tx.refund.aggregate({ where: { gateway_reference: charge.reference }, _sum: { gateway_amount: true } })
-    const left = round2(parseFloat(charge.amount_paid) - parseFloat(claimed._sum.gateway_amount || 0))
+    const left = round2(Number(charge.amount_paid) - Number(claimed._sum.gateway_amount ?? 0))
     if (left >= gatewayAmount) {
       return { gateway_status: 'NOT_SENT', gateway_amount: gatewayAmount, gateway_reference: charge.reference }
     }
@@ -52,7 +76,7 @@ async function planGatewayRefund(tx, sale, amount, cashAmount) {
 
 // Paystack's states only move forward (PENDING → PROCESSING → PROCESSED or FAILED), so a late or
 // repeated update can never undo a newer one
-const MOVES_FROM = {
+const MOVES_FROM: Partial<Record<GatewayRefundStatus, GatewayRefundStatus[]>> = {
   PENDING: [],
   PROCESSING: ['PENDING'],
   PROCESSED: ['PENDING', 'PROCESSING'],
@@ -62,10 +86,11 @@ const MOVES_FROM = {
 // A send that never finished (the server stopped mid-call) shows as PENDING with no Paystack id
 const STALE_SEND_MS = 2 * 60 * 1000
 
-async function advanceStatus(refundId, status, extra = {}) {
-  if (!MOVES_FROM[status]?.length) return false
+async function advanceStatus(refundId: string, status: GatewayRefundStatus, extra: Prisma.RefundUpdateManyMutationInput = {}) {
+  const from = MOVES_FROM[status]
+  if (!from?.length) return false
   const { count } = await prisma.refund.updateMany({
-    where: { id: refundId, gateway_status: { in: MOVES_FROM[status] } },
+    where: { id: refundId, gateway_status: { in: from } },
     data: { gateway_status: status, ...extra },
   })
   return count > 0
@@ -75,18 +100,19 @@ async function advanceStatus(refundId, status, extra = {}) {
  * Sends one recorded refund to Paystack. Returns false if it was not waiting to be sent (another
  * request got there first, or it has no charge to go back to).
  */
-async function sendGatewayRefund(refundId, userId) {
+export async function sendGatewayRefund(refundId: string, userId: string): Promise<boolean> {
   const claimed = await prisma.refund.updateMany({
     where: { id: refundId, gateway_status: { in: ['NOT_SENT', 'FAILED'] }, gateway_reference: { not: null } },
     data: { gateway_status: 'PENDING', gateway_error: null },
   })
   if (claimed.count === 0) return false
 
-  const refund = await prisma.refund.findUnique({ where: { id: refundId }, include: { sale: { select: { transaction_id: true } } } })
-  const pesewas = Math.round(parseFloat(refund.gateway_amount) * 100)
-  let outcome
+  // Just claimed above, so it exists, with a reference and an amount
+  const refund = await prisma.refund.findUniqueOrThrow({ where: { id: refundId }, include: { sale: { select: { transaction_id: true } } } })
+  const pesewas = Math.round(Number(refund.gateway_amount) * 100)
+  let outcome: GatewayRefundStatus
   try {
-    const res = await refundPaystackPayment(refund.gateway_reference, pesewas, `Return for ${refund.sale.transaction_id}`)
+    const res = await refundPaystackPayment(refund.gateway_reference ?? '', pesewas, `Return for ${refund.sale.transaction_id}`)
     if (res?.status === true) {
       const paystackId = res.data?.id === undefined || res.data?.id === null ? null : String(res.data.id)
       // Without an id it can't be checked on from here, and must never be sent again by mistake
@@ -96,7 +122,7 @@ async function sendGatewayRefund(refundId, userId) {
           ? { gateway_refund_id: paystackId }
           : { gateway_error: 'Paystack accepted the refund; follow it in the Paystack dashboard' },
       })
-      outcome = PAYSTACK_STATUS[res.data?.status] ?? 'PENDING'
+      outcome = PAYSTACK_STATUS[res.data?.status ?? ''] ?? 'PENDING'
       // A webhook may already have moved it on; only ever go forward
       await advanceStatus(refundId, outcome)
     } else {
@@ -109,7 +135,7 @@ async function sendGatewayRefund(refundId, userId) {
   } catch (err) {
     // Paystack may still have received it, so say to look before trying again
     outcome = 'FAILED'
-    logger.error(`Paystack refund ${refundId} failed: ${err.message}`)
+    logger.error(`Paystack refund ${refundId} failed: ${err instanceof Error ? err.message : String(err)}`)
     await prisma.refund.updateMany({
       where: { id: refundId, gateway_status: 'PENDING', gateway_refund_id: null },
       data: {
@@ -123,15 +149,15 @@ async function sendGatewayRefund(refundId, userId) {
     action: outcome === 'FAILED' ? 'PAYSTACK_REFUND_FAILED' : 'PAYSTACK_REFUND_SENT',
     entity: 'Refund',
     entityId: refundId,
-    details: `${refund.sale.transaction_id}: ${parseFloat(refund.gateway_amount).toFixed(2)} to ${refund.gateway_reference}`,
+    details: `${refund.sale.transaction_id}: ${Number(refund.gateway_amount).toFixed(2)} to ${refund.gateway_reference}`,
   })
   return true
 }
 
 /** Asks Paystack how a sent refund is going and records the answer. */
-async function refreshGatewayRefund(refund) {
+async function refreshGatewayRefund(refund: Pick<Refund, 'id'> & { gateway_refund_id: string }) {
   const res = await fetchPaystackRefund(refund.gateway_refund_id)
-  const status = res?.status === true ? PAYSTACK_STATUS[res.data?.status] : null
+  const status = res?.status === true ? PAYSTACK_STATUS[res.data?.status ?? ''] : null
   if (!status) throw new AppError('Paystack did not return the refund status. Try again shortly.', 502, 'PAYSTACK_ERROR')
   await advanceStatus(refund.id, status, status === 'FAILED' ? { gateway_error: 'Paystack could not complete the refund' } : {})
 }
@@ -139,7 +165,7 @@ async function refreshGatewayRefund(refund) {
 /**
  * The manager's button on a refund: sends it if it hasn't gone (or failed), otherwise checks on it.
  */
-async function sendOrRefreshGatewayRefund(saleId, refundId, userId) {
+export async function sendOrRefreshGatewayRefund(saleId: string, refundId: string, userId: string) {
   const refund = await prisma.refund.findFirst({ where: { id: refundId, sale_id: saleId } })
   if (!refund) throw new NotFoundError('Refund not found')
   if (!refund.gateway_status) {
@@ -149,14 +175,14 @@ async function sendOrRefreshGatewayRefund(saleId, refundId, userId) {
     throw new AppError('Paystack is not set up on this server', 503, 'PAYSTACK_NOT_CONFIGURED')
   }
 
-  if (['NOT_SENT', 'FAILED'].includes(refund.gateway_status)) {
+  if (refund.gateway_status === 'NOT_SENT' || refund.gateway_status === 'FAILED') {
     if (!refund.gateway_reference) {
       throw new ValidationError('Send it from Paystack', [{ field: 'refund', message: refund.gateway_error || 'Send this refund from the Paystack dashboard' }])
     }
     if (!(await sendGatewayRefund(refund.id, userId))) throw new ConflictError('This refund is already being sent')
-  } else if (['PENDING', 'PROCESSING'].includes(refund.gateway_status)) {
+  } else if (refund.gateway_status === 'PENDING' || refund.gateway_status === 'PROCESSING') {
     if (refund.gateway_refund_id) {
-      await refreshGatewayRefund(refund)
+      await refreshGatewayRefund({ id: refund.id, gateway_refund_id: refund.gateway_refund_id })
     } else if (!refund.gateway_error && Date.now() - new Date(refund.updated_at).getTime() > STALE_SEND_MS) {
       // Sending was cut off before Paystack answered: let it be retried, after a look at the dashboard
       await prisma.refund.updateMany({
@@ -175,13 +201,14 @@ async function sendOrRefreshGatewayRefund(saleId, refundId, userId) {
  * when the event has one, otherwise by the charge reference and amount (the oldest open match).
  * Unknown refunds are ignored.
  */
-async function applyRefundWebhook(event) {
+export async function applyRefundWebhook(event: RefundWebhookEvent | null | undefined): Promise<boolean> {
   const name = String(event?.event || '')
   const status = name.startsWith('refund.') ? PAYSTACK_STATUS[name.slice('refund.'.length)] : null
-  const data = event?.data || {}
-  if (!status || !MOVES_FROM[status].length) return false
+  const data: NonNullable<RefundWebhookEvent['data']> = event?.data || {}
+  const from = status ? MOVES_FROM[status] : undefined
+  if (!status || !from?.length) return false
 
-  let match
+  let match: Prisma.RefundWhereInput
   if (data.id !== undefined && data.id !== null) {
     match = { gateway_refund_id: String(data.id) }
   } else if (data.transaction_reference) {
@@ -193,7 +220,7 @@ async function applyRefundWebhook(event) {
     return false
   }
   const refund = await prisma.refund.findFirst({
-    where: { ...match, gateway_status: { in: MOVES_FROM[status] } },
+    where: { ...match, gateway_status: { in: from } },
     orderBy: { created_at: 'asc' },
     select: { id: true },
   })
@@ -201,4 +228,3 @@ async function applyRefundWebhook(event) {
   return advanceStatus(refund.id, status, status === 'FAILED' ? { gateway_error: 'Paystack could not complete the refund' } : {})
 }
 
-module.exports = { autoRefundsEnabled, planGatewayRefund, sendGatewayRefund, sendOrRefreshGatewayRefund, applyRefundWebhook }

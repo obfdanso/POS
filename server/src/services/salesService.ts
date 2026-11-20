@@ -1,25 +1,92 @@
-const prisma = require('../utils/prismaClient').default
-const { buildOrderBy } = require('../middleware/sorting')
-const { NotFoundError, ValidationError, AppError, ConflictError, ForbiddenError } = require('../utils/errors')
-const { recordAudit } = require('../utils/audit')
-const { verifyPaystackPayment } = require('../utils/paystack')
-const { logger } = require('../middleware/logger')
-const generateTransactionId = require('../utils/generateTransactionId').default
-const { buildDateRange } = require('../utils/dateRange')
-const { isEmailConfigured, sendMail } = require('../utils/mailer')
-const { buildReceiptEmail } = require('../utils/receiptEmail')
-const { isSmsConfigured, normalizePhone, isAllowedDestination, sendSms } = require('../utils/sms')
-const { buildReceiptSms } = require('../utils/receiptSms')
-const { activePromotionsFor, bestPromotionFor } = require('./promotionService')
-const { autoRefundsEnabled, planGatewayRefund, sendGatewayRefund } = require('./gatewayRefundService')
-const { changeStock, branchStockFor } = require('../utils/branchStock')
+import { Prisma, type PaymentMethod, type PaymentStatus, type Refund, type Sale } from '@prisma/client'
+import prisma from '../utils/prismaClient'
+import { buildOrderBy, type SortDirection } from '../middleware/sorting'
+import { NotFoundError, ValidationError, AppError, ConflictError, ForbiddenError } from '../utils/errors'
+import { recordAudit } from '../utils/audit'
+import { verifyPaystackPayment, type PaystackResponse, type PaystackTransaction } from '../utils/paystack'
+import { logger } from '../middleware/logger'
+import generateTransactionId from '../utils/generateTransactionId'
+import { buildDateRange } from '../utils/dateRange'
+import { isEmailConfigured, sendMail } from '../utils/mailer'
+import { buildReceiptEmail } from '../utils/receiptEmail'
+import { isSmsConfigured, normalizePhone, isAllowedDestination, sendSms } from '../utils/sms'
+import { buildReceiptSms } from '../utils/receiptSms'
+import { activePromotionsFor, bestPromotionFor } from './promotionService'
+import { autoRefundsEnabled, planGatewayRefund, sendGatewayRefund } from './gatewayRefundService'
+import { changeStock, branchStockFor } from '../utils/branchStock'
+import type { AuthUser } from '../types/express'
+
+/** One line of a new sale, as validated by the sales route. */
+export interface SaleItemInput {
+  product_id: string
+  quantity: number
+  discount?: number | string | null
+}
+
+/** One part of a split payment. */
+export interface PaymentPartInput {
+  method: PaymentMethod
+  amount: number
+  reference?: string | null
+}
+
+/** The body of POST /api/sales, as validated by the sales route. */
+export interface SaleInput {
+  items: SaleItemInput[]
+  customer_id?: string | null
+  payment_method: PaymentMethod
+  amount_paid?: number | string
+  discount_amount?: number | string
+  redeem_points?: number | string
+  notes?: string | null
+  reference?: string | null
+  payments?: PaymentPartInput[]
+  client_ref?: string | null
+}
+
+/** A Payment row to create for a sale (its sale_id is added when the sale exists). */
+interface PaymentRow {
+  method: PaymentMethod
+  amount_paid: number
+  change_given: number
+  reference: string | null
+}
+
+const SALE_INCLUDE = {
+  user: { select: { id: true, username: true, full_name: true } },
+  branch: { select: { id: true, name: true, code: true, address: true, phone: true } },
+  customer: { select: { id: true, name: true, phone: true, email: true } },
+  sale_items: {
+    include: {
+      product: { select: { id: true, name: true, sku: true } },
+      promotion: { select: { id: true, name: true, percent_off: true } },
+    },
+  },
+  // Enum order puts cash first
+  payments: { orderBy: { method: 'asc' } },
+  refunds: {
+    include: {
+      user: { select: { id: true, full_name: true } },
+      branch: { select: { id: true, name: true, code: true, address: true, phone: true } },
+      items: { select: { sale_item_id: true, quantity: true, amount: true, restocked: true } },
+    },
+    orderBy: { created_at: 'asc' },
+  },
+} satisfies Prisma.SaleInclude
+
+/** A sale with everything a sale page or receipt shows (see getSaleById). */
+export type SaleDetail = Prisma.SaleGetPayload<{ include: typeof SALE_INCLUDE }>
 
 // The user's open drawer at this branch; a shift open at another branch doesn't count here
-const openShiftAt = (db, userId, branchId) =>
+const openShiftAt = (db: Prisma.TransactionClient, userId: string, branchId: string) =>
   db.shift.findFirst({ where: { user_id: userId, status: 'OPEN', branch_id: branchId }, select: { id: true } })
 
 /** A sale at `branchId`: its stock is checked and deducted, and the sale is recorded there. */
-async function createSale({ items, customer_id, payment_method, amount_paid, discount_amount = 0, redeem_points = 0, notes, reference, payments, client_ref }, user, branchId) {
+export async function createSale(
+  { items, customer_id, payment_method, amount_paid, discount_amount = 0, redeem_points = 0, notes, reference, payments, client_ref }: SaleInput,
+  user: AuthUser | string,
+  branchId: string
+) {
   // Support legacy callers that pass userId as a string
   const userId = typeof user === 'string' ? user : user.id
 
@@ -76,7 +143,7 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
   }
 
   // Loyalty points spent as money off; checked here, before any card charge, and again inside the transaction
-  const pointsToRedeem = parseInt(redeem_points, 10) || 0
+  const pointsToRedeem = parseInt(String(redeem_points), 10) || 0
   const pointValue = pointsToRedeem > 0 ? await getNumericSetting('loyalty_point_value', 0) : 0
   if (pointsToRedeem > 0) {
     if (!customer_id) {
@@ -97,11 +164,13 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
   let subtotal = 0
   const saleItems = items.map((item) => {
     const product = productMap.get(item.product_id)
-    const unit_price = parseFloat(product.price)
+    // Checked above
+    if (!product) throw new NotFoundError(`Product ${item.product_id} not found or inactive`)
+    const unit_price = Number(product.price)
     const lineGross = round2(unit_price * item.quantity)
     const promotion = bestPromotionFor(product, promotions)
     const promotionDiscount = promotion ? round2((lineGross * Number(promotion.percent_off)) / 100) : 0
-    const manualDiscount = round2(parseFloat(item.discount || 0))
+    const manualDiscount = round2(parseFloat(String(item.discount || 0)))
     const discountable = round2(lineGross - promotionDiscount)
     if (manualDiscount > discountable) {
       throw new ValidationError('Invalid discount', [
@@ -129,7 +198,7 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
     }
   })
 
-  const discountAmt = round2(parseFloat(discount_amount) || 0)
+  const discountAmt = round2(parseFloat(String(discount_amount)) || 0)
   if (discountAmt > subtotal) {
     throw new ValidationError('Invalid discount', [
       { field: 'discount_amount', message: `Discount cannot exceed the subtotal (${subtotal.toFixed(2)})` },
@@ -150,7 +219,11 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
 
   // Work out the payment rows, then check every card and Mobile Money part with Paystack
   const paymentRows = planPayments({ payment_method, amount_paid, reference, payments }, totalAmount)
-  await Promise.all(paymentRows.filter((r) => r.reference).map((row) => verifyCharge(row.reference, row.amount_paid)))
+  await Promise.all(
+    paymentRows
+      .filter((r): r is PaymentRow & { reference: string } => Boolean(r.reference))
+      .map((row) => verifyCharge(row.reference, row.amount_paid))
+  )
 
   // Loyalty points (1 point per <loyalty rate> GHS); stored on the sale so a refund reverses exactly this
   const loyaltyRate = customer_id ? await getNumericSetting('loyalty_points_rate', 10) : 0
@@ -163,7 +236,7 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
     // Next number after the highest one issued today. Counting today's sales instead would reuse a
     // number whenever one of them was removed (e.g. by the clear-sales script)
     const todayPrefix = generateTransactionId(now, 0).replace(/0+$/, '')
-    const [latest] = await tx.$queryRaw`
+    const [latest] = await tx.$queryRaw<{ transaction_id: string }[]>`
       SELECT transaction_id FROM "Sale"
       WHERE transaction_id LIKE ${todayPrefix + '%'}
       ORDER BY LENGTH(transaction_id) DESC, transaction_id DESC
@@ -177,7 +250,7 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
     if (!openShift && requireShift) throw noOpenShiftError()
 
     // The balance guard stops two tills spending the same points at once
-    if (pointsToRedeem > 0) {
+    if (pointsToRedeem > 0 && customer_id) {
       const { count } = await tx.customer.updateMany({
         where: { id: customer_id, loyalty_points: { gte: pointsToRedeem } },
         data: { loyalty_points: { decrement: pointsToRedeem } },
@@ -244,7 +317,7 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
       }
     }
 
-    if (pointsEarned > 0) {
+    if (pointsEarned > 0 && customer_id) {
       await tx.customer.update({
         where: { id: customer_id },
         data: { loyalty_points: { increment: pointsEarned } },
@@ -257,14 +330,14 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
   // Concurrent sales can pick the same daily sequence number; each retry re-reads the highest
   // number committed today and so moves on to a free one
   const MAX_ATTEMPTS = 5
-  let sale
+  let sale: Sale | undefined
   for (let attempt = 1; !sale; attempt++) {
     try {
       sale = await runTx()
     } catch (err) {
-      const target = err.code === 'P2002' ? String(err.meta?.target ?? '') : ''
+      const target = err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002' ? String(err.meta?.target ?? '') : ''
       // The same sale sent twice at once: the other request recorded it
-      if (target.includes('client_ref')) return findByClientRef(client_ref, userId)
+      if (target.includes('client_ref') && client_ref) return findByClientRef(client_ref, userId)
       if (target.includes('reference')) {
         throw new ConflictError('This payment reference has already been used for another sale', 'reference')
       }
@@ -276,9 +349,9 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
   return getSaleById(sale.id)
 }
 
-const METHOD_LABEL = { CASH: 'Cash', MOBILE_MONEY: 'Mobile Money', CARD: 'Card', SPLIT: 'Split' }
+const METHOD_LABEL: Record<PaymentMethod, string> = { CASH: 'Cash', MOBILE_MONEY: 'Mobile Money', CARD: 'Card', SPLIT: 'Split' }
 
-function paymentError(message, field = 'payments') {
+function paymentError(message: string, field = 'payments') {
   return new ValidationError('Invalid payment', [{ field, message }])
 }
 
@@ -288,11 +361,14 @@ function paymentError(message, field = 'payments') {
  * Money parts are charged exactly their amount, and a cash part is the cash handed over for what
  * is left, with change given from it.
  */
-function planPayments({ payment_method, amount_paid, reference, payments }, total) {
+function planPayments(
+  { payment_method, amount_paid, reference, payments }: Pick<SaleInput, 'payment_method' | 'amount_paid' | 'reference' | 'payments'>,
+  total: number
+): PaymentRow[] {
   if (payment_method !== 'SPLIT') {
     if (payments) throw paymentError('List payments only for a split payment')
     if (payment_method === 'CASH') {
-      const paid = parseFloat(amount_paid)
+      const paid = parseFloat(String(amount_paid))
       if (!(paid >= total)) {
         throw new ValidationError('Insufficient payment', [
           { field: 'amount_paid', message: `Amount paid (${amount_paid}) is less than total (${total})` },
@@ -320,7 +396,7 @@ function planPayments({ payment_method, amount_paid, reference, payments }, tota
   if (new Set(nonCash.map((p) => p.reference)).size !== nonCash.length) throw paymentError('Each part needs its own Paystack payment')
   const nonCashTotal = round2(nonCash.reduce((sum, p) => sum + round2(p.amount), 0))
 
-  const rows = []
+  const rows: PaymentRow[] = []
   const cash = parts.find((p) => p.method === 'CASH')
   if (cash) {
     const due = round2(total - nonCashTotal)
@@ -334,20 +410,20 @@ function planPayments({ payment_method, amount_paid, reference, payments }, tota
     throw paymentError(`The parts add up to ${nonCashTotal.toFixed(2)} but the total is ${total.toFixed(2)}`)
   }
   for (const part of nonCash) {
-    rows.push({ method: part.method, amount_paid: round2(part.amount), change_given: 0, reference: part.reference })
+    rows.push({ method: part.method, amount_paid: round2(part.amount), change_given: 0, reference: part.reference ?? null })
   }
   return rows
 }
 
 /** Confirms with Paystack that `reference` is an unused, successful GHS charge of exactly `amount`. */
-async function verifyCharge(reference, amount) {
+async function verifyCharge(reference: string, amount: number) {
   // A successful Paystack charge can pay for one sale only
   const alreadyUsed = await prisma.payment.findUnique({ where: { reference }, select: { id: true } })
   if (alreadyUsed) {
     throw new ConflictError('This payment reference has already been used for another sale', 'reference')
   }
 
-  let paystackRes
+  let paystackRes: PaystackResponse<PaystackTransaction>
   try {
     paystackRes = await verifyPaystackPayment(reference)
   } catch (err) {
@@ -366,7 +442,8 @@ async function verifyCharge(reference, amount) {
   // The customer must have been charged exactly this amount (including tax), in pesewas
   const paystackAmountPesewas = paystackRes.data.amount
   const expectedAmountPesewas = Math.round(amount * 100)
-  if (Math.abs(paystackAmountPesewas - expectedAmountPesewas) > 1) {
+  // A charge with no amount can't be shown to match, so it fails too
+  if (typeof paystackAmountPesewas !== 'number' || Math.abs(paystackAmountPesewas - expectedAmountPesewas) > 1) {
     throw new ValidationError(
       `Payment verification failed: amount mismatch (Paystack: ${paystackAmountPesewas} pesewas, expected: ${expectedAmountPesewas} pesewas)`,
       [{ field: 'amount', message: 'Verified amount does not match total amount' }]
@@ -376,37 +453,17 @@ async function verifyCharge(reference, amount) {
   logger.info(`Paystack verification successful: Ref ${reference}, Amount ${paystackAmountPesewas} pesewas, Channel ${paystackRes.data.channel || 'unknown'}`)
 }
 
-async function findByClientRef(clientRef, userId) {
+async function findByClientRef(clientRef: string, userId: string) {
   const sale = await prisma.sale.findUnique({ where: { client_ref: clientRef }, select: { id: true, user_id: true } })
   if (!sale) return null
   if (sale.user_id !== userId) throw new ConflictError('This sale reference belongs to another user', 'client_ref')
   return getSaleById(sale.id)
 }
 
-async function getSaleById(id) {
+export async function getSaleById(id: string): Promise<SaleDetail> {
   const sale = await prisma.sale.findUnique({
     where: { id },
-    include: {
-      user: { select: { id: true, username: true, full_name: true } },
-      branch: { select: { id: true, name: true, code: true, address: true, phone: true } },
-      customer: { select: { id: true, name: true, phone: true, email: true } },
-      sale_items: {
-        include: {
-          product: { select: { id: true, name: true, sku: true } },
-          promotion: { select: { id: true, name: true, percent_off: true } },
-        },
-      },
-      // Enum order puts cash first
-      payments: { orderBy: { method: 'asc' } },
-      refunds: {
-        include: {
-          user: { select: { id: true, full_name: true } },
-          branch: { select: { id: true, name: true, code: true, address: true, phone: true } },
-          items: { select: { sale_item_id: true, quantity: true, amount: true, restocked: true } },
-        },
-        orderBy: { created_at: 'asc' },
-      },
-    },
+    include: SALE_INCLUDE,
   })
   if (!sale) throw new NotFoundError('Sale not found')
   return sale
@@ -416,10 +473,10 @@ async function getSaleById(id) {
  * A sale found by its receipt number and total, at any branch (for returns made at another branch).
  * Asking for the total too means sequential transaction IDs can't simply be tried one by one.
  */
-async function getSaleByTransactionId(transactionId, total) {
+export async function getSaleByTransactionId(transactionId: string, total: number) {
   const found = await prisma.sale.findUnique({ where: { transaction_id: transactionId }, select: { id: true, total_amount: true } })
   // Compared in whole pesewas, and failing closed on anything that isn't a number
-  const pesewas = (v) => Math.round(Number(v) * 100)
+  const pesewas = (v: Prisma.Decimal | number) => Math.round(Number(v) * 100)
   if (!found || !Number.isFinite(total) || pesewas(found.total_amount) !== pesewas(total)) {
     throw new NotFoundError('No sale with that transaction ID and total')
   }
@@ -430,7 +487,11 @@ async function getSaleByTransactionId(transactionId, total) {
  * Who may open a sale: admins any; cashiers their own; managers their branch's, plus sales from
  * another branch they have handled a return for.
  */
-function assertCanSeeSale(sale, user, cashierMessage = 'You can only view your own sales') {
+export function assertCanSeeSale(
+  sale: Pick<Sale, 'user_id' | 'branch_id'> & { refunds?: Pick<Refund, 'branch_id'>[] },
+  user: AuthUser,
+  cashierMessage = 'You can only view your own sales'
+) {
   if (user.role === 'ADMIN') return
   if (user.role === 'CASHIER') {
     if (sale.user_id !== user.id) throw new ForbiddenError(cashierMessage)
@@ -440,7 +501,9 @@ function assertCanSeeSale(sale, user, cashierMessage = 'You can only view your o
   if (!handledHere) throw new NotFoundError('Sale not found')
 }
 
-const SALE_SORTS = {
+type SaleOrderBy = Prisma.SaleOrderByWithRelationInput
+
+export const SALE_SORTS: Record<string, (dir: SortDirection) => SaleOrderBy | SaleOrderBy[]> = {
   created_at: (dir) => ({ created_at: dir }),
   transaction_id: (dir) => ({ transaction_id: dir }),
   total_amount: (dir) => ({ total_amount: dir }),
@@ -450,11 +513,39 @@ const SALE_SORTS = {
   customer: (dir) => [{ customer: { name: dir } }, { created_at: 'desc' }],
 }
 
-async function listSales({ page = 1, per_page = 20, start_date, end_date, user_id, customer_id, payment_status, payment_method, search, sort, order, branchId = null } = {}) {
+export interface ListSalesOptions {
+  page?: number
+  per_page?: number
+  start_date?: string
+  end_date?: string
+  user_id?: string
+  customer_id?: string
+  payment_status?: PaymentStatus
+  payment_method?: PaymentMethod
+  search?: string
+  sort?: string
+  order?: string
+  branchId?: string | null
+}
+
+export async function listSales({
+  page = 1,
+  per_page = 20,
+  start_date,
+  end_date,
+  user_id,
+  customer_id,
+  payment_status,
+  payment_method,
+  search,
+  sort,
+  order,
+  branchId = null,
+}: ListSalesOptions = {}) {
   const skip = (page - 1) * per_page
   const take = Math.min(per_page, 100)
 
-  const where = {}
+  const where: Prisma.SaleWhereInput = {}
   if (start_date || end_date) where.created_at = buildDateRange(start_date, end_date)
   if (user_id) where.user_id = user_id
   if (customer_id) where.customer_id = customer_id
@@ -474,7 +565,7 @@ async function listSales({ page = 1, per_page = 20, start_date, end_date, user_i
         branch: { select: { id: true, name: true, code: true } },
         _count: { select: { sale_items: true } },
       },
-      orderBy: buildOrderBy({ sort, order }, SALE_SORTS, { created_at: 'desc' }),
+      orderBy: buildOrderBy<SaleOrderBy>({ sort, order }, SALE_SORTS, { created_at: 'desc' }),
     }),
     prisma.sale.count({ where }),
   ])
@@ -493,13 +584,19 @@ async function listSales({ page = 1, per_page = 20, start_date, end_date, user_i
  * Processed at `branchId`, which may differ from the branch that made the sale: returned goods go
  * into that branch's stock and any cash comes out of its drawer.
  */
-async function processRefund(saleId, userId, { items, reason } = {}, branchId) {
+export interface RefundInput {
+  items?: { sale_item_id: string; quantity: number; restock?: boolean }[]
+  reason?: string
+}
+
+export async function processRefund(saleId: string, userId: string, { items, reason }: RefundInput = {}, branchId: string) {
   const refund = await prisma.$transaction(async (tx) => {
     // Lock the sale so simultaneous returns against it are processed one after the other
-    const locked = await tx.$queryRaw`SELECT id FROM "Sale" WHERE id = ${saleId} FOR UPDATE`
+    const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM "Sale" WHERE id = ${saleId} FOR UPDATE`
     if (locked.length === 0) throw new NotFoundError('Sale not found')
 
-    const sale = await tx.sale.findUnique({
+    // Locked above, so it exists
+    const sale = await tx.sale.findUniqueOrThrow({
       where: { id: saleId },
       include: { sale_items: { include: { product: { select: { name: true } } } }, payments: true },
     })
@@ -520,7 +617,8 @@ async function processRefund(saleId, userId, { items, reason } = {}, branchId) {
     if (requested.length === 0) {
       throw new ValidationError('Nothing to refund', [{ field: 'items', message: 'Choose at least one item to return' }])
     }
-    const seen = new Set()
+    const seen = new Set<string>()
+    const checked: { item: (typeof requested)[number]; line: (typeof sale.sale_items)[number] }[] = []
     for (const item of requested) {
       const line = lines.get(item.sale_item_id)
       if (!line) {
@@ -536,18 +634,18 @@ async function processRefund(saleId, userId, { items, reason } = {}, branchId) {
           { field: 'items', message: `Only ${remaining} of "${line.product.name}" can still be returned` },
         ])
       }
+      checked.push({ item, line })
     }
 
-    const total = parseFloat(sale.total_amount)
-    const subtotal = parseFloat(sale.subtotal)
-    const alreadyRefunded = parseFloat(sale.refunded_amount)
+    const total = Number(sale.total_amount)
+    const subtotal = Number(sale.subtotal)
+    const alreadyRefunded = Number(sale.refunded_amount)
     const returnedUnits = requested.reduce((n, i) => n + i.quantity, 0)
     const unitsLeft = sale.sale_items.reduce((n, si) => n + si.quantity - si.refunded_quantity, 0)
     const completesSale = returnedUnits === unitsLeft
 
-    const refundItems = requested.map((item) => {
-      const line = lines.get(item.sale_item_id)
-      const lineValue = (parseFloat(line.total) * item.quantity) / line.quantity
+    const refundItems = checked.map(({ item, line }) => {
+      const lineValue = (Number(line.total) * item.quantity) / line.quantity
       const amount = subtotal > 0 ? round2((total * lineValue) / subtotal) : 0
       return { ...item, amount, product_id: line.product_id, restock: item.restock !== false }
     })
@@ -567,7 +665,7 @@ async function processRefund(saleId, userId, { items, reason } = {}, branchId) {
     if (sale.customer_id && sale.loyalty_points_redeemed > 0) {
       const returning = new Map(refundItems.map((i) => [i.sale_item_id, i.quantity]))
       const returnedValue = sale.sale_items.reduce(
-        (sum, si) => sum + (parseFloat(si.total) * (si.refunded_quantity + (returning.get(si.id) || 0))) / si.quantity,
+        (sum, si) => sum + (Number(si.total) * (si.refunded_quantity + (returning.get(si.id) || 0))) / si.quantity,
         0
       )
       const owed = completesSale || subtotal <= 0
@@ -593,9 +691,9 @@ async function processRefund(saleId, userId, { items, reason } = {}, branchId) {
     } else if (sale.payment_method === 'SPLIT') {
       const cashTaken = sale.payments
         .filter((p) => p.method === 'CASH')
-        .reduce((sum, p) => sum + parseFloat(p.amount_paid) - parseFloat(p.change_given), 0)
+        .reduce((sum, p) => sum + Number(p.amount_paid) - Number(p.change_given), 0)
       const earlier = await tx.refund.aggregate({ where: { sale_id: saleId }, _sum: { cash_amount: true } })
-      const cashLeft = round2(cashTaken - parseFloat(earlier._sum.cash_amount || 0))
+      const cashLeft = round2(cashTaken - Number(earlier._sum.cash_amount ?? 0))
       cashAmount = Math.max(0, Math.min(amount, cashLeft))
     }
 
@@ -639,7 +737,7 @@ async function processRefund(saleId, userId, { items, reason } = {}, branchId) {
 
     // Give redeemed points back first, so taking back earned points below draws on them rather than
     // being cut short at a zero balance
-    if (pointsToRestore > 0) {
+    if (pointsToRestore > 0 && sale.customer_id) {
       await tx.customer.update({ where: { id: sale.customer_id }, data: { loyalty_points: { increment: pointsToRestore } } })
       await tx.sale.update({ where: { id: saleId }, data: { loyalty_points_restored: { increment: pointsToRestore } } })
     }
@@ -677,14 +775,14 @@ async function processRefund(saleId, userId, { items, reason } = {}, branchId) {
     try {
       await sendGatewayRefund(refund.id, userId)
     } catch (err) {
-      logger.error(`Return ${refund.id} saved, but sending it to Paystack failed: ${err.message}`)
+      logger.error(`Return ${refund.id} saved, but sending it to Paystack failed: ${errorMessage(err)}`)
     }
   }
 
   return getSaleById(saleId)
 }
 
-async function getReceiptData(saleId) {
+export async function getReceiptData(saleId: string) {
   const sale = await getSaleById(saleId)
 
   const [storeName, storeAddress, storePhone] = await Promise.all([
@@ -710,7 +808,13 @@ async function getReceiptData(saleId) {
  * there, or else (for a return at the sale's own branch) the shift the sale was rung up on if it is
  * still open. When shifts are required, cash can't leave without an open drawer.
  */
-async function refundShiftId(tx, userId, sale, cashAmount, branchId) {
+async function refundShiftId(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  sale: Pick<Sale, 'shift_id' | 'branch_id'>,
+  cashAmount: number,
+  branchId: string
+): Promise<string | null> {
   const own = await openShiftAt(tx, userId, branchId)
   if (own) return own.id
   if (sale.shift_id && sale.branch_id === branchId) {
@@ -729,7 +833,7 @@ function noOpenShiftError() {
   return new ValidationError('No open shift', [{ field: 'shift', message: 'Open a cash drawer shift before making sales' }])
 }
 
-function notEnoughPointsError(balance) {
+function notEnoughPointsError(balance: number) {
   return new ValidationError('Not enough points', [
     { field: 'redeem_points', message: `The customer only has ${balance} point${balance === 1 ? '' : 's'}` },
   ])
@@ -739,7 +843,7 @@ function notEnoughPointsError(balance) {
  * Emails a sale's receipt to `email`, or to the customer's address on file. Email must be set up
  * with SMTP_HOST and MAIL_FROM. `sale` is the already-loaded, access-checked sale.
  */
-async function emailReceipt(sale, userId, email) {
+export async function emailReceipt(sale: SaleDetail, userId: string, email?: string | null) {
   if (!isEmailConfigured()) {
     throw new AppError("Email receipts aren't set up on this server. Ask an admin to add the SMTP settings.", 503, 'EMAIL_NOT_CONFIGURED')
   }
@@ -766,7 +870,7 @@ async function emailReceipt(sale, userId, email) {
   try {
     await sendMail({ to, ...message })
   } catch (err) {
-    logger.error(`Receipt email for ${sale.transaction_id} failed: ${err.message}`)
+    logger.error(`Receipt email for ${sale.transaction_id} failed: ${errorMessage(err)}`)
     throw new AppError('The email could not be sent. Check the address and try again.', 502, 'EMAIL_FAILED')
   }
   await recordAudit({ userId, action: 'RECEIPT_EMAILED', entity: 'Sale', entityId: sale.id, details: `${sale.transaction_id} to ${to}` })
@@ -779,7 +883,7 @@ async function emailReceipt(sale, userId, email) {
  */
 const MAX_TEXTS_PER_SALE = 3
 
-async function smsReceipt(sale, userId, phone) {
+export async function smsReceipt(sale: SaleDetail, userId: string, phone?: string | null) {
   if (!isSmsConfigured()) {
     throw new AppError("SMS receipts aren't set up on this server. Ask an admin to add the SMS settings.", 503, 'SMS_NOT_CONFIGURED')
   }
@@ -812,18 +916,23 @@ async function smsReceipt(sale, userId, phone) {
   } catch (err) {
     // Not sent, so it doesn't count towards the limit
     await prisma.auditLog.delete({ where: { id: reservation.id } }).catch(() => {})
-    logger.error(`Receipt SMS for ${sale.transaction_id} failed: ${err.message}`)
+    logger.error(`Receipt SMS for ${sale.transaction_id} failed: ${errorMessage(err)}`)
     throw new AppError('The text message could not be sent. Check the number and try again.', 502, 'SMS_FAILED')
   }
   return { to }
 }
 
 // Half-up to 2 decimals; EPSILON stops values like 1.005 (stored as 1.00499…) rounding down
-function round2(n) {
+function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100
 }
 
-async function getSettingValue(key, defaultValue) {
+// For logs: what went wrong, whatever was thrown
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+async function getSettingValue<D>(key: string, defaultValue: D): Promise<string | D> {
   try {
     const setting = await prisma.settings.findUnique({ where: { key } })
     return setting ? setting.value : defaultValue
@@ -832,20 +941,8 @@ async function getSettingValue(key, defaultValue) {
   }
 }
 
-async function getNumericSetting(key, defaultValue) {
-  const val = parseFloat(await getSettingValue(key, defaultValue))
+async function getNumericSetting(key: string, defaultValue: number): Promise<number> {
+  const val = parseFloat(String(await getSettingValue(key, defaultValue)))
   return isNaN(val) ? defaultValue : val
 }
 
-module.exports = {
-  SALE_SORTS,
-  createSale,
-  getSaleById,
-  getSaleByTransactionId,
-  assertCanSeeSale,
-  listSales,
-  processRefund,
-  getReceiptData,
-  emailReceipt,
-  smsReceipt,
-}

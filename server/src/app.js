@@ -25,6 +25,7 @@ const supplierRoutes = require('./routes/suppliers')
 const shiftRoutes = require('./routes/shifts')
 const purchaseOrderRoutes = require('./routes/purchaseOrders')
 const promotionRoutes = require('./routes/promotions')
+const branchRoutes = require('./routes/branches')
 const paystackRoutes = require('./routes/paystack')
 
 const app = express()
@@ -117,6 +118,7 @@ app.use('/api/suppliers', supplierRoutes)
 app.use('/api/shifts', shiftRoutes)
 app.use('/api/purchase-orders', purchaseOrderRoutes)
 app.use('/api/promotions', promotionRoutes)
+app.use('/api/branches', branchRoutes)
 app.use('/api/paystack', paystackRoutes)
 
 // 404 handler

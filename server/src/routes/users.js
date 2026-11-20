@@ -31,6 +31,8 @@ const branchError = (message) => new ValidationError(message, [{ field: 'branch_
  */
 async function branchForRole(role, requestedId, currentId = null) {
   if (role === 'ADMIN') return null
+  // Keeping someone where they are is always allowed, even at a closed branch (e.g. to deactivate them)
+  if (currentId && (requestedId === undefined || requestedId === currentId)) return currentId
   const id = requestedId ?? currentId
   if (!id) throw branchError('Cashiers and managers need a branch')
   const branch = await prisma.branch.findFirst({ where: { id, is_active: true }, select: { id: true } })

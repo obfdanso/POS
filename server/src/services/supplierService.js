@@ -1,4 +1,5 @@
 const prisma = require('../utils/prismaClient')
+const { branchStockFor, withStock } = require('../utils/branchStock')
 const { NotFoundError, ConflictError } = require('../utils/errors')
 
 async function listSuppliers({ page = 1, per_page = 50, search } = {}) {
@@ -36,19 +37,21 @@ async function listSuppliers({ page = 1, per_page = 50, search } = {}) {
   }
 }
 
-async function getSupplierById(id) {
+/** A supplier with its active products and their stock at the acting branch (or all branches). */
+async function getSupplierById(id, branchId = null) {
   const supplier = await prisma.supplier.findUnique({
     where: { id },
     include: {
       products: {
         where: { is_active: true },
-        select: { id: true, name: true, sku: true, price: true, quantity: true, category: { select: { name: true } } },
+        select: { id: true, name: true, sku: true, price: true, category: { select: { name: true } } },
         orderBy: { name: 'asc' },
       },
     },
   })
   if (!supplier) throw new NotFoundError('Supplier not found')
-  return supplier
+  const stock = await branchStockFor(supplier.products.map((p) => p.id), branchId)
+  return { ...supplier, products: supplier.products.map((p) => withStock(p, stock)) }
 }
 
 async function createSupplier({ name, phone, email, address, website }) {

@@ -16,7 +16,7 @@ async function listSuppliers(req, res, next) {
 
 async function getSupplier(req, res, next) {
   try {
-    const supplier = await supplierService.getSupplierById(req.params.id)
+    const supplier = await supplierService.getSupplierById(req.params.id, req.branchId)
     res.status(200).json({ success: true, data: supplier })
   } catch (err) {
     next(err)

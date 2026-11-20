@@ -9,6 +9,7 @@ import { Pagination } from '../components/Pagination'
 import { Badge } from '../components/Badge'
 import { Receipt } from '../components/Receipt'
 import { ReturnModal } from '../components/ReturnModal'
+import { useBranch } from '../hooks/useBranch'
 import { salesService } from '../services/sales'
 import { usersService } from '../services/users'
 import { formatCurrency } from '../utils/formatCurrency'
@@ -30,9 +31,10 @@ function formatDateTime(value) {
   return new Date(value).toLocaleString('en-GH', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-// Shows a sale's receipt with reprint, its returns so far, and lets managers/admins return items
-function SaleDetailModal({ saleId, onClose, onRefunded }) {
-  const [sale, setSale] = useState(null)
+// Shows a sale's receipt with reprint, its returns so far, and lets managers/admins return items.
+// `initialSale` is a sale already loaded (one found at another branch by its transaction ID)
+function SaleDetailModal({ saleId, initialSale = null, onClose, onRefunded }) {
+  const [sale, setSale] = useState(initialSale)
   const [isReturning, setIsReturning] = useState(false)
   // The refund being sent to (or checked with) Paystack
   const [sendingRefundId, setSendingRefundId] = useState(null)
@@ -40,6 +42,7 @@ function SaleDetailModal({ saleId, onClose, onRefunded }) {
   const fmt = (v) => formatCurrency(v, settings.currency_symbol || 'GH₵')
 
   useEffect(() => {
+    if (!saleId) return
     salesService.get(saleId)
       .then((res) => setSale(res.data?.data))
       .catch((err) => {
@@ -154,7 +157,51 @@ function SaleDetailModal({ saleId, onClose, onRefunded }) {
   )
 }
 
+// Finds a sale from any branch by the transaction ID on its receipt, so its items can be returned here
+function FindSaleModal({ onClose, onFound }) {
+  const [txn, setTxn] = useState('')
+  const [error, setError] = useState('')
+  const [isFinding, setIsFinding] = useState(false)
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    const value = txn.trim().toUpperCase()
+    if (!/^TXN-\d{8}-\d{4,}$/.test(value)) {
+      setError('Enter the transaction ID from the receipt, e.g. TXN-20260101-0001')
+      return
+    }
+    setIsFinding(true)
+    setError('')
+    try {
+      const res = await salesService.lookup(value)
+      onFound(res.data.data)
+    } catch (err) {
+      setError(err?.response?.status === 404 ? 'No sale with that transaction ID' : getErrorMessage(err, 'Could not look up the sale'))
+    } finally {
+      setIsFinding(false)
+    }
+  }
+
+  return (
+    <Modal isOpen onClose={onClose} title="Return from another branch" size="sm">
+      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+        <p className="text-sm text-gray-600 dark:text-gray-400">
+          Returned items go back into this branch's stock, and any cash comes out of this branch's drawer.
+        </p>
+        <Input label="Transaction ID" placeholder="TXN-20260101-0001" value={txn} onChange={(e) => setTxn(e.target.value)} error={error} autoFocus />
+        <div className="flex gap-3">
+          <Button type="button" variant="secondary" className="flex-1" onClick={onClose} disabled={isFinding}>Cancel</Button>
+          <Button type="submit" className="flex-1" isLoading={isFinding}>Find sale</Button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 export default function SalesPage() {
+  const { isAllBranches } = useBranch()
+  const [isFinding, setIsFinding] = useState(false)
+  const [foundSale, setFoundSale] = useState(null)
   const [sales, setSales] = useState([])
   const [meta, setMeta] = useState({ page: 1, total_pages: 1, total: 0 })
   const [isLoading, setIsLoading] = useState(true)
@@ -227,6 +274,7 @@ export default function SalesPage() {
       sortable: true,
       render: (v) => <span className="font-mono text-xs font-medium text-primary-700 dark:text-primary-400">{v}</span>,
     },
+    ...(isAllBranches ? [{ key: 'branch', label: 'Branch', render: (v) => v?.name ?? '—' }] : []),
     { key: 'user', label: 'Cashier', sortable: true, sortKey: 'cashier', render: (v) => v?.full_name ?? '—' },
     {
       key: 'customer',
@@ -262,6 +310,7 @@ export default function SalesPage() {
   return (
     <DashboardLayout>
       <div className="space-y-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Sales</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
@@ -269,6 +318,15 @@ export default function SalesPage() {
               ? 'Loading sales…'
               : `${meta.total} sale${meta.total !== 1 ? 's' : ''} in this period · click a sale to reprint its receipt or return items`}
           </p>
+        </div>
+        <Button
+          variant="secondary"
+          onClick={() => setIsFinding(true)}
+          disabled={isAllBranches}
+          title={isAllBranches ? 'Choose the branch taking the return first' : undefined}
+        >
+          Return from another branch
+        </Button>
         </div>
 
         {/* Filters */}
@@ -348,6 +406,16 @@ export default function SalesPage() {
       </div>
 
       {selectedSaleId && <SaleDetailModal saleId={selectedSaleId} onClose={closeDetail} onRefunded={fetchSales} />}
+      {isFinding && (
+        <FindSaleModal
+          onClose={() => setIsFinding(false)}
+          onFound={(sale) => {
+            setIsFinding(false)
+            setFoundSale(sale)
+          }}
+        />
+      )}
+      {foundSale && <SaleDetailModal initialSale={foundSale} onClose={() => setFoundSale(null)} onRefunded={fetchSales} />}
     </DashboardLayout>
   )
 }

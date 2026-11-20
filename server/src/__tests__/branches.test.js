@@ -218,7 +218,7 @@ describe('Selling and returning across branches', () => {
     const res = await request(app).get('/api/sales?per_page=100').set(managerB.headers)
     expect(res.status).toBe(200)
     expect(res.body.data.length).toBeGreaterThan(0)
-    expect(res.body.data.every((s) => s.branch_id === branchB.id)).toBe(true)
+    expect(res.body.data.every((s) => s.branch_id === branchB.id && s.branch.code === 'BTB')).toBe(true)
   })
 
   it("doesn't let cashiers look sales up by transaction ID", async () => {

@@ -1,0 +1,232 @@
+import './loadEnv'
+import type { Branch, Category, Product, Supplier } from '@prisma/client'
+import { app, prisma, request, createUserWithToken, deleteTestUsers, stockAt, inTestBranch, testBranch, type TestAccount } from './helpers'
+
+const PREFIX = 'potest'
+let manager: TestAccount, cashier: TestAccount, supplier: Supplier, otherSupplier: Supplier, category: Category, rice: Product, oil: Product, soap: Product
+
+/** The fields of a purchase order from the API that these tests read. */
+interface PurchaseOrderBody {
+  id: string
+  po_number: string
+  status: string
+  total_cost: string
+  units_ordered: number
+  branch: { code: string }
+  items: { id: string; product_id: string }[]
+}
+
+const auth = (who: TestAccount) => who.headers
+const api = {
+  create: (body: object, who: TestAccount = manager) => request(app).post('/api/purchase-orders').set(auth(who)).send(body),
+  receive: (id: string, body: object = {}) => request(app).post(`/api/purchase-orders/${id}/receive`).set(auth(manager)).send(body),
+  cancel: (id: string, body: object = {}) => request(app).post(`/api/purchase-orders/${id}/cancel`).set(auth(manager)).send(body),
+  get: (id: string) => request(app).get(`/api/purchase-orders/${id}`).set(auth(manager)),
+}
+// A product with its stock at the test branch
+const product = async (id: string) => ({ ...(await prisma.product.findUnique({ where: { id } })), quantity: await stockAt(id) })
+
+beforeAll(async () => {
+  manager = await createUserWithToken('MANAGER', PREFIX)
+  cashier = await createUserWithToken('CASHIER', PREFIX)
+  supplier = await prisma.supplier.create({ data: { name: 'POTest Wholesale' } })
+  otherSupplier = await prisma.supplier.create({ data: { name: 'POTest Other' } })
+  category = await prisma.category.create({ data: { name: 'POTest Category' } })
+  const make = (name: string, sku: string, quantity: number, threshold: number, cost: number) =>
+    prisma.product.create({
+      data: { name, sku, category_id: category.id, supplier_id: supplier.id, price: 50, cost_price: cost, stocks: inTestBranch(quantity, threshold) },
+    })
+  rice = await make('POTest Rice 5kg', 'POTEST-RICE', 2, 10, 30)
+  oil = await make('POTest Oil 1L', 'POTEST-OIL', 4, 5, 20)
+  soap = await make('POTest Soap', 'POTEST-SOAP', 100, 10, 3)
+})
+
+afterAll(async () => {
+  const userIds = (await prisma.user.findMany({ where: { username: { startsWith: PREFIX } }, select: { id: true } })).map((u) => u.id)
+  const productIds = [rice.id, oil.id, soap.id]
+  await prisma.purchaseOrder.deleteMany({ where: { supplier_id: { in: [supplier.id, otherSupplier.id] } } })
+  await prisma.auditLog.deleteMany({ where: { user_id: { in: userIds } } })
+  await prisma.inventoryLog.deleteMany({ where: { product_id: { in: productIds } } })
+  await prisma.product.deleteMany({ where: { id: { in: productIds } } })
+  await prisma.category.deleteMany({ where: { id: category.id } })
+  await prisma.supplier.deleteMany({ where: { id: { in: [supplier.id, otherSupplier.id] } } })
+  await deleteTestUsers(PREFIX)
+  await deleteTestUsers(`${PREFIX}b`)
+  await prisma.branch.deleteMany({ where: { code: 'POB' } })
+  await prisma.$disconnect()
+})
+
+describe('Purchase orders', () => {
+  let po: PurchaseOrderBody
+
+  it('suggests low-stock items from a supplier, topped up to twice their threshold', async () => {
+    const res = await request(app).get(`/api/purchase-orders/suggestions?supplier_id=${supplier.id}`).set(auth(manager))
+    expect(res.status).toBe(200)
+    expect(res.body.data.map((s: { sku: string; suggested_quantity: number; unit_cost: number }) => [s.sku, s.suggested_quantity, s.unit_cost])).toEqual([
+      ['POTEST-RICE', 18, 30], // 2 × 10 − 2 in stock
+      ['POTEST-OIL', 6, 20], // 2 × 5 − 4
+    ])
+  })
+
+  it('creates an order with a PO number and total cost', async () => {
+    const res = await api.create({
+      supplier_id: supplier.id,
+      items: [
+        { product_id: rice.id, quantity: 20, unit_cost: 32.5 },
+        { product_id: oil.id, quantity: 6, unit_cost: 21 },
+      ],
+      expected_at: '2026-12-01',
+      notes: 'Deliver to back door',
+    })
+    expect(res.status).toBe(201)
+    po = res.body.data
+    expect(po.po_number).toMatch(/^PO-\d{8}-\d{4}$/)
+    expect(po.status).toBe('ORDERED')
+    expect(parseFloat(po.total_cost)).toBe(776) // 20 × 32.50 + 6 × 21
+    expect(po.items).toHaveLength(2)
+    expect(po.units_ordered).toBe(26)
+  })
+
+  it('counts open orders in later suggestions so stock is not ordered twice', async () => {
+    const res = await request(app).get(`/api/purchase-orders/suggestions?supplier_id=${supplier.id}`).set(auth(manager))
+    expect(res.body.data).toEqual([])
+  })
+
+  it('receives part of a delivery: adds stock, logs it, and updates the cost price', async () => {
+    const riceLine = po.items.find((i) => i.product_id === rice.id)!
+    const res = await api.receive(po.id, { items: [{ item_id: riceLine.id, quantity: 12 }], notes: 'First van' })
+    expect(res.status).toBe(200)
+    expect(res.body.data.status).toBe('PARTIALLY_RECEIVED')
+    expect(res.body.data.items.find((i: { id: string }) => i.id === riceLine.id)).toMatchObject({ quantity_received: 12, quantity_outstanding: 8 })
+    const after = await product(rice.id)
+    expect(after.quantity).toBe(14)
+    expect(parseFloat(String(after.cost_price))).toBe(32.5)
+    const log = await prisma.inventoryLog.findFirst({ where: { product_id: rice.id, change_type: 'RESTOCK' } })
+    expect(log).toMatchObject({ quantity_change: 12, previous_quantity: 2, new_quantity: 14 })
+    expect(log!.notes).toBe(`Received on ${po.po_number}: First van`)
+  })
+
+  it('rejects receiving more than is outstanding or an item from another order', async () => {
+    const riceLine = po.items.find((i) => i.product_id === rice.id)!
+    expect((await api.receive(po.id, { items: [{ item_id: riceLine.id, quantity: 9 }] })).status).toBe(422)
+    expect((await api.receive(po.id, { items: [{ item_id: '00000000-0000-4000-8000-000000000000', quantity: 1 }] })).status).toBe(422)
+    expect((await api.receive(po.id, { items: [{ item_id: riceLine.id, quantity: 0 }] })).status).toBe(422)
+    expect((await product(rice.id)).quantity).toBe(14)
+  })
+
+  it('receives everything outstanding when no items are given, keeping the cost price if asked', async () => {
+    const res = await api.receive(po.id, { update_cost: false })
+    expect(res.status).toBe(200)
+    expect(res.body.data.status).toBe('RECEIVED')
+    expect(res.body.data.received_at).not.toBeNull()
+    expect((await product(rice.id)).quantity).toBe(22)
+    const oilAfter = await product(oil.id)
+    expect(oilAfter.quantity).toBe(10)
+    expect(parseFloat(String(oilAfter.cost_price))).toBe(20) // unchanged
+    expect((await api.receive(po.id)).status).toBe(422) // closed
+  })
+
+  it('never adds stock twice when the same delivery is received at the same moment', async () => {
+    const created = await api.create({ supplier_id: supplier.id, items: [{ product_id: soap.id, quantity: 10, unit_cost: 3 }] })
+    const before = (await product(soap.id)).quantity
+    const results = await Promise.all([api.receive(created.body.data.id), api.receive(created.body.data.id)])
+    expect(results.map((r) => r.status).sort()).toEqual([200, 422])
+    expect((await product(soap.id)).quantity).toBe(before! + 10)
+  })
+
+  it('cancels an open order but not a finished one', async () => {
+    const created = await api.create({ supplier_id: supplier.id, items: [{ product_id: soap.id, quantity: 5, unit_cost: 3 }] })
+    const res = await api.cancel(created.body.data.id, { reason: 'Supplier out of stock' })
+    expect(res.status).toBe(200)
+    expect(res.body.data.status).toBe('CANCELLED')
+    expect((await api.receive(created.body.data.id)).status).toBe(422)
+    expect((await api.cancel(po.id)).status).toBe(422)
+    expect(await prisma.auditLog.count({ where: { action: 'PURCHASE_ORDER_CANCELLED', entity_id: created.body.data.id } })).toBe(1)
+  })
+
+  it('validates new orders', async () => {
+    const line = { product_id: rice.id, quantity: 1, unit_cost: 1 }
+    expect((await api.create({ supplier_id: '00000000-0000-4000-8000-000000000000', items: [line] })).status).toBe(422)
+    expect((await api.create({ supplier_id: supplier.id, items: [] })).status).toBe(422)
+    expect((await api.create({ supplier_id: supplier.id, items: [line, line] })).status).toBe(422)
+    expect((await api.create({ supplier_id: supplier.id, items: [{ ...line, quantity: 0 }] })).status).toBe(422)
+    expect((await api.create({ supplier_id: supplier.id, items: [{ ...line, unit_cost: -1 }] })).status).toBe(422)
+    expect((await api.create({ supplier_id: supplier.id, items: [line], total_cost: 1 })).status).toBe(422)
+  })
+
+  it('lists orders with filters and progress, for managers only', async () => {
+    const res = await request(app).get(`/api/purchase-orders?supplier_id=${supplier.id}&status=RECEIVED`).set(auth(manager))
+    expect(res.status).toBe(200)
+    expect(res.body.data.length).toBeGreaterThanOrEqual(2)
+    const row = res.body.data.find((o: { id: string }) => o.id === po.id)
+    expect(row).toMatchObject({ item_count: 2, units_ordered: 26, units_received: 26, supplier: { name: 'POTest Wholesale' } })
+    expect(res.body.meta.total).toBe(res.body.data.length)
+
+    expect((await request(app).get('/api/purchase-orders').set(auth(cashier))).status).toBe(403)
+    expect((await api.create({ supplier_id: supplier.id, items: [{ product_id: rice.id, quantity: 1, unit_cost: 1 }] }, cashier)).status).toBe(403)
+  })
+
+  it('keeps a supplier that has purchase orders from being deleted', async () => {
+    const admin = await createUserWithToken('ADMIN', PREFIX)
+    await prisma.product.updateMany({ where: { supplier_id: supplier.id }, data: { supplier_id: null } })
+    const res = await request(app).delete(`/api/suppliers/${supplier.id}`).set(auth(admin))
+    expect(res.status).toBe(409)
+    await prisma.product.updateMany({ where: { id: { in: [rice.id, oil.id, soap.id] } }, data: { supplier_id: supplier.id } })
+  })
+
+  describe('at another branch', () => {
+    let branchB: Branch, managerB: TestAccount, orderB: PurchaseOrderBody
+
+    beforeAll(async () => {
+      branchB = await prisma.branch.upsert({ where: { code: 'POB' }, update: {}, create: { name: 'POTest Branch', code: 'POB' } })
+      managerB = await createUserWithToken('MANAGER', `${PREFIX}b`, { branchId: branchB.id })
+    })
+
+    it("receives into the order's branch, starting to stock a product the branch didn't carry", async () => {
+      const homeBefore = await stockAt(oil.id)
+      const created = await api.create({ supplier_id: supplier.id, items: [{ product_id: oil.id, quantity: 5, unit_cost: 20 }] }, managerB)
+      expect(created.status).toBe(201)
+      orderB = created.body.data
+      expect(orderB.branch).toMatchObject({ code: 'POB' })
+
+      const received = await request(app).post(`/api/purchase-orders/${orderB.id}/receive`).set(auth(managerB)).send({})
+      expect(received.status).toBe(200)
+      expect(await stockAt(oil.id, branchB.id)).toBe(5)
+      expect(await stockAt(oil.id)).toBe(homeBefore)
+      const log = await prisma.inventoryLog.findFirst({ where: { product_id: oil.id, branch_id: branchB.id } })
+      expect(log).toMatchObject({ change_type: 'RESTOCK', quantity_change: 5 })
+    })
+
+    it("suggests from the branch's own low stock", async () => {
+      const res = await request(app).get(`/api/purchase-orders/suggestions?supplier_id=${supplier.id}`).set(auth(managerB))
+      expect(res.status).toBe(200)
+      const ids = res.body.data.map((r: { product_id: string }) => r.product_id)
+      // Branch B holds 5 oil (threshold 10) and doesn't stock rice
+      expect(ids).toContain(oil.id)
+      expect(ids).not.toContain(rice.id)
+    })
+
+    it('refuses deliveries to a closed branch', async () => {
+      const created = await api.create({ supplier_id: supplier.id, items: [{ product_id: soap.id, quantity: 2, unit_cost: 3 }] }, managerB)
+      await prisma.branch.update({ where: { id: branchB.id }, data: { is_active: false } })
+      try {
+        const admin = await createUserWithToken('ADMIN', `${PREFIX}a`)
+        const res = await request(app).post(`/api/purchase-orders/${created.body.data.id}/receive`).set({ Authorization: admin.headers.Authorization }).send({})
+        expect(res.status).toBe(422)
+        expect(res.body.error.details[0]).toMatchObject({ field: 'branch', message: 'POTest Branch is closed, so it can\'t receive goods' })
+      } finally {
+        await prisma.branch.update({ where: { id: branchB.id }, data: { is_active: true } })
+        await deleteTestUsers(`${PREFIX}a`)
+      }
+    })
+
+    it("keeps each branch's managers to their own orders", async () => {
+      const home = await testBranch()
+      const mine = await request(app).get('/api/purchase-orders?per_page=100').set(auth(managerB))
+      expect(mine.body.data.every((o: { branch_id: string }) => o.branch_id === branchB.id)).toBe(true)
+      const theirs = (await prisma.purchaseOrder.findFirst({ where: { branch_id: home.id, supplier_id: supplier.id } }))!
+      expect((await request(app).get(`/api/purchase-orders/${theirs.id}`).set(auth(managerB))).status).toBe(404)
+      expect((await request(app).post(`/api/purchase-orders/${theirs.id}/cancel`).set(auth(managerB)).send({})).status).toBe(404)
+    })
+  })
+})

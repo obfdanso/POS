@@ -13,15 +13,15 @@
     "db:migrate": "npx prisma migrate dev",
     "db:seed": "npx prisma db seed",
     "db:studio": "npx prisma studio",
-    "db:backup": "tsx scripts/backup.js",
-    "db:restore": "tsx scripts/restore.js",
-    "clear-sales": "tsx scripts/clear-sales.js",
-    "unlock-user": "tsx scripts/unlock-user.js",
-    "import-images": "tsx scripts/import-product-images.js",
-    "lint": "eslint src/ --ext .js,.ts"
+    "db:backup": "tsx scripts/backup.ts",
+    "db:restore": "tsx scripts/restore.ts",
+    "clear-sales": "tsx scripts/clear-sales.ts",
+    "unlock-user": "tsx scripts/unlock-user.ts",
+    "import-images": "tsx scripts/import-product-images.ts",
+    "lint": "eslint src/ --ext .ts"
   },
   "prisma": {
-    "seed": "tsx prisma/seed.js"
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
@@ -73,8 +73,7 @@
         {
           "tsconfig": "tsconfig.json"
         }
-      ],
-      "^.+\\.js$": "babel-jest"
+      ]
     },
     "moduleFileExtensions": [
       "ts",
@@ -85,12 +84,12 @@
     "testPathIgnorePatterns": [
       "/node_modules/",
       "/dist/",
-      "/__tests__/helpers\\.(js|ts)$"
+      "/__tests__/(helpers|loadEnv)\\.ts$"
     ],
     "coverageDirectory": "coverage",
     "collectCoverageFrom": [
-      "src/**/*.{js,ts}",
-      "!src/app.{js,ts}",
+      "src/**/*.ts",
+      "!src/app.ts",
       "!src/**/*.d.ts"
     ]
   },

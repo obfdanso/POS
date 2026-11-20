@@ -1,0 +1,250 @@
+import './loadEnv'
+import request from 'supertest'
+import app from '../app'
+import prisma from '../utils/prismaClient'
+import bcrypt from 'bcrypt'
+import jwt, { type JwtPayload } from 'jsonwebtoken'
+import type { User } from '@prisma/client'
+import { testBranch } from './helpers'
+
+let testUser: User
+
+beforeAll(async () => {
+  // Create a test user
+  const hash = await bcrypt.hash('testpass123', 12)
+  testUser = await prisma.user.create({
+    data: {
+      username: 'testuser_auth',
+      email: 'testuser_auth@test.com',
+      password_hash: hash,
+      full_name: 'Test User',
+      role: 'CASHIER',
+      branch_id: (await testBranch()).id,
+    },
+  })
+})
+
+afterAll(async () => {
+  // Clean up test user and their auth logs
+  await prisma.authLog.deleteMany({ where: { user_id: testUser.id } })
+  await prisma.user.delete({ where: { id: testUser.id } })
+  await prisma.$disconnect()
+})
+
+describe('POST /api/auth/login', () => {
+  it('returns 200 with accessToken on valid credentials', async () => {
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ username: 'testuser_auth', password: 'testpass123' })
+
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(res.body.data.accessToken).toBeTruthy()
+    expect(res.body.data.user.username).toBe('testuser_auth')
+    // refresh token should be in cookie, not in body
+    expect(res.body.data.refreshToken).toBeUndefined()
+    expect(res.headers['set-cookie']).toBeDefined()
+  })
+
+  it('returns 401 on wrong password', async () => {
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ username: 'testuser_auth', password: 'wrongpassword' })
+
+    expect(res.status).toBe(401)
+    expect(res.body.success).toBe(false)
+    expect(res.body.error.code).toBe('UNAUTHORIZED')
+  })
+
+  it('returns 401 on unknown username', async () => {
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ username: 'nonexistent_xyz', password: 'anypassword' })
+
+    expect(res.status).toBe(401)
+    expect(res.body.success).toBe(false)
+  })
+
+  it('returns 422 when username is missing', async () => {
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ password: 'testpass123' })
+
+    expect(res.status).toBe(422)
+    expect(res.body.error.code).toBe('VALIDATION_ERROR')
+  })
+
+  it('returns 422 when password is missing', async () => {
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ username: 'testuser_auth' })
+
+    expect(res.status).toBe(422)
+  })
+})
+
+describe('GET /api/auth/me', () => {
+  let accessToken: string
+
+  beforeAll(async () => {
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ username: 'testuser_auth', password: 'testpass123' })
+    accessToken = res.body.data.accessToken
+  })
+
+  it('returns 200 with user profile on valid token', async () => {
+    const res = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${accessToken}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(res.body.data.username).toBe('testuser_auth')
+    expect(res.body.data.password_hash).toBeUndefined()
+  })
+
+  it('returns 401 without token', async () => {
+    const res = await request(app).get('/api/auth/me')
+    expect(res.status).toBe(401)
+  })
+
+  it('returns 401 with invalid token', async () => {
+    const res = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', 'Bearer invalidtoken123')
+    expect(res.status).toBe(401)
+  })
+})
+
+describe('POST /api/auth/refresh', () => {
+  it('returns 200 with new accessToken using valid refresh cookie', async () => {
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ username: 'testuser_auth', password: 'testpass123' })
+
+    const cookies = loginRes.headers['set-cookie']
+
+    const refreshRes = await request(app)
+      .post('/api/auth/refresh')
+      .set('Cookie', cookies)
+
+    expect(refreshRes.status).toBe(200)
+    expect(refreshRes.body.data.accessToken).toBeTruthy()
+  })
+
+  it('keeps working when tokens are rotated several times within one second', async () => {
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ username: 'testuser_auth', password: 'testpass123' })
+    let cookies = loginRes.headers['set-cookie']
+
+    for (let i = 0; i < 3; i++) {
+      const res = await request(app).post('/api/auth/refresh').set('Cookie', cookies)
+      expect(res.status).toBe(200)
+      cookies = res.headers['set-cookie']
+    }
+  })
+
+  it('rejects a refresh token that has already been rotated', async () => {
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ username: 'testuser_auth', password: 'testpass123' })
+    const original = loginRes.headers['set-cookie']
+
+    expect((await request(app).post('/api/auth/refresh').set('Cookie', original)).status).toBe(200)
+    expect((await request(app).post('/api/auth/refresh').set('Cookie', original)).status).toBe(401)
+  })
+
+  it('keeps rotated tokens revoked in the database, so a restart does not revive them', async () => {
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ username: 'testuser_auth', password: 'testpass123' })
+    // Node gives every Set-Cookie header as an array, though the typings say string
+    const cookie = loginRes.headers['set-cookie'] as unknown as string[]
+    const token = /refreshToken=([^;]+)/.exec(cookie.join(';'))![1]
+    const { jti } = jwt.decode(token) as JwtPayload & { jti: string }
+
+    expect((await request(app).post('/api/auth/refresh').set('Cookie', cookie)).status).toBe(200)
+    expect(await prisma.revokedToken.findUnique({ where: { jti } })).not.toBeNull()
+  })
+
+  it('lets only one of two simultaneous refreshes with the same token succeed', async () => {
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ username: 'testuser_auth', password: 'testpass123' })
+    const cookie = loginRes.headers['set-cookie']
+    const results = await Promise.all([
+      request(app).post('/api/auth/refresh').set('Cookie', cookie),
+      request(app).post('/api/auth/refresh').set('Cookie', cookie),
+    ])
+    expect(results.map((r) => r.status).sort()).toEqual([200, 401])
+  })
+
+  it('returns 401 without refresh cookie', async () => {
+    const res = await request(app).post('/api/auth/refresh')
+    expect(res.status).toBe(401)
+  })
+})
+
+describe('POST /api/auth/logout', () => {
+  it('returns 200 and clears cookie', async () => {
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ username: 'testuser_auth', password: 'testpass123' })
+
+    const accessToken = loginRes.body.data.accessToken
+
+    const logoutRes = await request(app)
+      .post('/api/auth/logout')
+      .set('Authorization', `Bearer ${accessToken}`)
+
+    expect(logoutRes.status).toBe(200)
+    expect(logoutRes.body.success).toBe(true)
+  })
+})
+
+describe('Account lockout', () => {
+  let lockTestUser: User
+
+  beforeAll(async () => {
+    const hash = await bcrypt.hash('correctpass', 12)
+    lockTestUser = await prisma.user.create({
+      data: {
+        username: 'locktest_user_xyz',
+        email: 'locktest_xyz@test.com',
+        password_hash: hash,
+        full_name: 'Lock Test User',
+        role: 'CASHIER',
+      },
+    })
+  })
+
+  afterAll(async () => {
+    await prisma.authLog.deleteMany({ where: { user_id: lockTestUser.id } })
+    await prisma.user.delete({ where: { id: lockTestUser.id } })
+  })
+
+  it('locks account after 5 failed attempts', async () => {
+    for (let i = 0; i < 5; i++) {
+      await request(app)
+        .post('/api/auth/login')
+        .send({ username: 'locktest_user_xyz', password: 'wrongpassword' })
+    }
+
+    const locked = (await prisma.user.findUnique({ where: { id: lockTestUser.id } }))!
+    expect(locked.locked_until).not.toBeNull()
+    expect(locked.locked_until! > new Date()).toBe(true)
+    // Stays locked until an admin unlocks it
+    expect(locked.locked_until!.getFullYear()).toBe(9999)
+  })
+
+  it('rejects login with correct password when account is locked', async () => {
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ username: 'locktest_user_xyz', password: 'correctpass' })
+
+    expect(res.status).toBe(401)
+    expect(res.body.error.message).toMatch(/locked/i)
+  })
+})

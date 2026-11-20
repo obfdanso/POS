@@ -52,6 +52,8 @@ async function getCustomerPurchases(req, res, next) {
       per_page,
       // Cashiers can only view their own sales
       userId: req.user.role === 'CASHIER' ? req.user.id : undefined,
+      // Managers don't get other branches' sale ids (returns there go through the receipt lookup)
+      branchId: req.user.role === 'MANAGER' ? req.user.branch_id : undefined,
     })
     const sales = result.sales.map((s) => ({
       ...s,

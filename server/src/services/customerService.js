@@ -130,8 +130,12 @@ async function updateCustomer(id, data) {
   })
 }
 
-// Pass userId to restrict the list to one cashier's sales
-async function getCustomerPurchases(id, { page = 1, per_page = 20, userId } = {}) {
+/**
+ * Pass userId to restrict the list to one cashier's sales. With `branchId` (a manager), other
+ * branches' sales lose their id and transaction ID, so a return there still goes through the
+ * receipt lookup.
+ */
+async function getCustomerPurchases(id, { page = 1, per_page = 20, userId, branchId } = {}) {
   const customer = await prisma.customer.findUnique({ where: { id } })
   if (!customer) throw new NotFoundError('Customer not found')
 
@@ -153,7 +157,10 @@ async function getCustomerPurchases(id, { page = 1, per_page = 20, userId } = {}
     prisma.sale.count({ where: { customer_id: id, ...(userId && { user_id: userId }) } }),
   ])
 
-  return { sales, total, page, per_page: take, total_pages: Math.ceil(total / take) }
+  const shown = branchId
+    ? sales.map((s) => (s.branch_id === branchId ? s : { ...s, id: null, transaction_id: null, other_branch: true }))
+    : sales
+  return { sales: shown, total, page, per_page: take, total_pages: Math.ceil(total / take) }
 }
 
 module.exports = { CUSTOMER_SORTS, listCustomers, getCustomerById, createCustomer, updateCustomer, getCustomerPurchases }

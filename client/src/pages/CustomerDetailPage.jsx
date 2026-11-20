@@ -76,7 +76,9 @@ export default function CustomerDetailPage() {
     {
       key: 'transaction_id',
       label: 'Transaction ID',
-      render: (v) => <span className="font-mono text-xs text-primary-700 font-medium">{v}</span>,
+      render: (v) => v
+        ? <span className="font-mono text-xs text-primary-700 font-medium">{v}</span>
+        : <span className="text-xs text-gray-500">Another branch</span>,
     },
     {
       key: 'created_at',

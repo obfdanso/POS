@@ -173,6 +173,16 @@ describe('Reports by branch', () => {
     ]))
   })
 
+  it('leaves out closed branches that sold nothing in the period', async () => {
+    const shut = await prisma.branch.create({ data: { name: 'RepTest Shut', code: 'RPS', is_active: false } })
+    try {
+      const res = await asAdmin(`branch-performance?${RANGE}`)
+      expect(res.body.data.map((b) => b.label)).not.toContain('RepTest Shut')
+    } finally {
+      await prisma.branch.delete({ where: { id: shut.id } })
+    }
+  })
+
   it("keeps the branch comparison for admins", async () => {
     expect((await get(`branch-performance?${RANGE}`)).status).toBe(403)
   })

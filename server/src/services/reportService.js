@@ -294,7 +294,8 @@ async function getDashboardSummary(branchId = null) {
 
 /**
  * Every branch side by side for a date range: revenue (net of returns), transactions and refunds,
- * as { label, value } rows for a chart. Branches with no sales still appear, with zeros.
+ * as { label, value } rows for a chart. Open branches with no sales still appear, with zeros; closed
+ * ones only when they sold something in the period.
  */
 async function getBranchPerformance({ start_date, end_date }) {
   const range = dateRange(start_date, end_date)
@@ -308,7 +309,9 @@ async function getBranchPerformance({ start_date, end_date }) {
       ON s.branch_id = b.id
       AND s.created_at >= ${range.gte} AND s.created_at <= ${range.lte}
       AND s.payment_status IN ('COMPLETED', 'PARTIALLY_REFUNDED')
-    GROUP BY b.id, b.name, b.code
+    GROUP BY b.id, b.name, b.code, b.is_active
+    -- A closed branch only appears when it sold something in the period
+    HAVING b.is_active OR COUNT(s.id) > 0
     ORDER BY value DESC, b.name ASC
   `
   return rows.map((r) => ({

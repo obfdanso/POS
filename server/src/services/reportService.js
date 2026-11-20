@@ -1,3 +1,4 @@
+const { Prisma } = require('@prisma/client')
 const prisma = require('../utils/prismaClient')
 // Product/category/profit revenue is net sales: each line's share of its sale after the cart
 // discount, excluding tax. Profit cost uses the cost price recorded at the time of sale.
@@ -5,6 +6,13 @@ const prisma = require('../utils/prismaClient')
 // so a partly refunded sale still counts, and a fully refunded one (status REFUNDED) drops out.
 const { ValidationError } = require('../utils/errors')
 const { buildDateRange } = require('../utils/dateRange')
+const { getLowStockCount } = require('./inventoryService')
+
+// Every report covers one branch when given one (null = every branch). `table` is the alias or
+// quoted table name of the Sale (or BranchStock) row being filtered
+function branchSql(table, branchId) {
+  return branchId ? Prisma.sql`AND ${Prisma.raw(table)}.branch_id = ${branchId}` : Prisma.empty
+}
 
 // Defaults to the last 30 days (including today) when dates are omitted
 function dateRange(start_date, end_date) {
@@ -28,7 +36,7 @@ function dateRange(start_date, end_date) {
   return range
 }
 
-async function getSalesSummary({ start_date, end_date }) {
+async function getSalesSummary({ start_date, end_date, branchId = null }) {
   const range = dateRange(start_date, end_date)
   // Tax is scaled by the share of each sale that wasn't refunded
   const [result] = await prisma.$queryRaw`
@@ -40,6 +48,7 @@ async function getSalesSummary({ start_date, end_date }) {
     FROM "Sale"
     WHERE created_at >= ${range.gte} AND created_at <= ${range.lte}
       AND payment_status IN ('COMPLETED', 'PARTIALLY_REFUNDED')
+      ${branchSql('"Sale"', branchId)}
   `
   const revenue = parseFloat(result.total_revenue || 0)
   return {
@@ -51,7 +60,7 @@ async function getSalesSummary({ start_date, end_date }) {
   }
 }
 
-async function getSalesByDay({ start_date, end_date }) {
+async function getSalesByDay({ start_date, end_date, branchId = null }) {
   const range = dateRange(start_date, end_date)
   // Every day in the range appears, with zeros for days that had no sales
   const sales = await prisma.$queryRaw`
@@ -64,13 +73,14 @@ async function getSalesByDay({ start_date, end_date }) {
       ON DATE(s.created_at) = d.day
       AND s.payment_status IN ('COMPLETED', 'PARTIALLY_REFUNDED')
       AND s.created_at >= ${range.gte} AND s.created_at <= ${range.lte}
+      ${branchSql('s', branchId)}
     GROUP BY d.day
     ORDER BY d.day ASC
   `
   return sales.map((r) => ({ label: r.label, value: parseFloat(r.value || 0), transactions: r.transactions }))
 }
 
-async function getTopProducts({ start_date, end_date, limit = 10, by = 'revenue' }) {
+async function getTopProducts({ start_date, end_date, limit = 10, by = 'revenue', branchId = null }) {
   const range = dateRange(start_date, end_date)
   const lim = parseInt(limit) || 10
 
@@ -85,6 +95,7 @@ async function getTopProducts({ start_date, end_date, limit = 10, by = 'revenue'
       JOIN "Sale" s ON s.id = si.sale_id
       WHERE s.created_at >= ${range.gte} AND s.created_at <= ${range.lte}
         AND s.payment_status IN ('COMPLETED', 'PARTIALLY_REFUNDED')
+        ${branchSql('s', branchId)}
       GROUP BY p.id, p.name, p.sku
       ORDER BY total_quantity DESC
       LIMIT ${lim}
@@ -99,6 +110,7 @@ async function getTopProducts({ start_date, end_date, limit = 10, by = 'revenue'
       JOIN "Sale" s ON s.id = si.sale_id
       WHERE s.created_at >= ${range.gte} AND s.created_at <= ${range.lte}
         AND s.payment_status IN ('COMPLETED', 'PARTIALLY_REFUNDED')
+        ${branchSql('s', branchId)}
       GROUP BY p.id, p.name, p.sku
       ORDER BY total_revenue DESC
       LIMIT ${lim}
@@ -113,7 +125,7 @@ async function getTopProducts({ start_date, end_date, limit = 10, by = 'revenue'
   }))
 }
 
-async function getCategoryPerformance({ start_date, end_date }) {
+async function getCategoryPerformance({ start_date, end_date, branchId = null }) {
   const range = dateRange(start_date, end_date)
   const results = await prisma.$queryRaw`
     SELECT
@@ -127,13 +139,14 @@ async function getCategoryPerformance({ start_date, end_date }) {
     JOIN "Sale" s ON s.id = si.sale_id
     WHERE s.created_at >= ${range.gte} AND s.created_at <= ${range.lte}
       AND s.payment_status IN ('COMPLETED', 'PARTIALLY_REFUNDED')
+      ${branchSql('s', branchId)}
     GROUP BY c.id, c.name
     ORDER BY value DESC
   `
   return results.map((r) => ({ id: r.id, label: r.label, value: parseFloat(r.value || 0), quantity: r.total_quantity }))
 }
 
-async function getCashierPerformance({ start_date, end_date }) {
+async function getCashierPerformance({ start_date, end_date, branchId = null }) {
   const range = dateRange(start_date, end_date)
   const results = await prisma.$queryRaw`
     SELECT
@@ -146,6 +159,7 @@ async function getCashierPerformance({ start_date, end_date }) {
     JOIN "User" u ON u.id = s.user_id
     WHERE s.created_at >= ${range.gte} AND s.created_at <= ${range.lte}
       AND s.payment_status IN ('COMPLETED', 'PARTIALLY_REFUNDED')
+      ${branchSql('s', branchId)}
     GROUP BY u.id, u.full_name, u.username
     ORDER BY value DESC
   `
@@ -158,29 +172,40 @@ async function getCashierPerformance({ start_date, end_date }) {
   }))
 }
 
-async function getInventoryStatus() {
-  const [totalProducts, totalLowStock, totalOutOfStock, lowStockItems, outOfStockItems] = await Promise.all([
-    prisma.product.count({ where: { is_active: true } }),
-    prisma.$queryRaw`SELECT COUNT(*)::int as cnt FROM "Product" WHERE is_active = true AND quantity > 0 AND quantity <= low_stock_threshold`,
-    prisma.$queryRaw`SELECT COUNT(*)::int as cnt FROM "Product" WHERE is_active = true AND quantity = 0`,
+/**
+ * Stock levels at a branch (or, for all branches, every branch's stock rows, so "low at Accra" shows
+ * even when Kumasi has plenty). Counts and lists cover active products only.
+ */
+async function getInventoryStatus(branchId = null) {
+  const scope = branchSql('s', branchId)
+  const [[{ cnt: totalProducts }], totalLowStock, totalOutOfStock, lowStockItems, outOfStockItems] = await Promise.all([
     prisma.$queryRaw`
-      SELECT id, name, sku, quantity, low_stock_threshold
-      FROM "Product"
-      WHERE is_active = true AND quantity > 0 AND quantity <= low_stock_threshold
-      ORDER BY quantity ASC
+      SELECT COUNT(DISTINCT p.id)::int as cnt FROM "BranchStock" s JOIN "Product" p ON p.id = s.product_id
+      WHERE p.is_active = true ${scope}`,
+    prisma.$queryRaw`
+      SELECT COUNT(*)::int as cnt FROM "BranchStock" s JOIN "Product" p ON p.id = s.product_id
+      WHERE p.is_active = true AND s.quantity > 0 AND s.quantity <= s.low_stock_threshold ${scope}`,
+    prisma.$queryRaw`
+      SELECT COUNT(*)::int as cnt FROM "BranchStock" s JOIN "Product" p ON p.id = s.product_id
+      WHERE p.is_active = true AND s.quantity = 0 ${scope}`,
+    prisma.$queryRaw`
+      SELECT p.id, p.name, p.sku, s.quantity, s.low_stock_threshold, b.name AS branch
+      FROM "BranchStock" s JOIN "Product" p ON p.id = s.product_id JOIN "Branch" b ON b.id = s.branch_id
+      WHERE p.is_active = true AND s.quantity > 0 AND s.quantity <= s.low_stock_threshold ${scope}
+      ORDER BY s.quantity ASC, p.name ASC
       LIMIT 20
     `,
     prisma.$queryRaw`
-      SELECT id, name, sku, quantity
-      FROM "Product"
-      WHERE is_active = true AND quantity = 0
-      ORDER BY name ASC
+      SELECT p.id, p.name, p.sku, s.quantity, b.name AS branch
+      FROM "BranchStock" s JOIN "Product" p ON p.id = s.product_id JOIN "Branch" b ON b.id = s.branch_id
+      WHERE p.is_active = true AND s.quantity = 0 ${scope}
+      ORDER BY p.name ASC
       LIMIT 20
     `,
   ])
 
   return {
-    total_products: totalProducts,
+    total_products: Number(totalProducts),
     low_stock_count: Number(totalLowStock[0].cnt),
     out_of_stock_count: Number(totalOutOfStock[0].cnt),
     low_stock: lowStockItems.map((r) => ({
@@ -195,7 +220,7 @@ async function getInventoryStatus() {
   }
 }
 
-async function getProfitReport({ start_date, end_date }) {
+async function getProfitReport({ start_date, end_date, branchId = null }) {
   const range = dateRange(start_date, end_date)
   const results = await prisma.$queryRaw`
     SELECT
@@ -210,6 +235,7 @@ async function getProfitReport({ start_date, end_date }) {
     JOIN "Sale" s ON s.id = si.sale_id
     WHERE s.created_at >= ${range.gte} AND s.created_at <= ${range.lte}
       AND s.payment_status IN ('COMPLETED', 'PARTIALLY_REFUNDED')
+      ${branchSql('s', branchId)}
     GROUP BY p.id, p.name, p.sku
     ORDER BY profit DESC
   `
@@ -229,7 +255,7 @@ async function getProfitReport({ start_date, end_date }) {
   })
 }
 
-async function getDashboardSummary() {
+async function getDashboardSummary(branchId = null) {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   const todayEnd = new Date()
@@ -241,15 +267,17 @@ async function getDashboardSummary() {
       FROM "Sale"
       WHERE created_at >= ${today} AND created_at <= ${todayEnd}
         AND payment_status IN ('COMPLETED', 'PARTIALLY_REFUNDED')
+        ${branchSql('"Sale"', branchId)}
     `,
     // Includes out-of-stock items, matching GET /inventory/low-stock
-    prisma.$queryRaw`SELECT COUNT(*)::int as cnt FROM "Product" WHERE is_active = true AND quantity <= low_stock_threshold`,
+    getLowStockCount(branchId),
     prisma.$queryRaw`
       SELECT p.name, ROUND(SUM(si.total * (si.quantity - si.refunded_quantity) / si.quantity * (s.subtotal - s.discount_amount) / NULLIF(s.subtotal, 0)), 2)::float as revenue, SUM(si.quantity - si.refunded_quantity)::int as quantity
       FROM "SaleItem" si
       JOIN "Product" p ON p.id = si.product_id
       JOIN "Sale" s ON s.id = si.sale_id
       WHERE s.payment_status IN ('COMPLETED', 'PARTIALLY_REFUNDED')
+        ${branchSql('s', branchId)}
       GROUP BY p.id, p.name
       ORDER BY revenue DESC
       LIMIT 5
@@ -259,9 +287,38 @@ async function getDashboardSummary() {
   return {
     today_revenue: parseFloat(todaySales[0].revenue || 0),
     today_transactions: todaySales[0].count,
-    low_stock_alerts: lowStockCount[0].cnt,
+    low_stock_alerts: lowStockCount,
     top_products: topProducts.map((r) => ({ name: r.name, revenue: parseFloat(r.revenue || 0), quantity: r.quantity })),
   }
+}
+
+/**
+ * Every branch side by side for a date range: revenue (net of returns), transactions and refunds,
+ * as { label, value } rows for a chart. Branches with no sales still appear, with zeros.
+ */
+async function getBranchPerformance({ start_date, end_date }) {
+  const range = dateRange(start_date, end_date)
+  const rows = await prisma.$queryRaw`
+    SELECT b.id, b.name AS label, b.code,
+      COUNT(s.id)::int AS transactions,
+      COALESCE(SUM(s.total_amount - s.refunded_amount), 0)::float AS value,
+      COALESCE(SUM(s.refunded_amount), 0)::float AS refunds
+    FROM "Branch" b
+    LEFT JOIN "Sale" s
+      ON s.branch_id = b.id
+      AND s.created_at >= ${range.gte} AND s.created_at <= ${range.lte}
+      AND s.payment_status IN ('COMPLETED', 'PARTIALLY_REFUNDED')
+    GROUP BY b.id, b.name, b.code
+    ORDER BY value DESC, b.name ASC
+  `
+  return rows.map((r) => ({
+    id: r.id,
+    label: r.label,
+    code: r.code,
+    value: parseFloat(r.value || 0),
+    transactions: r.transactions,
+    refunds: parseFloat(r.refunds || 0),
+  }))
 }
 
 async function getCashierStats(userId) {
@@ -324,5 +381,6 @@ module.exports = {
   getInventoryStatus,
   getProfitReport,
   getDashboardSummary,
+  getBranchPerformance,
   getCashierStats,
 }

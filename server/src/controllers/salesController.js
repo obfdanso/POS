@@ -5,6 +5,18 @@ const { NotFoundError } = require('../utils/errors')
 
 const without = (obj, keys) => Object.fromEntries(Object.entries(obj).filter(([key]) => !keys.includes(key)))
 
+const isOtherBranch = (sale, user) => user.role !== 'ADMIN' && sale.branch_id !== user.branch_id
+
+/** Another branch's sale with only what a return needs: no customer contacts or payment references. */
+function forOtherBranch(sale) {
+  return {
+    ...sale,
+    customer: sale.customer && { id: sale.customer.id, name: sale.customer.name },
+    payments: sale.payments.map((payment) => without(payment, ['reference'])),
+    refunds: sale.refunds.map((refund) => without(refund, ['gateway_reference', 'gateway_refund_id', 'gateway_error'])),
+  }
+}
+
 function normalizeSale(sale) {
   return {
     ...sale,
@@ -53,7 +65,7 @@ async function getSale(req, res, next) {
   try {
     const sale = await salesService.getSaleById(req.params.id)
     salesService.assertCanSeeSale(sale, req.user)
-    res.json({ success: true, data: normalizeSale(sale) })
+    res.json({ success: true, data: normalizeSale(isOtherBranch(sale, req.user) ? forOtherBranch(sale) : sale) })
   } catch (err) {
     next(err)
   }
@@ -68,13 +80,7 @@ async function lookupSale(req, res, next) {
   try {
     const sale = await salesService.getSaleByTransactionId(req.params.transactionId, Number(req.query.total))
     await recordAudit({ userId: req.user.id, action: 'SALE_LOOKUP', entity: 'Sale', entityId: sale.id, details: sale.transaction_id })
-    const trimmed = {
-      ...sale,
-      customer: sale.customer && { id: sale.customer.id, name: sale.customer.name },
-      payments: sale.payments.map((payment) => without(payment, ['reference'])),
-      refunds: sale.refunds.map((refund) => without(refund, ['gateway_reference', 'gateway_refund_id', 'gateway_error'])),
-    }
-    res.json({ success: true, data: normalizeSale(trimmed) })
+    res.json({ success: true, data: normalizeSale(forOtherBranch(sale)) })
   } catch (err) {
     next(err)
   }
@@ -84,7 +90,9 @@ async function processRefund(req, res, next) {
   try {
     const { items, reason } = req.body ?? {}
     const sale = await salesService.processRefund(req.params.id, req.user.id, { items, reason }, req.branchId)
-    res.json({ success: true, data: normalizeSale(sale), message: 'Refund processed successfully' })
+    // A return taken for another branch's sale gets the same trimmed sale as the lookup
+    const data = isOtherBranch(sale, req.user) ? forOtherBranch(sale) : sale
+    res.json({ success: true, data: normalizeSale(data), message: 'Refund processed successfully' })
   } catch (err) {
     next(err)
   }

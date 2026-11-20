@@ -220,6 +220,13 @@ describe('Selling and returning across branches', () => {
       const res = await request(app).get(`/api/sales/lookup/${sale.transaction_id}?total=${sale.total_amount}`).set(manager.headers)
       expect(res.status).toBe(200)
       expect(res.body.data.customer).toEqual({ id: customer.id, name: 'BranchTest Buyer' })
+      // Taking the return doesn't hand the details back either
+      const back = await request(app).post(`/api/sales/${sale.id}/refund`).set(manager.headers).send({})
+      expect(back.status).toBe(200)
+      expect(back.body.data.customer).toEqual({ id: customer.id, name: 'BranchTest Buyer' })
+      expect(back.body.data.payments.every((p) => !('reference' in p))).toBe(true)
+      const reopened = await request(app).get(`/api/sales/${sale.id}`).set(manager.headers)
+      expect(reopened.body.data.customer).toEqual({ id: customer.id, name: 'BranchTest Buyer' })
       expect(res.body.data.payments.every((p) => !('reference' in p))).toBe(true)
       const audit = await prisma.auditLog.findFirst({ where: { action: 'SALE_LOOKUP', entity_id: sale.id, user_id: manager.user.id } })
       expect(audit).not.toBeNull()

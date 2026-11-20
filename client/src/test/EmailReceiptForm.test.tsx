@@ -2,17 +2,18 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { EmailReceiptForm } from '../components/EmailReceiptForm'
 import { salesService } from '../services/sales'
+import { axiosResponse } from './axiosResponse'
 
 vi.mock('../services/sales', () => ({ salesService: { emailReceipt: vi.fn() } }))
 vi.mock('react-hot-toast', () => ({ default: { success: vi.fn(), error: vi.fn() } }))
 
-const sale = { id: 'sale-1', customer: { email: 'ama@example.com' } }
+const sale = { id: 'sale-1', customer: { id: 'cust-1', name: 'Ama Owusu', email: 'ama@example.com' } }
 
 describe('EmailReceiptForm', () => {
-  afterEach(() => salesService.emailReceipt.mockClear())
+  afterEach(() => vi.mocked(salesService.emailReceipt).mockClear())
 
   it("starts with the customer's email and sends to it", async () => {
-    salesService.emailReceipt.mockResolvedValue({ data: { data: { to: 'ama@example.com' }, message: 'Receipt sent to ama@example.com' } })
+    vi.mocked(salesService.emailReceipt).mockResolvedValue(axiosResponse({ success: true, data: { to: 'ama@example.com' }, message: 'Receipt sent to ama@example.com' }))
     const onSent = vi.fn()
     render(<EmailReceiptForm sale={sale} onSent={onSent} onCancel={() => {}} />)
     expect(screen.getByLabelText('Customer email')).toHaveValue('ama@example.com')
@@ -30,7 +31,7 @@ describe('EmailReceiptForm', () => {
   })
 
   it("shows the server's field error inline", async () => {
-    salesService.emailReceipt.mockImplementation(async () => {
+    vi.mocked(salesService.emailReceipt).mockImplementation(async () => {
       throw Object.assign(new Error('Request failed with status code 422'), {
         response: { data: { error: { details: [{ field: 'email', message: 'Rejected by the server' }] } } },
       })

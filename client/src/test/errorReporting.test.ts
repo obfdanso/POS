@@ -21,9 +21,10 @@ describe('client error reporting', () => {
       init: vi.fn(),
       captureException,
       setUser: vi.fn(),
-      withScope: (fn) => fn({ setContext: vi.fn() }),
+      withScope: (fn: (scope: { setContext: () => void }) => void) => fn({ setContext: vi.fn() }),
     }))
-    const fresh = await import('../utils/errorReporting?fresh')
+    vi.resetModules()
+    const fresh = await import('../utils/errorReporting')
     expect(await fresh.initErrorReporting('https://public@example.ingest.sentry.io/1')).toBe(true)
     const err = new Error('render failed')
     fresh.reportError(err, { componentStack: 'at POSPage' })

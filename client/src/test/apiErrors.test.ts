@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { getErrorMessage, getFieldErrors } from '../utils/apiErrors'
 
-const apiError = (error) => ({ response: { data: { success: false, error } } })
+const apiError = (error: unknown) => ({ response: { data: { success: false, error } } })
 
 describe('getErrorMessage', () => {
   it('uses the server message, or the fallback when there is none', () => {

@@ -10,7 +10,7 @@ import { METHOD_LABEL, splitOtherMethods } from './payments'
 export function buildRefundReceiptHtml(
   sale: Sale,
   refund: Refund,
-  settings: Pick<Settings, 'store_name' | 'store_address' | 'store_phone'>,
+  settings: Partial<Pick<Settings, 'store_name' | 'store_address' | 'store_phone'>>,
   fmt: (amount: MoneyLike | null | undefined) => string
 ): string {
   const lines = new Map((sale.items || []).map((i) => [i.id, i]))

@@ -62,15 +62,15 @@ describe('promotions (must match the server)', () => {
   ]
 
   it('picks the biggest promotion that applies', () => {
-    expect(bestPromotion({ product_id: 'cola', category_id: 'cat-drinks' }, promos).id).toBe('cola')
-    expect(bestPromotion({ product_id: 'juice', category_id: 'cat-drinks' }, promos).id).toBe('drinks')
-    expect(bestPromotion({ product_id: 'chips', category_id: 'cat-snacks' }, promos).id).toBe('store')
+    expect(bestPromotion({ product_id: 'cola', category_id: 'cat-drinks' }, promos)?.id).toBe('cola')
+    expect(bestPromotion({ product_id: 'juice', category_id: 'cat-drinks' }, promos)?.id).toBe('drinks')
+    expect(bestPromotion({ product_id: 'chips', category_id: 'cat-snacks' }, promos)?.id).toBe('store')
     expect(bestPromotion({ product_id: 'chips', category_id: 'cat-snacks' }, [])).toBeNull()
   })
 
   it('prefers the more specific promotion on a tie', () => {
     const tie = [{ id: 'store', percent_off: 10 }, { id: 'cat', category_id: 'c', percent_off: 10 }]
-    expect(bestPromotion({ product_id: 'x', category_id: 'c' }, tie).id).toBe('cat')
+    expect(bestPromotion({ product_id: 'x', category_id: 'c' }, tie)?.id).toBe('cat')
   })
 
   it('takes the promotion off first, then the cashier discount, matching the server', () => {

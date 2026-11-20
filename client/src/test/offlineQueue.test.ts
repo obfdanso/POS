@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { queueSale, queuedSales, removeQueued, syncQueuedSales, isNetworkError, newClientRef } from '../utils/offlineQueue'
+import { queueSale, queuedSales, removeQueued, syncQueuedSales, isNetworkError, newClientRef, type QueuedSalePayload } from '../utils/offlineQueue'
 
-const sale = (ref) => ({ client_ref: ref, items: [], payment_method: 'CASH', amount_paid: 10 })
+type SendSale = (payload: QueuedSalePayload, branchId: string | null) => Promise<unknown>
+
+const sale = (ref: string): QueuedSalePayload => ({ client_ref: ref, items: [], payment_method: 'CASH', amount_paid: 10 })
 
 describe('offline sales queue', () => {
   beforeEach(() => localStorage.clear())
@@ -16,7 +18,7 @@ describe('offline sales queue', () => {
 
   it('sends waiting sales, keeps refused ones with the reason, and stops on a network error', async () => {
     ;['a', 'b', 'c', 'd'].forEach((ref) => queueSale('u1', sale(ref), 10))
-    const send = vi.fn()
+    const send = vi.fn<SendSale>()
       .mockResolvedValueOnce({})
       .mockRejectedValueOnce({ isAxiosError: true, response: { status: 422, data: { error: { details: [{ message: 'Insufficient stock' }] } } } })
       .mockRejectedValueOnce({ isAxiosError: true, message: 'Network Error' })
@@ -25,7 +27,7 @@ describe('offline sales queue', () => {
     expect(queuedSales('u1').map((e) => [e.id, e.error])).toEqual([['b', 'Insufficient stock'], ['c', null], ['d', null]])
 
     // Refused sales aren't resent; the rest go on the next try
-    const later = vi.fn().mockResolvedValue({})
+    const later = vi.fn<SendSale>().mockResolvedValue({})
     expect(await syncQueuedSales('u1', later)).toEqual({ synced: 2, refused: 0 })
     expect(queuedSales('u1').map((e) => e.id)).toEqual(['b'])
   })
@@ -33,7 +35,7 @@ describe('offline sales queue', () => {
   it('waits on temporary server problems instead of marking the sale refused', async () => {
     queueSale('u1', sale('a'), 10)
     for (const status of [401, 429, 502]) {
-      const send = vi.fn().mockRejectedValue({ isAxiosError: true, response: { status, data: {} } })
+      const send = vi.fn<SendSale>().mockRejectedValue({ isAxiosError: true, response: { status, data: {} } })
       expect(await syncQueuedSales('u1', send)).toEqual({ synced: 0, refused: 0 })
     }
     expect(queuedSales('u1')[0].error).toBeNull()
@@ -42,7 +44,7 @@ describe('offline sales queue', () => {
   it('sends each sale to the branch it was rung up at', async () => {
     queueSale('u1', sale('a'), 10, 'branch-a')
     queueSale('u1', sale('b'), 10)
-    const send = vi.fn(async () => ({}))
+    const send = vi.fn<SendSale>(async () => ({}))
     await syncQueuedSales('u1', send)
     expect(send.mock.calls.map(([payload, branchId]) => [payload.client_ref, branchId])).toEqual([['a', 'branch-a'], ['b', null]])
   })

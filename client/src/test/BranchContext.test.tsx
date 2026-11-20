@@ -15,6 +15,7 @@ import { setBranchId as sendBranchHeader } from '../services/api'
 import { AuthContext } from '../context/AuthContext'
 import { BranchProvider } from '../context/BranchContext'
 import { useBranch } from '../hooks/useBranch'
+import type { User } from '../types'
 
 function Probe() {
   const branch = useBranch()
@@ -28,9 +29,11 @@ function Probe() {
   )
 }
 
-function renderAs(user) {
+function renderAs(fields: Pick<User, 'id' | 'role' | 'branch'>) {
+  const user: User = { username: fields.id, email: `${fields.id}@example.com`, full_name: fields.id, is_active: true, created_at: '', updated_at: '', ...fields }
+  const auth = { user, isAuthenticated: true, isLoading: false, login: vi.fn(), logout: vi.fn(), refreshUser: vi.fn() }
   return render(
-    <AuthContext.Provider value={{ user, isAuthenticated: true }}>
+    <AuthContext.Provider value={auth}>
       <BranchProvider>
         <Probe />
       </BranchProvider>
@@ -38,12 +41,12 @@ function renderAs(user) {
   )
 }
 
-const lastHeader = () => sendBranchHeader.mock.calls.at(-1)?.[0]
+const lastHeader = () => vi.mocked(sendBranchHeader).mock.calls.at(-1)?.[0]
 
 describe('BranchContext', () => {
   beforeEach(() => {
     localStorage.clear()
-    sendBranchHeader.mockClear()
+    vi.mocked(sendBranchHeader).mockClear()
   })
 
   it("remembers an admin's branch and sends it with every request", async () => {

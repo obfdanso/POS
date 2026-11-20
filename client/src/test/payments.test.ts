@@ -19,12 +19,12 @@ describe('methodLabel', () => {
 
 describe('paymentLines', () => {
   it('shows amount paid, change and reference for a single method', () => {
-    const lines = paymentLines({ payment_method: 'CASH', payment: { amount_paid: '50', change_given: '5' } })
+    const lines = paymentLines({ payment_method: 'CASH', payment: { method: 'CASH', amount_paid: '50', change_given: '5' } })
     expect(lines).toEqual([
       { label: 'Amount Paid:', amount: '50' },
       { label: 'Change:', amount: 5, strong: true },
     ])
-    expect(paymentLines({ payment_method: 'CARD', payments: [{ amount_paid: '9', change_given: '0', reference: 'R1' }] }))
+    expect(paymentLines({ payment_method: 'CARD', payments: [{ method: 'CARD', amount_paid: '9', change_given: '0', reference: 'R1' }] }))
       .toEqual([{ label: 'Amount Paid:', amount: '9' }, { label: 'Reference:', text: 'R1' }])
   })
 

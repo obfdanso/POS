@@ -88,6 +88,7 @@ describe('GET /api/customers/:id/purchases', () => {
     expect(res.status).toBe(200)
     expect(res.body.data.map((s) => s.payment_status)).toEqual(['REFUNDED', 'COMPLETED', 'COMPLETED'])
     expect(res.body.data[0].items_count).toBe(1)
+    expect(res.body.data[0].branch).toMatchObject({ name: 'Test Branch', code: 'TEST' })
     expect(res.body.meta.total).toBe(3)
   })
 

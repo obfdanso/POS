@@ -62,6 +62,7 @@ describe('POST /api/sales/:id/sms-receipt', () => {
     expect(to).toBe('+233245550199')
     expect(message).toContain(sale.transaction_id)
     expect(message).toContain('Total GHS 25.00')
+    expect(message).toContain('Test Branch')
     expect(message).toContain('Points earned: 2')
     expect(message).not.toContain('₵')
 

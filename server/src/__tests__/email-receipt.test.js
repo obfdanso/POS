@@ -59,6 +59,9 @@ describe('POST /api/sales/:id/email-receipt', () => {
     expect(message.to).toBe('mailtest.customer@example.com')
     expect(message.subject).toContain(sale.transaction_id)
     expect(message.html).toContain('25.00')
+    // The receipt names the branch the sale was made at
+    expect(message.html).toContain('Test Branch')
+    expect(message.text).toContain('Test Branch')
     expect(await prisma.auditLog.count({ where: { action: 'RECEIPT_EMAILED', entity_id: sale.id } })).toBe(1)
   })
 

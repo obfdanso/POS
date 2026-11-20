@@ -1,5 +1,5 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
-const { app, prisma, request, createUserWithToken, deleteTestUsers } = require('./helpers')
+const { app, prisma, request, createUserWithToken, deleteTestUsers, inTestBranch } = require('./helpers')
 const { verifyPaystackPayment } = require('../utils/paystack')
 
 jest.mock('../utils/paystack', () => ({ verifyPaystackPayment: jest.fn() }))
@@ -8,7 +8,7 @@ const PREFIX = 'shifttest'
 const TEST_SETTINGS = { tax_rate: '0', loyalty_points_rate: '10', require_open_shift: 'false' }
 let manager, cashier, otherCashier, category, product, originalSettings
 
-const auth = (who) => ({ Authorization: `Bearer ${who.token}` })
+const auth = (who) => who.headers
 const openShift = (who, body) => request(app).post('/api/shifts/open').set(auth(who)).send(body)
 const closeShift = (who, id, body) => request(app).post(`/api/shifts/${id}/close`).set(auth(who)).send(body)
 const sell = (who, body) => request(app).post('/api/sales').set(auth(who)).send(body)
@@ -23,7 +23,7 @@ beforeAll(async () => {
   otherCashier = await createUserWithToken('CASHIER', `${PREFIX}2`)
   category = await prisma.category.create({ data: { name: 'ShiftTest Category' } })
   product = await prisma.product.create({
-    data: { name: 'ShiftTest Item', sku: 'SHIFTTEST-1', category_id: category.id, price: 10, quantity: 500 },
+    data: { name: 'ShiftTest Item', sku: 'SHIFTTEST-1', category_id: category.id, price: 10, stocks: inTestBranch(500) },
   })
 })
 
@@ -39,6 +39,8 @@ afterAll(async () => {
   await prisma.category.deleteMany({ where: { name: { startsWith: 'ShiftTest' } } })
   await deleteTestUsers(PREFIX)
   await deleteTestUsers(`${PREFIX}2`)
+  await deleteTestUsers(`${PREFIX}x`)
+  await prisma.branch.deleteMany({ where: { code: 'SHB' } })
   await prisma.settings.deleteMany({ where: { key: { in: Object.keys(TEST_SETTINGS) } } })
   for (const { key, value } of originalSettings) await prisma.settings.create({ data: { key, value } })
   await prisma.$disconnect()
@@ -56,6 +58,21 @@ describe('Shifts', () => {
 
     const again = await openShift(cashier, { opening_float: 50 })
     expect(again.status).toBe(409)
+  })
+
+  it('records which branch the drawer is at', async () => {
+    const row = await prisma.shift.findUnique({ where: { id: shift.id } })
+    expect(row.branch_id).toBe(cashier.user.branch_id)
+    expect(shift.branch).toMatchObject({ code: 'TEST' })
+  })
+
+  it("keeps a manager at another branch out of this branch's shifts", async () => {
+    const elsewhere = await prisma.branch.upsert({ where: { code: 'SHB' }, update: {}, create: { name: 'ShiftTest Branch', code: 'SHB' } })
+    const outsider = await createUserWithToken('MANAGER', `${PREFIX}x`, { branchId: elsewhere.id })
+    expect((await request(app).get(`/api/shifts/${shift.id}`).set(auth(outsider))).status).toBe(404)
+    expect((await closeShift(outsider, shift.id, { counted_cash: 0 })).status).toBe(404)
+    const list = await request(app).get('/api/shifts').set(auth(outsider))
+    expect(list.body.data.map((s) => s.id)).not.toContain(shift.id)
   })
 
   it('rejects a negative float', async () => {

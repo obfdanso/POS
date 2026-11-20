@@ -1,15 +1,15 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
-const { app, prisma, request, createUserWithToken, deleteTestUsers } = require('./helpers')
+const { app, prisma, request, createUserWithToken, deleteTestUsers, inTestBranch, stockAt } = require('./helpers')
 
 const PREFIX = 'returntest'
 const TEST_SETTINGS = { tax_rate: '0', loyalty_points_rate: '10', require_open_shift: 'false' }
 let manager, cashier, category, pen, book, cheap, customer, originalSettings
 
-const auth = (who) => ({ Authorization: `Bearer ${who.token}` })
+const auth = (who) => who.headers
 const sell = (body) => request(app).post('/api/sales').set(auth(cashier)).send(body)
 const refund = (saleId, body, who = manager) => request(app).post(`/api/sales/${saleId}/refund`).set(auth(who)).send(body)
 const lineFor = (sale, product) => sale.items.find((i) => i.product_id === product.id)
-const stockOf = async (product) => (await prisma.product.findUnique({ where: { id: product.id } })).quantity
+const stockOf = async (product) => (await stockAt(product.id))
 
 beforeAll(async () => {
   originalSettings = await prisma.settings.findMany({ where: { key: { in: Object.keys(TEST_SETTINGS) } } })
@@ -20,9 +20,9 @@ beforeAll(async () => {
   cashier = await createUserWithToken('CASHIER', PREFIX)
   category = await prisma.category.create({ data: { name: 'ReturnTest Category' } })
   const products = await Promise.all([
-    prisma.product.create({ data: { name: 'ReturnTest Pen', sku: 'RETURNTEST-PEN', category_id: category.id, price: 10, cost_price: 4, quantity: 100 } }),
-    prisma.product.create({ data: { name: 'ReturnTest Book', sku: 'RETURNTEST-BOOK', category_id: category.id, price: 20, cost_price: 12, quantity: 100 } }),
-    prisma.product.create({ data: { name: 'ReturnTest Cheap', sku: 'RETURNTEST-CHEAP', category_id: category.id, price: 3.33, quantity: 100 } }),
+    prisma.product.create({ data: { name: 'ReturnTest Pen', sku: 'RETURNTEST-PEN', category_id: category.id, price: 10, cost_price: 4, stocks: inTestBranch(100) } }),
+    prisma.product.create({ data: { name: 'ReturnTest Book', sku: 'RETURNTEST-BOOK', category_id: category.id, price: 20, cost_price: 12, stocks: inTestBranch(100) } }),
+    prisma.product.create({ data: { name: 'ReturnTest Cheap', sku: 'RETURNTEST-CHEAP', category_id: category.id, price: 3.33, stocks: inTestBranch(100) } }),
   ])
   pen = products[0]
   book = products[1]

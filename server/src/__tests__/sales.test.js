@@ -2,7 +2,10 @@ require('dotenv').config({ path: require('path').join(__dirname, '../../.env') }
 const request = require('supertest')
 const app = require('../app')
 const prisma = require('../utils/prismaClient')
-const bcrypt = require('bcrypt')
+const { createUserWithToken, inTestBranch, stockAt } = require('./helpers')
+
+// Stock of a product at the test branch, shaped like the product rows these tests used to read
+const stockOf = async (id) => ({ quantity: await stockAt(id) })
 const { verifyPaystackPayment } = require('../utils/paystack')
 
 // Never call the real Paystack API from tests
@@ -16,7 +19,7 @@ function mockPaystackSuccess(amountGhs) {
 }
 
 // Tests assume 0% tax and 1 loyalty point per GHS 10; the dev database may be configured differently
-const TEST_SETTINGS = { tax_rate: '0', loyalty_points_rate: '10' }
+const TEST_SETTINGS = { tax_rate: '0', loyalty_points_rate: '10', require_open_shift: 'false' }
 let originalSettings = []
 
 let cashierToken
@@ -34,37 +37,14 @@ beforeAll(async () => {
     await prisma.settings.upsert({ where: { key }, update: { value }, create: { key, value } })
   }
 
-  // Create test users
-  const hash = await bcrypt.hash('testpass123', 12)
-  cashierUser = await prisma.user.create({
-    data: {
-      username: 'sales_test_cashier',
-      email: 'sales_test_cashier@test.com',
-      password_hash: hash,
-      full_name: 'Sales Test Cashier',
-      role: 'CASHIER',
-    },
-  })
-  managerUser = await prisma.user.create({
-    data: {
-      username: 'sales_test_manager',
-      email: 'sales_test_manager@test.com',
-      password_hash: hash,
-      full_name: 'Sales Test Manager',
-      role: 'MANAGER',
-    },
-  })
-
-  // Login to get tokens
-  const cashierLogin = await request(app)
-    .post('/api/auth/login')
-    .send({ username: 'sales_test_cashier', password: 'testpass123' })
-  cashierToken = cashierLogin.body.data.accessToken
-
-  const managerLogin = await request(app)
-    .post('/api/auth/login')
-    .send({ username: 'sales_test_manager', password: 'testpass123' })
-  managerToken = managerLogin.body.data.accessToken
+  const [cashierAccount, managerAccount] = await Promise.all([
+    createUserWithToken('CASHIER', 'salestest'),
+    createUserWithToken('MANAGER', 'salestest'),
+  ])
+  cashierUser = cashierAccount.user
+  managerUser = managerAccount.user
+  cashierToken = cashierAccount.token
+  managerToken = managerAccount.token
 
   // Create test category and products
   testCategory = await prisma.category.create({
@@ -78,8 +58,7 @@ beforeAll(async () => {
       category_id: testCategory.id,
       price: 10.0,
       cost_price: 5.0,
-      quantity: 100,
-      low_stock_threshold: 10,
+      stocks: inTestBranch(100, 10),
     },
   })
   testProduct2 = await prisma.product.create({
@@ -90,8 +69,7 @@ beforeAll(async () => {
       category_id: testCategory.id,
       price: 25.0,
       cost_price: 12.0,
-      quantity: 5,
-      low_stock_threshold: 5,
+      stocks: inTestBranch(5, 5),
     },
   })
   testCustomer = await prisma.customer.create({
@@ -128,7 +106,7 @@ afterAll(async () => {
 
 describe('POST /api/sales — create sale', () => {
   it('creates a CASH sale successfully and deducts stock', async () => {
-    const initialProduct = await prisma.product.findUnique({ where: { id: testProduct.id } })
+    const initialProduct = await stockOf(testProduct.id)
     const initialQty = initialProduct.quantity
 
     const res = await request(app)
@@ -154,7 +132,7 @@ describe('POST /api/sales — create sale', () => {
     expect(parseFloat(sale.payment.change_given)).toBe(10)
 
     // Verify stock was deducted
-    const updatedProduct = await prisma.product.findUnique({ where: { id: testProduct.id } })
+    const updatedProduct = await stockOf(testProduct.id)
     expect(updatedProduct.quantity).toBe(initialQty - 2)
 
     // Verify inventory log was created
@@ -379,7 +357,7 @@ describe('POST /api/sales/:id/refund', () => {
         amount_paid: 25.0,
       })
     saleId = res.body.data.id
-    const p = await prisma.product.findUnique({ where: { id: testProduct.id } })
+    const p = await stockOf(testProduct.id)
     productQtyBeforeRefund = p.quantity
   })
 
@@ -392,7 +370,7 @@ describe('POST /api/sales/:id/refund', () => {
     expect(res.body.data.payment_status).toBe('REFUNDED')
 
     // Verify stock was restored
-    const updatedProduct = await prisma.product.findUnique({ where: { id: testProduct.id } })
+    const updatedProduct = await stockOf(testProduct.id)
     expect(updatedProduct.quantity).toBe(productQtyBeforeRefund + 2)
 
     // Verify RETURN inventory log was created
@@ -444,7 +422,7 @@ describe('Sale safeguards', () => {
         sku: 'SALES-TEST-LIMITED',
         category_id: testCategory.id,
         price: 4.0,
-        quantity: 3,
+        stocks: inTestBranch(3),
       },
     })
   })
@@ -474,7 +452,7 @@ describe('Sale safeguards', () => {
     const succeeded = results.filter((r) => r.status === 201).length
     expect(succeeded).toBe(3)
 
-    const product = await prisma.product.findUnique({ where: { id: limitedProduct.id } })
+    const product = await stockOf(limitedProduct.id)
     expect(product.quantity).toBe(0)
   })
 
@@ -503,7 +481,7 @@ describe('Sale safeguards', () => {
 
   it('restores stock only once when the same refund is submitted concurrently', async () => {
     const sale = await cashSale(testProduct.id, 2)
-    const before = await prisma.product.findUnique({ where: { id: testProduct.id } })
+    const before = await stockOf(testProduct.id)
 
     const results = await Promise.all(
       [1, 2, 3].map(() =>
@@ -512,7 +490,7 @@ describe('Sale safeguards', () => {
     )
     expect(results.filter((r) => r.status === 200)).toHaveLength(1)
 
-    const after = await prisma.product.findUnique({ where: { id: testProduct.id } })
+    const after = await stockOf(testProduct.id)
     expect(after.quantity).toBe(before.quantity + 2)
   })
 })

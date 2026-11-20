@@ -60,6 +60,20 @@ async function createTestProduct(data, { quantity = 0, low_stock_threshold = 10,
   })
 }
 
+/**
+ * Nested-create value for a product's `stocks`: stock at the test branch. Lets fixtures that call
+ * prisma.product.create directly say `stocks: inTestBranch(20)`.
+ */
+function inTestBranch(quantity = 0, low_stock_threshold = 10) {
+  return {
+    create: {
+      quantity,
+      low_stock_threshold,
+      branch: { connectOrCreate: { where: { code: 'TEST' }, create: { name: 'Test Branch', code: 'TEST' } } },
+    },
+  }
+}
+
 /** How many of a product a branch (default: the test branch) holds, or null when it doesn't stock it. */
 async function stockAt(productId, branchId) {
   const branch_id = branchId ?? (await testBranch()).id
@@ -77,4 +91,4 @@ async function deleteTestUsers(prefix) {
   await prisma.user.deleteMany({ where: { id: { in: ids } } })
 }
 
-module.exports = { app, prisma, request, createUserWithToken, deleteTestUsers, testBranch, createTestProduct, stockAt }
+module.exports = { app, prisma, request, createUserWithToken, deleteTestUsers, testBranch, createTestProduct, stockAt, inTestBranch }

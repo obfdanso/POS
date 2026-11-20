@@ -2,7 +2,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '../../.env') }
 const { app, prisma, request, createUserWithToken, deleteTestUsers } = require('./helpers')
 
 const PREFIX = 'branchtest'
-const CODES = ['BTA', 'BTB', 'BTC']
+const CODES = ['BTA', 'BTB', 'BTC', 'BTX', 'BTS', 'BTE']
 let admin, manager, cashier, branchA
 
 beforeAll(async () => {
@@ -110,5 +110,108 @@ describe('Branches API', () => {
       .send({ product_id: '00000000-0000-4000-8000-000000000000', quantity: 1 })
     expect(res.status).toBe(422)
     expect(res.body.error.details[0]).toMatchObject({ field: 'branch', message: 'Choose a branch first' })
+  })
+})
+
+
+describe('Selling and returning across branches', () => {
+  let branchB, managerB, cashierB, item, unstocked, originalShiftSetting
+  const sell = (who, body, headers = who.headers) => request(app).post('/api/sales').set(headers).send({ payment_method: 'CASH', amount_paid: 1000, ...body })
+
+  beforeAll(async () => {
+    originalShiftSetting = await prisma.settings.findUnique({ where: { key: 'require_open_shift' } })
+    await prisma.settings.upsert({ where: { key: 'require_open_shift' }, update: { value: 'false' }, create: { key: 'require_open_shift', value: 'false' } })
+    branchB = await prisma.branch.create({ data: { name: 'BranchTest B', code: 'BTB' } })
+    managerB = await createUserWithToken('MANAGER', `${PREFIX}b`, { branchId: branchB.id })
+    cashierB = await createUserWithToken('CASHIER', `${PREFIX}b`, { branchId: branchB.id })
+    const category = await prisma.category.upsert({ where: { name: 'BranchTest Category' }, update: {}, create: { name: 'BranchTest Category' } })
+    item = await prisma.product.create({
+      data: {
+        name: 'BranchTest Soap', sku: 'BRANCHTEST-1', category_id: category.id, price: 5,
+        stocks: { create: [{ branch_id: branchA.id, quantity: 3 }, { branch_id: branchB.id, quantity: 3 }] },
+      },
+    })
+    unstocked = await prisma.product.create({
+      data: { name: 'BranchTest Kettle', sku: 'BRANCHTEST-2', category_id: category.id, price: 50, stocks: { create: { branch_id: branchB.id, quantity: 2 } } },
+    })
+  })
+
+  afterAll(async () => {
+    const ids = [item.id, unstocked.id]
+    await prisma.sale.deleteMany({ where: { sale_items: { some: { product_id: { in: ids } } } } })
+    await prisma.inventoryLog.deleteMany({ where: { product_id: { in: ids } } })
+    await prisma.branchStock.deleteMany({ where: { product_id: { in: ids } } })
+    await prisma.product.deleteMany({ where: { id: { in: ids } } })
+    await prisma.category.deleteMany({ where: { name: 'BranchTest Category' } })
+    await prisma.shift.deleteMany({ where: { user_id: admin.user.id } })
+    await deleteTestUsers(`${PREFIX}b`)
+    if (originalShiftSetting) await prisma.settings.update({ where: { key: 'require_open_shift' }, data: { value: originalShiftSetting.value } })
+  })
+
+  const stock = async (branch, product = item) =>
+    (await prisma.branchStock.findUnique({ where: { branch_id_product_id: { branch_id: branch.id, product_id: product.id } } }))?.quantity
+
+  it("sells from the branch's own stock only", async () => {
+    const res = await sell(cashier, { items: [{ product_id: item.id, quantity: 3 }] })
+    expect(res.status).toBe(201)
+    expect(res.body.data.branch_id).toBe(branchA.id)
+    expect(await stock(branchA)).toBe(0)
+    expect(await stock(branchB)).toBe(3)
+
+    const more = await sell(cashier, { items: [{ product_id: item.id, quantity: 1 }] })
+    expect(more.status).toBe(422)
+    const log = await prisma.inventoryLog.findFirst({ where: { product_id: item.id, change_type: 'SALE' } })
+    expect(log.branch_id).toBe(branchA.id)
+  })
+
+  it('refuses a product the branch does not stock', async () => {
+    const res = await sell(cashier, { items: [{ product_id: unstocked.id, quantity: 1 }] })
+    expect(res.status).toBe(422)
+    expect(res.body.error.details[0]).toMatchObject({ field: 'items', message: '"BranchTest Kettle" is not stocked at this branch' })
+  })
+
+  it('puts goods returned at another branch into that branch\'s stock', async () => {
+    const sale = (await sell(cashierB, { items: [{ product_id: unstocked.id, quantity: 1 }] })).body.data
+    expect(await stock(branchB, unstocked)).toBe(1)
+
+    // Branch A's manager can't browse branch B's sales, but finds this one by its transaction ID
+    expect((await request(app).get(`/api/sales/${sale.id}`).set(manager.headers)).status).toBe(404)
+    const found = await request(app).get(`/api/sales/lookup/${sale.transaction_id}`).set(manager.headers)
+    expect(found.status).toBe(200)
+    expect(found.body.data).toMatchObject({ id: sale.id, branch: { code: 'BTB' } })
+
+    const back = await request(app).post(`/api/sales/${sale.id}/refund`).set(manager.headers).send({ reason: 'Bought in B, returned in A' })
+    expect(back.status).toBe(200)
+    expect(await stock(branchA, unstocked)).toBe(1)
+    expect(await stock(branchB, unstocked)).toBe(1)
+    const refund = await prisma.refund.findFirst({ where: { sale_id: sale.id } })
+    expect(refund.branch_id).toBe(branchA.id)
+    // Having handled the return, A's manager can open the sale again (e.g. to reprint the slip)
+    expect((await request(app).get(`/api/sales/${sale.id}`).set(manager.headers)).status).toBe(200)
+  })
+
+  it("lists only the branch's sales to its manager", async () => {
+    const res = await request(app).get('/api/sales?per_page=100').set(managerB.headers)
+    expect(res.status).toBe(200)
+    expect(res.body.data.length).toBeGreaterThan(0)
+    expect(res.body.data.every((s) => s.branch_id === branchB.id)).toBe(true)
+  })
+
+  it("doesn't let cashiers look sales up by transaction ID", async () => {
+    expect((await request(app).get('/api/sales/lookup/TXN-20260101-0001').set(cashier.headers)).status).toBe(403)
+  })
+
+  it("doesn't use an admin's shift at one branch for a sale at another", async () => {
+    await prisma.shift.create({ data: { user_id: admin.user.id, opening_float: 0, branch_id: branchA.id } })
+    const res = await sell(admin, { items: [{ product_id: item.id, quantity: 1 }] }, { ...admin.headers, 'X-Branch-Id': branchB.id })
+    expect(res.status).toBe(201)
+    expect(res.body.data.branch_id).toBe(branchB.id)
+    expect(res.body.data.shift_id).toBeNull()
+  })
+
+  it('makes an admin choose a branch before selling', async () => {
+    const res = await sell(admin, { items: [{ product_id: item.id, quantity: 1 }] }, { Authorization: admin.headers.Authorization })
+    expect(res.status).toBe(422)
+    expect(res.body.error.details[0].field).toBe('branch')
   })
 })

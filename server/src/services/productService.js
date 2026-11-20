@@ -80,18 +80,39 @@ async function listProducts({ page = 1, per_page = 20, search, category_id, stat
   let products
   const total = await prisma.product.count({ where })
   if (sort === 'quantity') {
+    const desc = order === 'desc'
+    // Products no branch stocks hold 0, so they come first going up and last going down. (With a
+    // branch chosen, only products it stocks are listed, so there are none.)
+    const unstockedWhere = { ...where, stocks: { none: {} } }
+    const unstockedCount = branchId ? 0 : await prisma.product.count({ where: unstockedWhere })
+    const stockedCount = total - unstockedCount
+    // This page's window over [unstocked..., stocked...] (ascending) or [stocked..., unstocked...]
+    const [first, firstCount] = desc ? ['stocked', stockedCount] : ['unstocked', unstockedCount]
+    const window = (part) => {
+      const offset = part === first ? 0 : firstCount
+      const from = Math.max(0, skip - offset)
+      const to = Math.min(part === 'stocked' ? stockedCount : unstockedCount, skip + take - offset)
+      return { skip: from, take: Math.max(0, to - from) }
+    }
+    const stockedPage = window('stocked')
+    const unstockedPage = window('unstocked')
     // Order by the branch's stock (or the chain's total), then load that page of products
-    const groups = await prisma.branchStock.groupBy({
-      by: ['product_id'],
-      where: { ...(branchId && { branch_id: branchId }), product: where },
-      _sum: { quantity: true },
-      orderBy: [{ _sum: { quantity: order === 'desc' ? 'desc' : 'asc' } }, { product_id: 'asc' }],
-      skip,
-      take,
-    })
+    const groups = stockedPage.take
+      ? await prisma.branchStock.groupBy({
+        by: ['product_id'],
+        where: { ...(branchId && { branch_id: branchId }), product: where },
+        _sum: { quantity: true },
+        orderBy: [{ _sum: { quantity: desc ? 'desc' : 'asc' } }, { product_id: 'asc' }],
+        ...stockedPage,
+      })
+      : []
+    const unstocked = unstockedPage.take
+      ? await prisma.product.findMany({ where: unstockedWhere, include, orderBy: [{ name: 'asc' }, { id: 'asc' }], ...unstockedPage })
+      : []
     const found = await prisma.product.findMany({ where: { id: { in: groups.map((g) => g.product_id) } }, include })
     const byId = new Map(found.map((p) => [p.id, p]))
-    products = groups.map((g) => byId.get(g.product_id)).filter(Boolean)
+    const stocked = groups.map((g) => byId.get(g.product_id)).filter(Boolean)
+    products = desc ? [...stocked, ...unstocked] : [...unstocked, ...stocked]
   } else {
     products = await prisma.product.findMany({
       where,

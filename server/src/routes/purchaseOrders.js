@@ -2,6 +2,7 @@ const express = require('express')
 const { body, param, query } = require('express-validator')
 const controller = require('../controllers/purchaseOrderController')
 const { authenticate, authorize } = require('../middleware/auth')
+const { requireBranch } = require('../middleware/branch')
 const validate = require('../middleware/validate')
 const exactBody = require('../middleware/exactBody')
 const paginationRules = require('../middleware/pagination')
@@ -35,6 +36,7 @@ router.get(
 
 router.get(
   '/suggestions',
+  requireBranch,
   query('supplier_id').isUUID().withMessage('Choose a supplier'),
   validate,
   controller.getReorderSuggestions
@@ -44,6 +46,7 @@ router.get('/:id', idRule(), validate, controller.getPurchaseOrder)
 
 router.post(
   '/',
+  requireBranch,
   exactBody([
     body('supplier_id').isUUID().withMessage('Choose a supplier'),
     body('items').isArray({ min: 1, max: 200 }).withMessage('An order needs between 1 and 200 items'),

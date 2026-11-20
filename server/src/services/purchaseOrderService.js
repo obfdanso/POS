@@ -3,12 +3,14 @@ const { buildOrderBy } = require('../middleware/sorting')
 const { NotFoundError, ValidationError } = require('../utils/errors')
 const { recordAudit } = require('../utils/audit')
 const { buildDateRange } = require('../utils/dateRange')
+const { changeStock } = require('../utils/branchStock')
 
 const PO_INCLUDE = {
   supplier: { select: { id: true, name: true, phone: true, email: true } },
   created_by: { select: { id: true, full_name: true } },
+  branch: { select: { id: true, name: true, code: true } },
   items: {
-    include: { product: { select: { id: true, name: true, sku: true, quantity: true, cost_price: true } } },
+    include: { product: { select: { id: true, name: true, sku: true, cost_price: true } } },
     orderBy: { created_at: 'asc' },
   },
 }
@@ -49,7 +51,8 @@ function withProgress(po) {
   }
 }
 
-async function createPurchaseOrder({ supplier_id, items, expected_at, notes }, userId) {
+/** An order of goods to be delivered to `branchId`. */
+async function createPurchaseOrder({ supplier_id, items, expected_at, notes }, userId, branchId) {
   const supplier = await prisma.supplier.findUnique({ where: { id: supplier_id }, select: { id: true, name: true } })
   if (!supplier) throw new ValidationError('Supplier not found', [{ field: 'supplier_id', message: 'Supplier does not exist' }])
 
@@ -74,6 +77,7 @@ async function createPurchaseOrder({ supplier_id, items, expected_at, notes }, u
             po_number: await nextPoNumber(tx),
             supplier_id,
             created_by_id: userId,
+            branch_id: branchId,
             total_cost: total,
             expected_at: expected_at ? new Date(expected_at) : null,
             notes: notes || null,
@@ -94,15 +98,22 @@ async function createPurchaseOrder({ supplier_id, items, expected_at, notes }, u
   }
 }
 
-async function getPurchaseOrder(id) {
+/** With a `user`, managers may only reach their own branch's orders (others look missing). */
+function assertBranchAccess(po, user) {
+  if (user && user.role !== 'ADMIN' && po.branch_id !== user.branch_id) throw new NotFoundError('Purchase order not found')
+}
+
+async function getPurchaseOrder(id, user = null) {
   const po = await prisma.purchaseOrder.findUnique({ where: { id }, include: PO_INCLUDE })
   if (!po) throw new NotFoundError('Purchase order not found')
+  assertBranchAccess(po, user)
   return withProgress(po)
 }
 
-async function listPurchaseOrders({ page = 1, per_page = 20, status, supplier_id, search, start_date, end_date, sort, order } = {}) {
+async function listPurchaseOrders({ page = 1, per_page = 20, status, supplier_id, search, start_date, end_date, sort, order, branchId = null } = {}) {
   const take = Math.min(per_page, 100)
   const where = {}
+  if (branchId) where.branch_id = branchId
   if (status) where.status = status
   if (supplier_id) where.supplier_id = supplier_id
   if (search) where.po_number = { contains: search.trim(), mode: 'insensitive' }
@@ -116,6 +127,7 @@ async function listPurchaseOrders({ page = 1, per_page = 20, status, supplier_id
       include: {
         supplier: { select: { id: true, name: true } },
         created_by: { select: { id: true, full_name: true } },
+        branch: { select: { id: true, name: true, code: true } },
         items: { select: { quantity_ordered: true, quantity_received: true } },
       },
       orderBy: buildOrderBy({ sort, order }, PO_SORTS, { created_at: 'desc' }),
@@ -137,12 +149,14 @@ async function listPurchaseOrders({ page = 1, per_page = 20, status, supplier_id
  * update_cost is false) sets the product's cost price to what this order paid. With no `items`,
  * everything still outstanding is received.
  */
-async function receivePurchaseOrder(id, userId, { items, update_cost = true, notes } = {}) {
+async function receivePurchaseOrder(id, user, { items, update_cost = true, notes } = {}) {
+  const userId = user.id
   return prisma.$transaction(async (tx) => {
     // Lock the order so two people receiving the same delivery can't both add the stock
     const locked = await tx.$queryRaw`SELECT id FROM "PurchaseOrder" WHERE id = ${id} FOR UPDATE`
     if (locked.length === 0) throw new NotFoundError('Purchase order not found')
     const po = await tx.purchaseOrder.findUnique({ where: { id }, include: { items: { include: { product: { select: { name: true } } } } } })
+    assertBranchAccess(po, user)
     if (!['ORDERED', 'PARTIALLY_RECEIVED'].includes(po.status)) {
       throw new ValidationError('Order closed', [{ field: 'status', message: `This order is ${po.status.toLowerCase().replace('_', ' ')} and can't receive more goods` }])
     }
@@ -170,21 +184,16 @@ async function receivePurchaseOrder(id, userId, { items, update_cost = true, not
     for (const r of requested) {
       const line = lines.get(r.item_id)
       await tx.purchaseOrderItem.update({ where: { id: line.id }, data: { quantity_received: { increment: r.quantity } } })
-      const product = await tx.product.update({
-        where: { id: line.product_id },
-        data: { quantity: { increment: r.quantity }, ...(update_cost && { cost_price: line.unit_cost }) },
-        select: { quantity: true },
-      })
-      await tx.inventoryLog.create({
-        data: {
-          product_id: line.product_id,
-          change_type: 'RESTOCK',
-          quantity_change: r.quantity,
-          previous_quantity: product.quantity - r.quantity,
-          new_quantity: product.quantity,
-          user_id: userId,
-          notes: `Received on ${po.po_number}${notes ? `: ${notes}` : ''}`.slice(0, 500),
-        },
+      if (update_cost) await tx.product.update({ where: { id: line.product_id }, data: { cost_price: line.unit_cost } })
+      // Goods go into the ordering branch's stock; a product it didn't carry, it now does
+      await changeStock(tx, {
+        branchId: po.branch_id,
+        productId: line.product_id,
+        change: r.quantity,
+        type: 'RESTOCK',
+        userId,
+        notes: `Received on ${po.po_number}${notes ? `: ${notes}` : ''}`.slice(0, 500),
+        createIfMissing: true,
       })
     }
 
@@ -199,13 +208,15 @@ async function receivePurchaseOrder(id, userId, { items, update_cost = true, not
       { userId, action: 'PURCHASE_ORDER_RECEIVED', entity: 'PurchaseOrder', entityId: id, details: `${po.po_number}: ${units} unit${units === 1 ? '' : 's'} received${complete ? ' (complete)' : ''}` },
       tx
     )
-  }).then(() => getPurchaseOrder(id))
+  }).then(() => getPurchaseOrder(id, user))
 }
 
 /** Closes an order that won't (fully) arrive. Goods already received stay in stock. */
-async function cancelPurchaseOrder(id, userId, reason) {
-  const po = await prisma.purchaseOrder.findUnique({ where: { id }, select: { po_number: true } })
+async function cancelPurchaseOrder(id, user, reason) {
+  const userId = user.id
+  const po = await prisma.purchaseOrder.findUnique({ where: { id }, select: { po_number: true, branch_id: true } })
   if (!po) throw new NotFoundError('Purchase order not found')
+  assertBranchAccess(po, user)
   // The status guard means a delivery being received at the same moment can't be cancelled under it
   const { count } = await prisma.purchaseOrder.updateMany({
     where: { id, status: { in: ['ORDERED', 'PARTIALLY_RECEIVED'] } },
@@ -215,23 +226,25 @@ async function cancelPurchaseOrder(id, userId, reason) {
     throw new ValidationError('Order closed', [{ field: 'status', message: 'Only open orders can be cancelled' }])
   }
   await recordAudit({ userId, action: 'PURCHASE_ORDER_CANCELLED', entity: 'PurchaseOrder', entityId: id, details: `${po.po_number}${reason ? `: ${reason}` : ''}` })
-  return getPurchaseOrder(id)
+  return getPurchaseOrder(id, user)
 }
 
 /**
- * A supplier's active products at or below their low-stock level, with a suggested order that
- * brings each back to twice its threshold, less anything already on open orders.
+ * A supplier's active products at or below their low-stock level at a branch, with a suggested
+ * order that brings each back to twice its threshold, less anything already on that branch's open
+ * orders.
  */
-async function getReorderSuggestions(supplierId) {
+async function getReorderSuggestions(supplierId, branchId) {
   const rows = await prisma.$queryRaw`
-    SELECT p.id, p.name, p.sku, p.quantity, p.low_stock_threshold, p.cost_price,
+    SELECT p.id, p.name, p.sku, s.quantity, s.low_stock_threshold, p.cost_price,
            COALESCE(SUM(poi.quantity_ordered - poi.quantity_received) FILTER (WHERE po.status IN ('ORDERED', 'PARTIALLY_RECEIVED')), 0)::int AS on_order
-    FROM "Product" p
+    FROM "BranchStock" s
+    JOIN "Product" p ON p.id = s.product_id
     LEFT JOIN "PurchaseOrderItem" poi ON poi.product_id = p.id
-    LEFT JOIN "PurchaseOrder" po ON po.id = poi.purchase_order_id
-    WHERE p.supplier_id = ${supplierId} AND p.is_active = true AND p.quantity <= p.low_stock_threshold
-    GROUP BY p.id
-    ORDER BY p.quantity ASC, p.name ASC
+    LEFT JOIN "PurchaseOrder" po ON po.id = poi.purchase_order_id AND po.branch_id = s.branch_id
+    WHERE s.branch_id = ${branchId} AND p.supplier_id = ${supplierId} AND p.is_active = true AND s.quantity <= s.low_stock_threshold
+    GROUP BY p.id, s.quantity, s.low_stock_threshold
+    ORDER BY s.quantity ASC, p.name ASC
   `
   return rows
     .map((r) => {

@@ -12,6 +12,11 @@ A web-based point of sale system for a retail shop, built as a final-year capsto
 
 ## Features
 
+**Multiple branches**
+- An admin creates branches (name, code, address, phone) and can close or reopen them. Products and prices are shared, and each branch stocks its own selection with its own counts and low-stock levels.
+- Cashiers and managers belong to one branch and only see and sell its stock. Admins switch branch from the header, or view **All branches** for combined figures and a branch-by-branch report.
+- A customer can return an item at any branch: the manager finds the sale by its transaction ID, the goods go back into that branch's stock, and cash comes out of its drawer. Receipts show the branch's address.
+
 **Point of sale**
 - Search by name, SKU, or barcode. A scanned or typed barcode plus **Enter** adds the product straight to the cart.
 - Browse products by category. Stock badges warn when an item is running low.
@@ -89,7 +94,8 @@ Log in at http://localhost:5173:
 |---|---|---|---|
 | Admin | `admin` | `admin123` | Dashboard, with every page available |
 | Manager | `manager` | `manager123` | Dashboard, without Users and Settings |
-| Cashier | `cashier` | `cashier123` | Cashier home, New Sale, My Sales |
+| Cashier | `cashier` | `cashier123` | Cashier home, New Sale, My Sales (Kumasi Central) |
+| Cashier | `cashier2` | `cashier123` | The same, at Accra Mall |
 
 ### Or run everything with Docker
 
@@ -164,9 +170,9 @@ cd client && npm test     # Vitest component and utility tests
 cd e2e && npm install && npm test   # Playwright: real browser against the real API and a production build
 ```
 
-The end-to-end tests start the API and a production build of the web app themselves (or reuse ones already running), sign in as the seeded users, and use the database in `server/.env`, which must be seeded. They cover sign-in and role access, a keyboard checkout from barcode scan to receipt, a partial return with its refund slip, a promotion from creation to the receipt, a purchase order received in two deliveries, choosing a product variant at the till, and a cash sale made offline. Locally they use your installed Chrome.
+The end-to-end tests start the API and a production build of the web app themselves (or reuse ones already running), sign in as the seeded users, and use the database in `server/.env`, which must be seeded. They cover sign-in and role access, opening a branch and selling there, a keyboard checkout from barcode scan to receipt, a partial return with its refund slip, a promotion from creation to the receipt, a purchase order received in two deliveries, choosing a product variant at the till, and a cash sale made offline. Locally they use your installed Chrome.
 
-273 backend tests cover every module: auth (lockout, token rotation), sales (payments, discounts, concurrent sales), promotions, purchase orders, split payments, Paystack refunds and its webhook, product variants, loyalty redemption, emailed and texted receipts, request IDs, readiness and error reporting, partial returns, cash drawer shifts, inventory, products, customers, suppliers, reports (exact totals), users, and settings. Services have about 90% line coverage. The tests create and delete their own data, run one file at a time, and mock Paystack.
+323 backend tests cover every module: branches (isolation between branches, cross-branch returns), auth (lockout, token rotation), sales (payments, discounts, concurrent sales), promotions, purchase orders, split payments, Paystack refunds and its webhook, product variants, loyalty redemption, emailed and texted receipts, request IDs, readiness and error reporting, partial returns, cash drawer shifts, inventory, products, customers, suppliers, reports (exact totals), users, and settings. Services have about 90% line coverage. The tests create and delete their own data, run one file at a time, and mock Paystack.
 
 GitHub Actions runs the server tests against a fresh PostgreSQL database, both linters, the client tests, a production build, and the Playwright tests against a freshly seeded database, on every push and pull request (`.github/workflows/ci.yml`).
 

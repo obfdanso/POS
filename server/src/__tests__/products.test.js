@@ -333,6 +333,31 @@ describe('Branch stock', () => {
     expect(await stockAt(res.body.data.id, home.id)).toBe(2)
   })
 
+  it('leaves a closed branch\'s stock alone when an admin saves the branch list', async () => {
+    const shut = await prisma.branch.upsert({ where: { code: 'PTX' }, update: {}, create: { name: 'ProdTest Shut', code: 'PTX' } })
+    const p = await createTestProduct({ name: 'ProdTest Closed', sku: 'PRODTEST-CLOSED', category_id: category.id, price: 1 }, { quantity: 1 })
+    await prisma.branchStock.create({ data: { branch_id: shut.id, product_id: p.id, quantity: 3 } })
+    await prisma.branch.update({ where: { id: shut.id }, data: { is_active: false } })
+    try {
+      const res = await request(app).put(`/api/products/${p.id}`).set(allBranches()).send({ stocks: [{ branch_id: home.id }] })
+      expect(res.status).toBe(200)
+      expect(await stockAt(p.id, shut.id)).toBe(3)
+    } finally {
+      await prisma.branchStock.deleteMany({ where: { branch_id: shut.id } })
+      await prisma.branch.delete({ where: { id: shut.id } })
+    }
+  })
+
+  it('asks an admin viewing all branches which branch a starting quantity or low-stock level is for', async () => {
+    const create = await request(app).post('/api/products').set(allBranches())
+      .send({ name: 'ProdTest Where', sku: 'PRODTEST-WHERE', category_id: category.id, price: 4, quantity: 50 })
+    expect(create.status).toBe(422)
+    expect(create.body.error.details[0].field).toBe('quantity')
+    const update = await request(app).put(`/api/products/${product.id}`).set(allBranches()).send({ low_stock_threshold: 2 })
+    expect(update.status).toBe(422)
+    expect(update.body.error.details[0].field).toBe('low_stock_threshold')
+  })
+
   it('sets the low-stock level for the acting branch only', async () => {
     const res = await request(app).put(`/api/products/${product.id}`).set(auth(manager)).send({ low_stock_threshold: 3 })
     expect(res.status).toBe(200)

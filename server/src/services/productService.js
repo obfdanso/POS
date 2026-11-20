@@ -131,6 +131,8 @@ async function getProductByBarcode(barcode, branchId = null) {
   return withQty
 }
 
+const whichBranchError = (field) =>
+  new ValidationError('Choose a branch', [{ field, message: 'Choose a branch first, or list each branch under stocks' }])
 const stocksError = (message) => new ValidationError('Invalid branch stock', [{ field: 'stocks', message }])
 
 /**
@@ -240,6 +242,11 @@ async function createProduct(data, user, branchId = null) {
   await assertSupplierExists(data.supplier_id)
 
   let stocks = data.stocks
+  // A starting quantity or low-stock level has to say which branch it is for
+  if (!stocks && !branchId) {
+    if (data.quantity > 0) throw whichBranchError('quantity')
+    if (data.low_stock_threshold !== undefined) throw whichBranchError('low_stock_threshold')
+  }
   if (!stocks) {
     const targets = user.role === 'ADMIN'
       ? (await prisma.branch.findMany({ where: { is_active: true }, select: { id: true } })).map((b) => b.id)
@@ -316,8 +323,11 @@ async function updateProduct(id, data, user, branchId = null) {
     await assertVariantNameFree(existing.parent_id ?? existing.id, variantName, existing.id)
   }
 
+  if (data.low_stock_threshold !== undefined && !branchId) throw whichBranchError('low_stock_threshold')
   const branches = data.stocks ? await checkStockBranches(data.stocks, user) : null
-  const inScope = existing.stocks.filter((s) => user.role === 'ADMIN' || s.branch_id === user.branch_id)
+  // A closed branch's stock rows are left as they are: only open branches can be added or dropped
+  const openIds = new Set((await prisma.branch.findMany({ where: { is_active: true }, select: { id: true } })).map((b) => b.id))
+  const inScope = existing.stocks.filter((s) => openIds.has(s.branch_id) && (user.role === 'ADMIN' || s.branch_id === user.branch_id))
   if (data.stocks) {
     const keep = new Set(data.stocks.map((s) => s.branch_id))
     for (const row of inScope.filter((s) => !keep.has(s.branch_id) && s.quantity > 0)) {

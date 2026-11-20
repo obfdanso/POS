@@ -1,8 +1,8 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
-const { app, prisma, request, createUserWithToken, deleteTestUsers } = require('./helpers')
+const { app, prisma, request, createUserWithToken, deleteTestUsers, testBranch, createTestProduct, stockAt } = require('./helpers')
 
 const PREFIX = 'prodtest'
-let admin, manager, cashier, category, product
+let admin, manager, cashier, category, product, home, other, otherManager
 
 beforeAll(async () => {
   [admin, manager, cashier] = await Promise.all([
@@ -11,21 +11,27 @@ beforeAll(async () => {
     createUserWithToken('CASHIER', PREFIX),
   ])
   category = await prisma.category.create({ data: { name: 'ProdTest Category' } })
-  product = await prisma.product.create({
-    data: { name: 'ProdTest Alpha', sku: 'PRODTEST-A', barcode: '9990000000011', category_id: category.id, price: 10, quantity: 5 },
-  })
+  product = await createTestProduct(
+    { name: 'ProdTest Alpha', sku: 'PRODTEST-A', barcode: '9990000000011', category_id: category.id, price: 10 },
+    { quantity: 5 }
+  )
+  home = await testBranch()
+  other = await prisma.branch.upsert({ where: { code: 'PTB' }, update: { is_active: true }, create: { name: 'ProdTest Branch', code: 'PTB' } })
+  otherManager = await createUserWithToken('MANAGER', `${PREFIX}o`, { branchId: other.id })
 })
 
 afterAll(async () => {
   const products = await prisma.product.findMany({ where: { sku: { startsWith: 'PRODTEST' } }, select: { id: true } })
   await prisma.inventoryLog.deleteMany({ where: { product_id: { in: products.map((p) => p.id) } } })
+  await prisma.branchStock.deleteMany({ where: { product_id: { in: products.map((p) => p.id) } } })
   await prisma.product.deleteMany({ where: { sku: { startsWith: 'PRODTEST' } } })
   await prisma.category.deleteMany({ where: { name: { startsWith: 'ProdTest' } } })
   await deleteTestUsers(PREFIX)
+  await deleteTestUsers(`${PREFIX}o`)
   await prisma.$disconnect()
 })
 
-const auth = (who) => ({ Authorization: `Bearer ${who.token}` })
+const auth = (who) => who.headers
 
 describe('GET /api/products', () => {
   it('searches name, SKU, and barcode', async () => {
@@ -54,9 +60,7 @@ describe('GET /api/products', () => {
   })
 
   it('only shows inactive products to managers and admins', async () => {
-    const inactive = await prisma.product.create({
-      data: { name: 'ProdTest Hidden', sku: 'PRODTEST-HIDDEN', category_id: category.id, price: 1, is_active: false },
-    })
+    const inactive = await createTestProduct({ name: 'ProdTest Hidden', sku: 'PRODTEST-HIDDEN', category_id: category.id, price: 1, is_active: false })
     const asCashier = await request(app).get('/api/products?status=inactive&search=ProdTest').set(auth(cashier))
     expect(asCashier.body.data.map((p) => p.id)).not.toContain(inactive.id)
     const asManager = await request(app).get('/api/products?status=inactive&search=ProdTest').set(auth(manager))
@@ -94,7 +98,9 @@ describe('POST /api/products', () => {
     expect(res.body.data.quantity).toBe(12)
 
     const logs = await prisma.inventoryLog.findMany({ where: { product_id: res.body.data.id } })
-    expect(logs).toEqual([expect.objectContaining({ change_type: 'RESTOCK', quantity_change: 12, new_quantity: 12 })])
+    expect(logs).toEqual([
+      expect.objectContaining({ change_type: 'RESTOCK', quantity_change: 12, new_quantity: 12, branch_id: home.id, notes: 'Starting stock' }),
+    ])
   })
 
   it('accepts multipart form values (as sent with an image upload)', async () => {
@@ -154,8 +160,7 @@ describe('PUT /api/products/:id', () => {
   it('rejects stock quantity, which only changes through inventory', async () => {
     const res = await request(app).put(`/api/products/${product.id}`).set(auth(manager)).send({ quantity: 999 })
     expect(res.status).toBe(422)
-    const unchanged = await prisma.product.findUnique({ where: { id: product.id } })
-    expect(unchanged.quantity).toBe(5)
+    expect(await stockAt(product.id)).toBe(5)
   })
 
   it('clears the image when image_url is null, and rejects setting a URL', async () => {
@@ -218,5 +223,108 @@ describe('Categories', () => {
 
   it('is forbidden for cashiers to create', async () => {
     expect((await request(app).post('/api/categories').set(auth(cashier)).send({ name: 'ProdTest Nope' })).status).toBe(403)
+  })
+})
+
+describe('Branch stock', () => {
+  const at = (who, branch) => ({ ...who.headers, 'X-Branch-Id': branch.id })
+  const allBranches = () => ({ Authorization: admin.headers.Authorization })
+
+  it("lists only products stocked at the branch, with that branch's count", async () => {
+    const onlyOther = await createTestProduct(
+      { name: 'ProdTest Elsewhere', sku: 'PRODTEST-ELSE', barcode: '9990000000099', category_id: category.id, price: 2 },
+      { quantity: 3, branchId: other.id }
+    )
+    const mine = await request(app).get('/api/products?search=ProdTest&per_page=100').set(auth(cashier))
+    expect(mine.body.data.map((p) => p.id)).not.toContain(onlyOther.id)
+    const theirs = await request(app).get('/api/products?search=ProdTest Elsewhere').set(auth(otherManager))
+    expect(theirs.body.data[0]).toMatchObject({ id: onlyOther.id, quantity: 3 })
+  })
+
+  it('says a scanned product is not stocked here', async () => {
+    const res = await request(app).get('/api/products/barcode/9990000000099').set(auth(cashier))
+    expect(res.status).toBe(404)
+    expect(res.body.error.message).toBe('Not stocked at this branch')
+  })
+
+  it('sums every branch in the admin all-branches view', async () => {
+    await prisma.branchStock.create({ data: { branch_id: other.id, product_id: product.id, quantity: 7 } })
+    const res = await request(app).get('/api/products?search=PRODTEST-A').set(allBranches())
+    expect(res.body.data.find((p) => p.id === product.id).quantity).toBe(12)
+    const detail = await request(app).get(`/api/products/${product.id}`).set(allBranches())
+    expect(detail.body.data.stocks.map((s) => s.quantity).sort()).toEqual([5, 7])
+  })
+
+  it('sorts by stock at the branch', async () => {
+    const res = await request(app).get('/api/products?search=ProdTest&sort=quantity&order=desc&per_page=100').set(auth(manager))
+    expect(res.status).toBe(200)
+    const counts = res.body.data.map((p) => p.quantity)
+    expect(counts).toEqual([...counts].sort((a, b) => b - a))
+  })
+
+  it('stocks a new product at the branches chosen, logging starting stock at each', async () => {
+    const res = await request(app).post('/api/products').set(allBranches())
+      .send({
+        name: 'ProdTest Chain', sku: 'PRODTEST-CHAIN', category_id: category.id, price: 4,
+        stocks: [{ branch_id: home.id, quantity: 6, low_stock_threshold: 2 }, { branch_id: other.id, quantity: 0 }],
+      })
+    expect(res.status).toBe(201)
+    expect(await stockAt(res.body.data.id, home.id)).toBe(6)
+    expect(await stockAt(res.body.data.id, other.id)).toBe(0)
+    const logs = await prisma.inventoryLog.findMany({ where: { product_id: res.body.data.id } })
+    expect(logs).toEqual([expect.objectContaining({ branch_id: home.id, quantity_change: 6, notes: 'Starting stock' })])
+  })
+
+  it('stocks a new product at every open branch when an admin does not say', async () => {
+    const res = await request(app).post('/api/products').set(allBranches())
+      .send({ name: 'ProdTest Everywhere', sku: 'PRODTEST-ALL', category_id: category.id, price: 4 })
+    expect(res.status).toBe(201)
+    const openBranches = await prisma.branch.count({ where: { is_active: true } })
+    expect(await prisma.branchStock.count({ where: { product_id: res.body.data.id } })).toBe(openBranches)
+  })
+
+  it("doesn't let a manager stock another branch", async () => {
+    const res = await request(app).post('/api/products').set(auth(manager))
+      .send({ name: 'ProdTest Sneaky', sku: 'PRODTEST-SNEAK', category_id: category.id, price: 4, stocks: [{ branch_id: other.id, quantity: 9 }] })
+    expect(res.status).toBe(403)
+    const edit = await request(app).put(`/api/products/${product.id}`).set(auth(manager)).send({ stocks: [{ branch_id: other.id }] })
+    expect(edit.status).toBe(403)
+  })
+
+  it('starts stocking a product at a branch from the edit form, and stops when it has none', async () => {
+    const created = await createTestProduct({ name: 'ProdTest Toggle', sku: 'PRODTEST-TOG', category_id: category.id, price: 1 }, { quantity: 0 })
+    const add = await request(app).put(`/api/products/${created.id}`).set(at(otherManager, other))
+      .send({ stocks: [{ branch_id: other.id, quantity: 4, low_stock_threshold: 1 }] })
+    expect(add.status).toBe(200)
+    expect(await stockAt(created.id, other.id)).toBe(4)
+    // The manager only manages their own branch's row, so home's row is untouched
+    expect(await stockAt(created.id, home.id)).toBe(0)
+
+    const refuse = await request(app).put(`/api/products/${created.id}`).set(at(otherManager, other)).send({ stocks: [] })
+    expect(refuse.status).toBe(422)
+    expect(refuse.body.error.details[0]).toMatchObject({ field: 'stocks', message: '"ProdTest Branch" still has 4 in stock' })
+
+    const stop = await request(app).put(`/api/products/${created.id}`).set(auth(manager)).send({ stocks: [] })
+    expect(stop.status).toBe(200)
+    expect(await stockAt(created.id, home.id)).toBeNull()
+  })
+
+  it('accepts the stock list as JSON text, as sent with an image upload', async () => {
+    const res = await request(app).post('/api/products').set(auth(manager))
+      .field('name', 'ProdTest Form')
+      .field('sku', 'PRODTEST-FORM')
+      .field('category_id', category.id)
+      .field('price', '2')
+      .field('stocks', JSON.stringify([{ branch_id: home.id, quantity: 2 }]))
+    expect(res.status).toBe(201)
+    expect(await stockAt(res.body.data.id, home.id)).toBe(2)
+  })
+
+  it('sets the low-stock level for the acting branch only', async () => {
+    const res = await request(app).put(`/api/products/${product.id}`).set(auth(manager)).send({ low_stock_threshold: 3 })
+    expect(res.status).toBe(200)
+    expect(res.body.data.low_stock_threshold).toBe(3)
+    const otherRow = await prisma.branchStock.findUnique({ where: { branch_id_product_id: { branch_id: other.id, product_id: product.id } } })
+    expect(otherRow.low_stock_threshold).toBe(10)
   })
 })

@@ -1,11 +1,11 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
-const { app, prisma, request, createUserWithToken, deleteTestUsers } = require('./helpers')
+const { app, prisma, request, createUserWithToken, deleteTestUsers, stockAt } = require('./helpers')
 
 const PREFIX = 'varianttest'
 const TEST_SETTINGS = { tax_rate: '0', require_open_shift: 'false' }
 let manager, cashier, category, otherCategory, main, originalSettings
 
-const auth = (who) => ({ Authorization: `Bearer ${who.token}` })
+const auth = (who) => who.headers
 const create = (body) => request(app).post('/api/products').set(auth(manager)).send(body)
 const update = (id, body) => request(app).put(`/api/products/${id}`).set(auth(manager)).send(body)
 const variant = (overrides = {}) =>
@@ -30,6 +30,8 @@ afterAll(async () => {
   await prisma.auditLog.deleteMany({ where: { user_id: { in: userIds } } })
   await prisma.inventoryLog.deleteMany({ where: { product_id: { in: productIds } } })
   await prisma.sale.deleteMany({ where: { user_id: { in: userIds } } })
+  await prisma.branchStock.deleteMany({ where: { product_id: { in: productIds } } })
+  await prisma.branch.deleteMany({ where: { code: 'VTB' } })
   await prisma.product.deleteMany({ where: { parent_id: { in: productIds } } })
   await prisma.product.deleteMany({ where: { id: { in: productIds } } })
   await prisma.category.deleteMany({ where: { name: { startsWith: 'VariantTest' } } })
@@ -69,6 +71,18 @@ describe('Product variants', () => {
     expect(searched.body.data.map((p) => p.id)).toEqual([oneLitre.id])
   })
 
+  it("leaves variants the branch doesn't stock out of the till listing", async () => {
+    const elsewhere = await prisma.branch.upsert({ where: { code: 'VTB' }, update: {}, create: { name: 'VariantTest Branch', code: 'VTB' } })
+    const far = await prisma.product.create({
+      data: {
+        name: 'VariantTest Juice 5L', sku: 'VARTEST-FAR', category_id: category.id, price: 40, parent_id: main.id, variant_name: '5L',
+        stocks: { create: { branch_id: elsewhere.id, quantity: 2 } },
+      },
+    })
+    const grouped = await request(app).get(`/api/products?group_variants=true&category_id=${category.id}`).set(auth(cashier))
+    expect(grouped.body.data[0].variants.map((v) => v.id)).not.toContain(far.id)
+  })
+
   it('leaves inactive variants out of the till listing', async () => {
     const extra = (await variant({ variant_name: '2L', name: 'VariantTest Juice 2L', is_active: false })).body.data
     const grouped = await request(app).get(`/api/products?group_variants=true&category_id=${category.id}`).set(auth(cashier))
@@ -90,8 +104,8 @@ describe('Product variants', () => {
       items: [{ product_id: oneLitre.id, quantity: 2 }], payment_method: 'CASH', amount_paid: 24,
     })
     expect(res.status).toBe(201)
-    expect((await prisma.product.findUnique({ where: { id: oneLitre.id } })).quantity).toBe(3)
-    expect((await prisma.product.findUnique({ where: { id: main.id } })).quantity).toBe(10)
+    expect(await stockAt(oneLitre.id)).toBe(3)
+    expect(await stockAt(main.id)).toBe(10)
   })
 
   it('rejects a variant without a name, of a variant, in another category, or of a missing product', async () => {

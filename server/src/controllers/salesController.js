@@ -14,7 +14,7 @@ function normalizeSale(sale) {
 
 async function createSale(req, res, next) {
   try {
-    const sale = await salesService.createSale(req.body, req.user)
+    const sale = await salesService.createSale(req.body, req.user, req.branchId)
     res.status(201).json({ success: true, data: normalizeSale(sale), message: 'Sale processed successfully' })
   } catch (err) {
     next(err)
@@ -32,7 +32,7 @@ async function listSales(req, res, next) {
 
     const result = await salesService.listSales({
       page, per_page, start_date, end_date, user_id, customer_id, payment_status, payment_method, search,
-      sort: req.query.sort, order: req.query.order,
+      sort: req.query.sort, order: req.query.order, branchId: req.branchId,
     })
     const sales = result.sales.map(({ _count, ...s }) => ({ ...s, items_count: _count?.sale_items ?? 0 }))
     res.json({
@@ -48,10 +48,17 @@ async function listSales(req, res, next) {
 async function getSale(req, res, next) {
   try {
     const sale = await salesService.getSaleById(req.params.id)
-    if (req.user.role === 'CASHIER' && sale.user_id !== req.user.id) {
-      const { ForbiddenError } = require('../utils/errors')
-      throw new ForbiddenError('You can only view your own sales')
-    }
+    salesService.assertCanSeeSale(sale, req.user)
+    res.json({ success: true, data: normalizeSale(sale) })
+  } catch (err) {
+    next(err)
+  }
+}
+
+/** Any branch's sale, by its receipt number, so a return can be made at another branch. */
+async function lookupSale(req, res, next) {
+  try {
+    const sale = await salesService.getSaleByTransactionId(req.params.transactionId)
     res.json({ success: true, data: normalizeSale(sale) })
   } catch (err) {
     next(err)
@@ -61,7 +68,7 @@ async function getSale(req, res, next) {
 async function processRefund(req, res, next) {
   try {
     const { items, reason } = req.body ?? {}
-    const sale = await salesService.processRefund(req.params.id, req.user.id, { items, reason })
+    const sale = await salesService.processRefund(req.params.id, req.user.id, { items, reason }, req.branchId)
     res.json({ success: true, data: normalizeSale(sale), message: 'Refund processed successfully' })
   } catch (err) {
     next(err)
@@ -71,10 +78,7 @@ async function processRefund(req, res, next) {
 async function getReceipt(req, res, next) {
   try {
     const data = await salesService.getReceiptData(req.params.id)
-    if (req.user.role === 'CASHIER' && data.sale.user_id !== req.user.id) {
-      const { ForbiddenError } = require('../utils/errors')
-      throw new ForbiddenError('You can only view receipts for your own sales')
-    }
+    salesService.assertCanSeeSale(data.sale, req.user, 'You can only view receipts for your own sales')
     res.json({ success: true, data })
   } catch (err) {
     next(err)
@@ -84,10 +88,7 @@ async function getReceipt(req, res, next) {
 async function emailReceipt(req, res, next) {
   try {
     const sale = await salesService.getSaleById(req.params.id)
-    if (req.user.role === 'CASHIER' && sale.user_id !== req.user.id) {
-      const { ForbiddenError } = require('../utils/errors')
-      throw new ForbiddenError('You can only email receipts for your own sales')
-    }
+    salesService.assertCanSeeSale(sale, req.user, 'You can only email receipts for your own sales')
     const { to } = await salesService.emailReceipt(sale, req.user.id, req.body?.email)
     res.json({ success: true, data: { to }, message: `Receipt sent to ${to}` })
   } catch (err) {
@@ -98,10 +99,7 @@ async function emailReceipt(req, res, next) {
 async function smsReceipt(req, res, next) {
   try {
     const sale = await salesService.getSaleById(req.params.id)
-    if (req.user.role === 'CASHIER' && sale.user_id !== req.user.id) {
-      const { ForbiddenError } = require('../utils/errors')
-      throw new ForbiddenError('You can only text receipts for your own sales')
-    }
+    salesService.assertCanSeeSale(sale, req.user, 'You can only text receipts for your own sales')
     const { to } = await salesService.smsReceipt(sale, req.user.id, req.body?.phone)
     res.json({ success: true, data: { to }, message: `Receipt texted to ${to}` })
   } catch (err) {
@@ -119,4 +117,4 @@ async function sendRefundToPaystack(req, res, next) {
   }
 }
 
-module.exports = { createSale, listSales, getSale, processRefund, getReceipt, emailReceipt, smsReceipt, sendRefundToPaystack }
+module.exports = { createSale, listSales, getSale, lookupSale, processRefund, getReceipt, emailReceipt, smsReceipt, sendRefundToPaystack }

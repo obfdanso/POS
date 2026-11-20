@@ -3,6 +3,7 @@ const { body, param, query } = require('express-validator')
 const rateLimit = require('express-rate-limit')
 const salesController = require('../controllers/salesController')
 const { authenticate, authorize } = require('../middleware/auth')
+const { requireBranch } = require('../middleware/branch')
 const validate = require('../middleware/validate')
 const exactBody = require('../middleware/exactBody')
 const { sortRules } = require('../middleware/sorting')
@@ -56,7 +57,7 @@ const saleValidation = [
   body('client_ref').optional().isUUID().withMessage('client_ref must be a UUID'),
 ]
 
-router.post('/', salesRateLimit, exactBody(saleValidation), validate, salesController.createSale)
+router.post('/', salesRateLimit, requireBranch, exactBody(saleValidation), validate, salesController.createSale)
 const listSalesValidation = [
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be >= 1'),
   query('per_page').optional().isInt({ min: 1, max: 100 }).withMessage('Per page must be 1-100'),
@@ -71,6 +72,14 @@ const listSalesValidation = [
 ]
 
 router.get('/', listSalesValidation, validate, salesController.listSales)
+// A sale from any branch, by receipt number, for returns made at another branch
+router.get(
+  '/lookup/:transactionId',
+  authorize(['ADMIN', 'MANAGER']),
+  param('transactionId').trim().matches(/^TXN-\d{8}-\d{4,}$/).withMessage('Enter a transaction ID like TXN-20260101-0001'),
+  validate,
+  salesController.lookupSale
+)
 router.get('/:id', authorize(['ADMIN', 'MANAGER', 'CASHIER']), param('id').isUUID(), validate, salesController.getSale)
 router.get('/:id/receipt', authorize(['ADMIN', 'MANAGER', 'CASHIER']), param('id').isUUID(), validate, salesController.getReceipt)
 // Body is optional: with no `items`, everything not yet returned is refunded
@@ -86,6 +95,7 @@ const refundValidation = [
 router.post(
   '/:id/refund',
   authorize(['ADMIN', 'MANAGER']),
+  requireBranch,
   param('id').isUUID(),
   exactBody(refundValidation),
   validate,

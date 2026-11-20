@@ -1,5 +1,6 @@
 const salesService = require('../services/salesService')
 const gatewayRefundService = require('../services/gatewayRefundService')
+const { recordAudit } = require('../utils/audit')
 
 function normalizeSale(sale) {
   return {
@@ -55,11 +56,22 @@ async function getSale(req, res, next) {
   }
 }
 
-/** Any branch's sale, by its receipt number, so a return can be made at another branch. */
+/**
+ * Any branch's sale, by its receipt number, so a return can be made at another branch. Only what a
+ * return needs comes back: the customer's name but not their contact details, and no payment
+ * references. Each lookup is recorded in the audit trail.
+ */
 async function lookupSale(req, res, next) {
   try {
     const sale = await salesService.getSaleByTransactionId(req.params.transactionId)
-    res.json({ success: true, data: normalizeSale(sale) })
+    await recordAudit({ userId: req.user.id, action: 'SALE_LOOKUP', entity: 'Sale', entityId: sale.id, details: sale.transaction_id })
+    const trimmed = {
+      ...sale,
+      customer: sale.customer && { id: sale.customer.id, name: sale.customer.name },
+      payments: sale.payments.map(({ reference, ...payment }) => payment),
+      refunds: sale.refunds.map(({ gateway_reference, gateway_refund_id, gateway_error, ...refund }) => refund),
+    }
+    res.json({ success: true, data: normalizeSale(trimmed) })
   } catch (err) {
     next(err)
   }

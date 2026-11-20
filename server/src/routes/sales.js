@@ -72,10 +72,22 @@ const listSalesValidation = [
 ]
 
 router.get('/', listSalesValidation, validate, salesController.listSales)
+// Transaction IDs are sequential, so limit how fast one person can look up other branches' sales
+const lookupRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  keyGenerator: (req) => req.user.id,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
+  message: { success: false, error: { code: 'RATE_LIMITED', message: 'Too many sale lookups. Wait a minute and try again.' } },
+})
+
 // A sale from any branch, by receipt number, for returns made at another branch
 router.get(
   '/lookup/:transactionId',
   authorize(['ADMIN', 'MANAGER']),
+  lookupRateLimit,
   param('transactionId').trim().matches(/^TXN-\d{8}-\d{4,}$/).withMessage('Enter a transaction ID like TXN-20260101-0001'),
   validate,
   salesController.lookupSale

@@ -190,6 +190,22 @@ describe('Selling and returning across branches', () => {
     expect((await request(app).get(`/api/sales/${sale.id}`).set(manager.headers)).status).toBe(200)
   })
 
+  it("shows only what a return needs when looking up another branch's sale, and records the lookup", async () => {
+    const customer = await prisma.customer.create({ data: { name: 'BranchTest Buyer', phone: '020-555-0101', email: 'buyer@branchtest.local' } })
+    try {
+      const sale = (await sell(cashierB, { items: [{ product_id: item.id, quantity: 1 }], customer_id: customer.id })).body.data
+      const res = await request(app).get(`/api/sales/lookup/${sale.transaction_id}`).set(manager.headers)
+      expect(res.status).toBe(200)
+      expect(res.body.data.customer).toEqual({ id: customer.id, name: 'BranchTest Buyer' })
+      expect(res.body.data.payments.every((p) => !('reference' in p))).toBe(true)
+      const audit = await prisma.auditLog.findFirst({ where: { action: 'SALE_LOOKUP', entity_id: sale.id, user_id: manager.user.id } })
+      expect(audit).not.toBeNull()
+    } finally {
+      await prisma.sale.updateMany({ where: { customer_id: customer.id }, data: { customer_id: null } })
+      await prisma.customer.delete({ where: { id: customer.id } })
+    }
+  })
+
   it("lists only the branch's sales to its manager", async () => {
     const res = await request(app).get('/api/sales?per_page=100').set(managerB.headers)
     expect(res.status).toBe(200)

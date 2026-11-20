@@ -26,7 +26,7 @@ module.exports = defineConfig({
   ],
   webServer: [
     {
-      command: 'node src/app.js',
+      command: 'npx tsx src/app.ts',
       cwd: '../server',
       url: 'http://localhost:3001/api/health/ready',
       reuseExistingServer: !process.env.CI,

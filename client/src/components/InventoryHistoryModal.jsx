@@ -73,7 +73,7 @@ export function InventoryHistoryModal({ product, onClose }) {
                     <td className="px-3 py-2 text-right whitespace-nowrap text-gray-600 dark:text-gray-400">
                       {log.previous_quantity} → <span className="font-medium text-gray-900 dark:text-gray-100">{log.new_quantity}</span>
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-gray-600 dark:text-gray-400">{log.user?.full_name ?? '—'}</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-gray-600 dark:text-gray-400">{log.user?.full_name ?? '—'}{log.branch ? <span className="text-gray-400"> · {log.branch.code}</span> : null}</td>
                     <td className="px-3 py-2 text-gray-500 dark:text-gray-400 max-w-xs truncate" title={log.notes ?? ''}>{log.notes ?? '—'}</td>
                   </tr>
                 ))}

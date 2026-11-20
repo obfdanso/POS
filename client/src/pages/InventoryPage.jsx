@@ -10,6 +10,7 @@ import { Modal } from '../components/Modal'
 import { inventoryService } from '../services/inventory'
 import { InventoryHistoryModal } from '../components/InventoryHistoryModal'
 import { formatCurrency } from '../utils/formatCurrency'
+import { useBranch } from '../hooks/useBranch'
 
 const TABS = [
   { key: 'all', label: 'All Products' },
@@ -24,7 +25,10 @@ function StockStatusBadge({ quantity, threshold }) {
 }
 
 export default function InventoryPage() {
+  const { isAllBranches } = useBranch()
   const [products, setProducts] = useState([])
+  // With all branches shown, a product appears once per branch, so rows need their own key
+  const rows = isAllBranches ? products.map((p) => ({ ...p, product_id: p.id, id: `${p.id}:${p.branch_id}` })) : products
   const [isLoading, setIsLoading] = useState(true)
   const [meta, setMeta] = useState({ page: 1, total_pages: 1, total: 0 })
   const [page, setPage] = useState(1)
@@ -164,6 +168,9 @@ export default function InventoryPage() {
         </div>
       ),
     },
+    ...(isAllBranches
+      ? [{ key: 'branch', sortable: true, sortValue: (row) => row.branch?.name, label: 'Branch', render: (val) => val?.name ?? '—' }]
+      : []),
     {
       key: 'category',
       sortable: true,
@@ -206,10 +213,16 @@ export default function InventoryPage() {
       label: 'Actions',
       render: (val, row) => (
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="secondary" onClick={() => openAdjustModal(row)}>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => openAdjustModal(row)}
+            disabled={isAllBranches}
+            title={isAllBranches ? 'Choose a branch first' : undefined}
+          >
             Adjust Stock
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => setHistoryTarget(row)}>
+          <Button size="sm" variant="ghost" onClick={() => setHistoryTarget({ ...row, id: row.product_id ?? row.id })}>
             History
           </Button>
         </div>
@@ -271,7 +284,7 @@ export default function InventoryPage() {
         <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
           <Table
             columns={columns}
-            data={products}
+            data={rows}
             isLoading={isLoading}
             {...(activeTab !== 'low' && { sort, onSortChange: handleSortChange })}
             emptyMessage={

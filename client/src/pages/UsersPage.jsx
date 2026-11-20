@@ -33,9 +33,9 @@ function validate(form, mode) {
   const errors = {}
   if (!form.full_name?.trim()) errors.full_name = 'Full name is required'
   if (!form.email?.trim()) errors.email = 'Email is required'
+  else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = 'Invalid email address'
   // Cashiers and managers work at one branch; admins work across all of them
   if (form.role !== 'ADMIN' && !form.branch_id) errors.branch_id = 'Choose the branch they work at'
-  else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = 'Invalid email address'
   if (mode === 'create') {
     if (!form.username?.trim()) errors.username = 'Username is required'
     if (!form.password?.trim()) errors.password = 'Password is required'
@@ -48,7 +48,7 @@ const selectClass =
   'block w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 disabled:opacity-60'
 
 /** The branch a cashier or manager works at; hidden for admins. */
-function BranchField({ form, onChange, error, branches, disabled = false, id }) {
+function BranchField({ form, onChange, error, branches, disabled = false, id, current = null }) {
   if (form.role === 'ADMIN') {
     return <p className="text-xs text-gray-500 dark:text-gray-400">Admins work across all branches.</p>
   }
@@ -60,6 +60,8 @@ function BranchField({ form, onChange, error, branches, disabled = false, id }) 
         {branches.map((b) => (
           <option key={b.id} value={b.id}>{b.name}</option>
         ))}
+        {/* Someone at a closed branch keeps it until moved */}
+        {current && !branches.some((b) => b.id === current.id) && <option value={current.id}>{current.name} (closed)</option>}
       </select>
       {error && <p className="text-xs text-danger-600 dark:text-danger-400">{error}</p>}
     </div>
@@ -438,7 +440,7 @@ export default function UsersPage() {
               ))}
             </select>
           </div>
-          <BranchField id="edit-branch" form={editForm} onChange={handleEditChange} error={editErrors.branch_id} branches={branches} />
+          <BranchField id="edit-branch" form={editForm} onChange={handleEditChange} error={editErrors.branch_id} branches={branches} current={editTarget?.branch} />
           <div className="flex items-center gap-3">
             <input
               type="checkbox"

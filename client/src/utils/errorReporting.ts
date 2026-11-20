@@ -1,11 +1,20 @@
 // Optional browser error reporting to Sentry. The SDK is downloaded only when VITE_SENTRY_DSN is
 // set at build time, so the app is no bigger when reporting is off.
+import type { Role } from '../types'
 
-let sentry = null
+type SentrySdk = typeof import('@sentry/react')
+
+let sentry: SentrySdk | null = null
+
+/** The parts of a Sentry event that scrubEvent removes or trims */
+interface ScrubbableEvent {
+  breadcrumbs?: unknown
+  request?: { url?: string; query_string?: unknown; cookies?: unknown; headers?: unknown }
+}
 
 // Strip things that could identify customers or carry credentials: URL queries and breadcrumbs
 // (which record clicks, console output and request URLs)
-export function scrubEvent(event) {
+export function scrubEvent<E extends ScrubbableEvent>(event: E): E {
   delete event.breadcrumbs
   if (event.request?.url) event.request.url = event.request.url.split('?')[0]
   if (event.request) {
@@ -16,7 +25,7 @@ export function scrubEvent(event) {
   return event
 }
 
-export async function initErrorReporting(dsn = import.meta.env.VITE_SENTRY_DSN) {
+export async function initErrorReporting(dsn: string | undefined = import.meta.env.VITE_SENTRY_DSN): Promise<boolean> {
   if (!dsn || sentry) return false
   const Sentry = await import('@sentry/react')
   Sentry.init({
@@ -32,15 +41,16 @@ export async function initErrorReporting(dsn = import.meta.env.VITE_SENTRY_DSN) 
 }
 
 /** Reports an error the app caught (e.g. in the error boundary); does nothing when reporting is off. */
-export function reportError(error, context) {
+export function reportError(error: unknown, context?: Record<string, unknown>): void {
   if (!sentry) return
-  sentry.withScope((scope) => {
+  const sdk = sentry
+  sdk.withScope((scope) => {
     if (context) scope.setContext('react', context)
-    sentry.captureException(error)
+    sdk.captureException(error)
   })
 }
 
 /** Records who is signed in (ID and role only) so reports show which kind of user hit them. */
-export function setReportingUser(user) {
+export function setReportingUser(user: { id: string; role?: Role } | null): void {
   sentry?.setUser(user ? { id: user.id, role: user.role } : null)
 }

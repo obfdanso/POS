@@ -1,3 +1,4 @@
+import type { MoneyLike, Refund, Sale, Settings } from '../types'
 import { escapeHtml as esc, RECEIPT_STYLES } from './print'
 import { METHOD_LABEL, splitOtherMethods } from './payments'
 
@@ -6,7 +7,12 @@ import { METHOD_LABEL, splitOtherMethods } from './payments'
  * refunded, and who processed it. `sale` is the API sale (with `items` and `refunds`), `refund` one
  * of its `refunds`. Every user-provided value is escaped.
  */
-export function buildRefundReceiptHtml(sale, refund, settings, fmt) {
+export function buildRefundReceiptHtml(
+  sale: Sale,
+  refund: Refund,
+  settings: Pick<Settings, 'store_name' | 'store_address' | 'store_phone'>,
+  fmt: (amount: MoneyLike | null | undefined) => string
+): string {
   const lines = new Map((sale.items || []).map((i) => [i.id, i]))
   const itemsHTML = refund.items
     .map((ri) => {

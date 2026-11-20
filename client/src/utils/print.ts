@@ -1,8 +1,10 @@
 import toast from 'react-hot-toast'
 
+const HTML_ENTITIES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
+
 // Escape text before writing it into a print window's HTML
-export function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+export function escapeHtml(value: unknown): string {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => HTML_ENTITIES[c])
 }
 
 // Shared 80mm thermal receipt styling for printed documents
@@ -17,7 +19,7 @@ export const RECEIPT_STYLES = `
     .row { display: flex; justify-content: space-between; margin: 2px 0; }`
 
 /** Opens `html` (already escaped) in a small window and prints it. */
-export function printDocument(html) {
+export function printDocument(html: string): void {
   const win = window.open('', '_blank', 'width=420,height=640')
   if (!win) {
     toast.error('Allow pop-ups for this site to print receipts')

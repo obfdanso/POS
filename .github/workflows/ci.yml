@@ -46,6 +46,8 @@ jobs:
       - run: npm ci
       - run: npx prisma migrate deploy
       - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
       - run: npm test
 
   client:
@@ -63,6 +65,7 @@ jobs:
           cache-dependency-path: client/package-lock.json
       - run: npm ci
       - run: npm run lint
+      - run: npm run typecheck
       - run: npx vitest run
       - run: npm run build
 

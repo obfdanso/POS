@@ -71,3 +71,16 @@ test('admin opens a branch, stocks a product there and sells it without touching
   expect(await stockAt(request, headers, branchId)).toBe(4)
   expect(await stockAt(request, headers, kumasi.id)).toBe(kumasiBefore)
 })
+
+test("switching branch reloads the page with that branch's data", async ({ page }) => {
+  await login(page, 'admin')
+  await page.goto('/sales')
+  await page.getByLabel('Branch', { exact: true }).selectOption({ label: 'All branches' })
+  // All branches: Kumasi's sales (rung up by Ama Mensah) are listed
+  await expect(page.getByRole('cell', { name: 'Ama Mensah' }).first()).toBeVisible()
+
+  // Switch to Accra on the same page, without navigating
+  await page.getByLabel('Branch', { exact: true }).selectOption({ label: 'Accra Mall' })
+  await expect(page.getByRole('cell', { name: 'Akosua Boateng' }).first()).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'Ama Mensah' })).toHaveCount(0)
+})

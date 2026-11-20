@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './hooks/useAuth'
+import { useBranch } from './hooks/useBranch'
 import LoginPage from './pages/LoginPage'
 import POSPage from './pages/POSPage'
 import ProductsPage from './pages/ProductsPage'
@@ -68,8 +69,10 @@ function PublicRoute({ children }) {
 }
 
 export default function App() {
+  // Keyed by branch: switching branch remounts the page, so it reloads its data for the new branch
+  const { branchId } = useBranch()
   return (
-    <Routes>
+    <Routes key={branchId ?? 'all'}>
       {/* Public */}
       <Route
         path="/login"

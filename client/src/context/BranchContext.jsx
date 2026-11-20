@@ -53,8 +53,8 @@ export function BranchProvider({ children }) {
     }
   }, [isAuthenticated, loadBranches])
 
-  // An admin's remembered branch only counts while it is still an open branch
-  const adminBranch = isAdmin && chosen && (!loaded || branches.some((b) => b.id === chosen)) ? chosen : null
+  // An admin's remembered branch only counts once the list confirms it is still an open branch
+  const adminBranch = isAdmin && chosen && loaded && branches.some((b) => b.id === chosen) ? chosen : null
   const branchId = isAdmin ? adminBranch : (user?.branch?.id ?? null)
 
   // Set during render so requests made by children's effects already carry it

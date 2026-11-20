@@ -1,9 +1,8 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../context/SettingsContext'
 import { useCart } from '../context/CartContext'
-import { useBranch } from '../hooks/useBranch'
 import { BranchSwitcher } from '../components/BranchSwitcher'
 import { Modal } from '../components/Modal'
 import toast from 'react-hot-toast'
@@ -232,7 +231,6 @@ function ThemeToggle() {
 
 export function DashboardLayout({ children, noPad = false }) {
   const { user, logout } = useAuth()
-  const { branchId } = useBranch()
   const { clearCart } = useCart()
   const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -423,14 +421,11 @@ export function DashboardLayout({ children, noPad = false }) {
 
       {/* Page content */}
       <main className="flex-1 min-h-0 flex flex-col">
-        {/* Keyed by branch: switching branch reloads the page's data for the new branch */}
-        <Fragment key={branchId ?? 'all'}>
-          {noPad ? children : (
-            <div className="max-w-7xl mx-auto px-6 py-6 w-full">
-              {children}
-            </div>
-          )}
-        </Fragment>
+        {noPad ? children : (
+          <div className="max-w-7xl mx-auto px-6 py-6 w-full">
+            {children}
+          </div>
+        )}
       </main>
 
       {/* Logout confirmation modal */}

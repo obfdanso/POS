@@ -1,13 +1,13 @@
-const express = require('express')
-const { body, param, query } = require('express-validator')
-const shiftController = require('../controllers/shiftController')
-const { authenticate } = require('../middleware/auth')
-const { requireBranch } = require('../middleware/branch')
-const validate = require('../middleware/validate').default
-const exactBody = require('../middleware/exactBody').default
-const paginationRules = require('../middleware/pagination').default
-const { sortRules } = require('../middleware/sorting')
-const { SHIFT_SORTS } = require('../services/shiftService')
+import express from 'express'
+import { body, param, query } from 'express-validator'
+import * as shiftController from '../controllers/shiftController'
+import { authenticate } from '../middleware/auth'
+import { requireBranch } from '../middleware/branch'
+import validate from '../middleware/validate'
+import exactBody from '../middleware/exactBody'
+import paginationRules from '../middleware/pagination'
+import { sortRules } from '../middleware/sorting'
+import { SHIFT_SORTS } from '../services/shiftService'
 
 const router = express.Router()
 
@@ -59,4 +59,4 @@ router.get(
 
 router.get('/:id', param('id').isUUID().withMessage('Invalid shift ID'), validate, shiftController.getShift)
 
-module.exports = router
+export default router

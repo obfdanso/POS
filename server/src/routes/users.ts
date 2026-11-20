@@ -1,14 +1,33 @@
-const express = require('express')
-const { body, param } = require('express-validator')
-const { authenticate, authorize } = require('../middleware/auth')
-const validate = require('../middleware/validate').default
-const exactBody = require('../middleware/exactBody').default
-const prisma = require('../utils/prismaClient').default
-const bcrypt = require('bcrypt')
-const { recordAudit } = require('../utils/audit')
-const { NotFoundError, ConflictError, ValidationError } = require('../utils/errors')
+import express, { type NextFunction, type Request, type Response } from 'express'
+import type { Role } from '@prisma/client'
+import { body, param } from 'express-validator'
+import { authenticate, authorize, currentUser } from '../middleware/auth'
+import validate from '../middleware/validate'
+import exactBody from '../middleware/exactBody'
+import prisma from '../utils/prismaClient'
+import bcrypt from 'bcrypt'
+import { recordAudit } from '../utils/audit'
+import { NotFoundError, ConflictError, ValidationError } from '../utils/errors'
 
 const router = express.Router()
+
+/** Bodies as validated by the routes below. */
+interface CreateUserBody {
+  username: string
+  email: string
+  password: string
+  full_name: string
+  role: Role
+  branch_id?: string | null
+}
+
+interface UpdateUserBody {
+  role?: Role
+  is_active?: boolean
+  full_name?: string
+  email?: string
+  branch_id?: string | null
+}
 
 router.use(authenticate)
 
@@ -23,13 +42,13 @@ const USER_FIELDS = {
   branch: { select: { id: true, name: true, code: true } },
 }
 const branchIdRule = body('branch_id').optional({ nullable: true }).isUUID().withMessage('Choose a valid branch')
-const branchError = (message) => new ValidationError(message, [{ field: 'branch_id', message }])
+const branchError = (message: string) => new ValidationError(message, [{ field: 'branch_id', message }])
 
 /**
  * The branch a user with this role should have: none for admins; an open branch for cashiers and
  * managers (their current one when the request doesn't name another).
  */
-async function branchForRole(role, requestedId, currentId = null) {
+async function branchForRole(role: Role, requestedId: string | null | undefined, currentId: string | null = null): Promise<string | null> {
   if (role === 'ADMIN') return null
   // Keeping someone where they are is always allowed, even at a closed branch (e.g. to deactivate them)
   if (currentId && (requestedId === undefined || requestedId === currentId)) return currentId
@@ -86,9 +105,10 @@ router.post(
     branchIdRule,
   ]),
   validate,
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { username, email, password, full_name, role } = req.body
+      const body = req.body as CreateUserBody
+      const { username, email, password, full_name, role } = body
       const existing = await prisma.user.findFirst({
         where: { OR: [{ username: { equals: username, mode: 'insensitive' } }, { email }] },
       })
@@ -97,13 +117,13 @@ router.post(
           ? new ConflictError('Email already in use', 'email')
           : new ConflictError('Username already taken', 'username')
       }
-      const branch_id = await branchForRole(role, req.body.branch_id)
+      const branch_id = await branchForRole(role, body.branch_id)
       const password_hash = await bcrypt.hash(password, 12)
       const user = await prisma.user.create({
         data: { username, email, password_hash, full_name, role, branch_id },
         select: USER_FIELDS,
       })
-      await recordAudit({ userId: req.user.id, action: 'USER_CREATED', entity: 'User', entityId: user.id, details: `${user.username} (${user.role})` })
+      await recordAudit({ userId: currentUser(req).id, action: 'USER_CREATED', entity: 'User', entityId: user.id, details: `${user.username} (${user.role})` })
       res.status(201).json({ success: true, data: user, message: 'User created successfully' })
     } catch (err) {
       next(err)
@@ -125,19 +145,20 @@ router.put(
     ]),
   ],
   validate,
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { role, is_active, full_name, email } = req.body
+      const body = req.body as UpdateUserBody
+      const { role, is_active, full_name, email } = body
       const user = await prisma.user.findUnique({ where: { id: req.params.id } })
       if (!user) throw new NotFoundError('User not found')
 
       // Admins can't lock themselves out of user management
-      if (user.id === req.user.id && ((role !== undefined && role !== 'ADMIN') || is_active === false)) {
+      if (user.id === currentUser(req).id && ((role !== undefined && role !== 'ADMIN') || is_active === false)) {
         throw new ValidationError('You cannot remove your own admin access', [
           { field: role !== undefined && role !== 'ADMIN' ? 'role' : 'is_active', message: 'Ask another admin to change your own role or status' },
         ])
       }
-      const branch_id = await branchForRole(role ?? user.role, req.body.branch_id, user.branch_id)
+      const branch_id = await branchForRole(role ?? user.role, body.branch_id, user.branch_id)
       // Their open drawer belongs to the old branch, so it has to be closed before they move
       if (branch_id !== user.branch_id && (await prisma.shift.count({ where: { user_id: user.id, status: 'OPEN' } }))) {
         throw branchError('Close their open shift before moving them to another branch')
@@ -153,11 +174,12 @@ router.put(
         },
         select: USER_FIELDS,
       })
-      const changes = Object.entries({ role, is_active, full_name, email, branch_id })
-        .filter(([key, value]) => value !== undefined && value !== user[key])
-        .map(([key, value]) => `${key}: ${user[key]} → ${value}`)
+      const proposed = { role, is_active, full_name, email, branch_id }
+      const changes = (Object.keys(proposed) as (keyof typeof proposed)[])
+        .filter((key) => proposed[key] !== undefined && proposed[key] !== user[key])
+        .map((key) => `${key}: ${user[key]} → ${proposed[key]}`)
       if (changes.length) {
-        await recordAudit({ userId: req.user.id, action: 'USER_UPDATED', entity: 'User', entityId: user.id, details: `${user.username}: ${changes.join(', ')}` })
+        await recordAudit({ userId: currentUser(req).id, action: 'USER_UPDATED', entity: 'User', entityId: user.id, details: `${user.username}: ${changes.join(', ')}` })
       }
       res.json({ success: true, data: updated, message: 'User updated successfully' })
     } catch (err) {
@@ -171,17 +193,18 @@ router.post(
   '/:id/reset-password',
   [param('id').isUUID(), ...exactBody([body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters')])],
   validate,
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const user = await prisma.user.findUnique({ where: { id: req.params.id } })
       if (!user) throw new NotFoundError('User not found')
-      const password_hash = await bcrypt.hash(req.body.password, 12)
+      const { password } = req.body as { password: string }
+      const password_hash = await bcrypt.hash(password, 12)
       // Also unlock the account, and sign out every existing session of that user
       await prisma.user.update({
         where: { id: req.params.id },
         data: { password_hash, failed_login_attempts: 0, locked_until: null, tokens_valid_after: new Date() },
       })
-      await recordAudit({ userId: req.user.id, action: 'PASSWORD_RESET', entity: 'User', entityId: user.id, details: user.username })
+      await recordAudit({ userId: currentUser(req).id, action: 'PASSWORD_RESET', entity: 'User', entityId: user.id, details: user.username })
       res.json({ success: true, message: 'Password reset successfully' })
     } catch (err) {
       next(err)
@@ -190,7 +213,7 @@ router.post(
 )
 
 // Unlock account
-router.post('/:id/unlock', [param('id').isUUID()], validate, async (req, res, next) => {
+router.post('/:id/unlock', [param('id').isUUID()], validate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = await prisma.user.findUnique({ where: { id: req.params.id } })
     if (!user) throw new NotFoundError('User not found')
@@ -204,7 +227,7 @@ router.post('/:id/unlock', [param('id').isUUID()], validate, async (req, res, ne
         event_type: 'ACCOUNT_UNLOCKED',
         ip_address: req.ip,
         user_agent: req.headers['user-agent'] || null,
-        details: `Unlocked by admin ${req.user.username}`,
+        details: `Unlocked by admin ${currentUser(req).username}`,
       },
     })
     res.json({ success: true, message: 'Account unlocked successfully' })
@@ -213,4 +236,4 @@ router.post('/:id/unlock', [param('id').isUUID()], validate, async (req, res, ne
   }
 })
 
-module.exports = router
+export default router

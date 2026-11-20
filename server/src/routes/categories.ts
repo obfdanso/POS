@@ -1,9 +1,9 @@
-const express = require('express')
-const { body, param } = require('express-validator')
-const productController = require('../controllers/productController')
-const { authenticate, authorize } = require('../middleware/auth')
-const validate = require('../middleware/validate').default
-const exactBody = require('../middleware/exactBody').default
+import express from 'express'
+import { body, param } from 'express-validator'
+import * as productController from '../controllers/productController'
+import { authenticate, authorize } from '../middleware/auth'
+import validate from '../middleware/validate'
+import exactBody from '../middleware/exactBody'
 
 const router = express.Router()
 
@@ -25,4 +25,4 @@ router.put(
   productController.updateCategory
 )
 
-module.exports = router
+export default router

@@ -1,6 +1,6 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
 const request = require('supertest')
-const app = require('../app')
+const app = require('../app').default
 const prisma = require('../utils/prismaClient').default
 const { createUserWithToken, inTestBranch, stockAt } = require('./helpers')
 

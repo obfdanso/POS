@@ -1,32 +1,32 @@
-require('dotenv').config()
-// Optional error reporting (SENTRY_DSN); started first so it sees errors from everything below
-require('./utils/errorReporting').initErrorReporting()
-const express = require('express')
-const cors = require('cors')
-const helmet = require('helmet')
-const cookieParser = require('cookie-parser')
-const morgan = require('morgan')
-const path = require('path')
+// Loads .env and starts optional error reporting (SENTRY_DSN); imported first so it sees errors
+// from everything below
+import './instrument'
+import express, { type Request } from 'express'
+import cors from 'cors'
+import helmet from 'helmet'
+import cookieParser from 'cookie-parser'
+import morgan from 'morgan'
+import path from 'path'
 
-const { logger, morganStream } = require('./middleware/logger')
-const errorHandler = require('./middleware/errorHandler').default
-const requestId = require('./middleware/requestId').default
-const prisma = require('./utils/prismaClient').default
-const authRoutes = require('./routes/auth')
-const productRoutes = require('./routes/products')
-const categoryRoutes = require('./routes/categories')
-const inventoryRoutes = require('./routes/inventory')
-const salesRoutes = require('./routes/sales')
-const customerRoutes = require('./routes/customers')
-const reportRoutes = require('./routes/reports')
-const userRoutes = require('./routes/users')
-const settingsRoutes = require('./routes/settings')
-const supplierRoutes = require('./routes/suppliers')
-const shiftRoutes = require('./routes/shifts')
-const purchaseOrderRoutes = require('./routes/purchaseOrders')
-const promotionRoutes = require('./routes/promotions')
-const branchRoutes = require('./routes/branches')
-const paystackRoutes = require('./routes/paystack')
+import { logger, morganStream } from './middleware/logger'
+import errorHandler from './middleware/errorHandler'
+import requestId from './middleware/requestId'
+import prisma from './utils/prismaClient'
+import authRoutes from './routes/auth'
+import productRoutes from './routes/products'
+import categoryRoutes from './routes/categories'
+import inventoryRoutes from './routes/inventory'
+import salesRoutes from './routes/sales'
+import customerRoutes from './routes/customers'
+import reportRoutes from './routes/reports'
+import userRoutes from './routes/users'
+import settingsRoutes from './routes/settings'
+import supplierRoutes from './routes/suppliers'
+import shiftRoutes from './routes/shifts'
+import purchaseOrderRoutes from './routes/purchaseOrders'
+import promotionRoutes from './routes/promotions'
+import branchRoutes from './routes/branches'
+import paystackRoutes from './routes/paystack'
 
 const app = express()
 
@@ -55,7 +55,7 @@ app.use(
 // Paystack signs the exact bytes it sends, so keep them for its webhook
 app.use(express.json({
   limit: '1mb',
-  verify: (req, res, buf) => {
+  verify: (req: Request, res, buf) => {
     if (req.originalUrl.startsWith('/api/paystack/webhook')) req.rawBody = buf
   },
 }))
@@ -63,7 +63,7 @@ app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())
 
 // HTTP request logging: request ID, client, method, path, status, size and response time
-morgan.token('id', (req) => req.id)
+morgan.token<Request>('id', (req) => req.id)
 app.use(
   morgan(':id :remote-addr ":method :url HTTP/:http-version" :status :res[content-length] - :response-time ms ":user-agent"', {
     stream: morganStream,
@@ -96,7 +96,7 @@ app.get('/api/health/ready', async (req, res) => {
       data: { status: 'ready', database: 'ok', database_ms: Date.now() - started, uptime_s: Math.round(process.uptime()) },
     })
   } catch (err) {
-    logger.error(`[${req.id}] Readiness check failed: ${err.message}`)
+    logger.error(`[${req.id}] Readiness check failed: ${err instanceof Error ? err.message : String(err)}`)
     res.status(503).json({
       success: false,
       error: { code: 'SERVICE_UNAVAILABLE', message: 'Database unreachable' },
@@ -143,4 +143,4 @@ if (require.main === module) {
   })
 }
 
-module.exports = app
+export default app

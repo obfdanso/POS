@@ -1,9 +1,9 @@
-const express = require('express')
-const { body, param, query } = require('express-validator')
-const controller = require('../controllers/promotionController')
-const { authenticate, authorize } = require('../middleware/auth')
-const validate = require('../middleware/validate').default
-const exactBody = require('../middleware/exactBody').default
+import express from 'express'
+import { body, param, query, type ValidationChain } from 'express-validator'
+import * as controller from '../controllers/promotionController'
+import { authenticate, authorize } from '../middleware/auth'
+import validate from '../middleware/validate'
+import exactBody from '../middleware/exactBody'
 
 const router = express.Router()
 
@@ -16,8 +16,8 @@ const manage = authorize(['ADMIN', 'MANAGER'])
 const idRule = () => param('id').isUUID().withMessage('Invalid promotion ID')
 
 // Built per route because validation chains are mutable; `required` makes the core fields mandatory
-const promotionRules = (required) => {
-  const opt = (chain) => (required ? chain : chain.optional())
+const promotionRules = (required: boolean) => {
+  const opt = (chain: ValidationChain) => (required ? chain : chain.optional())
   return [
     opt(body('name')).isString().withMessage('Name must be text').trim()
       .isLength({ min: 1, max: 100 }).withMessage('Name is required (max 100 characters)'),
@@ -41,4 +41,4 @@ router.get('/:id', manage, idRule(), validate, controller.get)
 router.post('/', manage, exactBody(promotionRules(true)), validate, controller.create)
 router.put('/:id', manage, idRule(), exactBody(promotionRules(false)), validate, controller.update)
 
-module.exports = router
+export default router

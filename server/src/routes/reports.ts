@@ -1,8 +1,8 @@
-const express = require('express')
-const { query } = require('express-validator')
-const reportController = require('../controllers/reportController')
-const { authenticate, authorize } = require('../middleware/auth')
-const validate = require('../middleware/validate').default
+import express from 'express'
+import { query } from 'express-validator'
+import * as reportController from '../controllers/reportController'
+import { authenticate, authorize } from '../middleware/auth'
+import validate from '../middleware/validate'
 
 const router = express.Router()
 
@@ -37,4 +37,4 @@ router.get('/profit', reportController.getProfitReport)
 // Comparing branches is for admins, who see the whole chain
 router.get('/branch-performance', authorize(['ADMIN']), reportController.getBranchPerformance)
 
-module.exports = router
+export default router

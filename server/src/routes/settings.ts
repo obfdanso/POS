@@ -1,10 +1,10 @@
-const express = require('express')
-const { body } = require('express-validator')
-const { authenticate, authorize } = require('../middleware/auth')
-const validate = require('../middleware/validate').default
-const exactBody = require('../middleware/exactBody').default
-const prisma = require('../utils/prismaClient').default
-const { recordAudit } = require('../utils/audit')
+import express, { type NextFunction, type Request, type Response } from 'express'
+import { body } from 'express-validator'
+import { authenticate, authorize, currentUser } from '../middleware/auth'
+import validate from '../middleware/validate'
+import exactBody from '../middleware/exactBody'
+import prisma from '../utils/prismaClient'
+import { recordAudit } from '../utils/audit'
 
 const router = express.Router()
 
@@ -48,7 +48,7 @@ const settingsValidation = [
 router.get('/', async (req, res, next) => {
   try {
     const rows = await prisma.settings.findMany()
-    const settings = { ...DEFAULT_SETTINGS }
+    const settings: Record<string, string> = { ...DEFAULT_SETTINGS }
     rows.forEach((r) => { settings[r.key] = r.value })
     res.json({ success: true, data: settings })
   } catch (err) {
@@ -56,10 +56,10 @@ router.get('/', async (req, res, next) => {
   }
 })
 
-router.put('/', authorize(['ADMIN']), exactBody(settingsValidation), validate, async (req, res, next) => {
+router.put('/', authorize(['ADMIN']), exactBody(settingsValidation), validate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const allowed = Object.keys(DEFAULT_SETTINGS)
-    const updates = Object.entries(req.body).filter(([k]) => allowed.includes(k))
+    const updates = Object.entries(req.body as Record<string, unknown>).filter(([k]) => allowed.includes(k))
     await Promise.all(
       updates.map(([key, value]) =>
         prisma.settings.upsert({
@@ -71,14 +71,14 @@ router.put('/', authorize(['ADMIN']), exactBody(settingsValidation), validate, a
     )
     if (updates.length) {
       await recordAudit({
-        userId: req.user.id,
+        userId: currentUser(req).id,
         action: 'SETTINGS_UPDATED',
         entity: 'Settings',
         details: updates.map(([key, value]) => `${key}=${value}`).join(', '),
       })
     }
     const rows = await prisma.settings.findMany()
-    const settings = { ...DEFAULT_SETTINGS }
+    const settings: Record<string, string> = { ...DEFAULT_SETTINGS }
     rows.forEach((r) => { settings[r.key] = r.value })
     res.json({ success: true, data: settings, message: 'Settings saved successfully' })
   } catch (err) {
@@ -86,4 +86,4 @@ router.put('/', authorize(['ADMIN']), exactBody(settingsValidation), validate, a
   }
 })
 
-module.exports = router
+export default router

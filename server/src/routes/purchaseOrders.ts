@@ -1,13 +1,13 @@
-const express = require('express')
-const { body, param, query } = require('express-validator')
-const controller = require('../controllers/purchaseOrderController')
-const { authenticate, authorize } = require('../middleware/auth')
-const { requireBranch } = require('../middleware/branch')
-const validate = require('../middleware/validate').default
-const exactBody = require('../middleware/exactBody').default
-const paginationRules = require('../middleware/pagination').default
-const { sortRules } = require('../middleware/sorting')
-const { PO_SORTS } = require('../services/purchaseOrderService')
+import express from 'express'
+import { body, param, query } from 'express-validator'
+import * as controller from '../controllers/purchaseOrderController'
+import { authenticate, authorize } from '../middleware/auth'
+import { requireBranch } from '../middleware/branch'
+import validate from '../middleware/validate'
+import exactBody from '../middleware/exactBody'
+import paginationRules from '../middleware/pagination'
+import { sortRules } from '../middleware/sorting'
+import { PO_SORTS } from '../services/purchaseOrderService'
 
 const router = express.Router()
 
@@ -15,7 +15,7 @@ const router = express.Router()
 router.use(authenticate, authorize(['ADMIN', 'MANAGER']))
 
 const idRule = () => param('id').isUUID().withMessage('Invalid purchase order ID')
-const text = (field, label, max) =>
+const text = (field: string, label: string, max: number) =>
   body(field).optional({ values: 'null' }).isString().withMessage(`${label} must be text`).trim()
     .isLength({ max }).withMessage(`${label} must be ${max} characters or fewer`)
 
@@ -76,4 +76,4 @@ router.post(
 
 router.post('/:id/cancel', idRule(), exactBody([text('reason', 'Reason', 300)]), validate, controller.cancelPurchaseOrder)
 
-module.exports = router
+export default router

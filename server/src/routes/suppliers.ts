@@ -1,10 +1,10 @@
-const express = require('express')
-const { body, param } = require('express-validator')
-const supplierController = require('../controllers/supplierController')
-const { authenticate, authorize } = require('../middleware/auth')
-const validate = require('../middleware/validate').default
-const exactBody = require('../middleware/exactBody').default
-const paginationRules = require('../middleware/pagination').default
+import express from 'express'
+import { body, param } from 'express-validator'
+import * as supplierController from '../controllers/supplierController'
+import { authenticate, authorize } from '../middleware/auth'
+import validate from '../middleware/validate'
+import exactBody from '../middleware/exactBody'
+import paginationRules from '../middleware/pagination'
 
 const router = express.Router()
 
@@ -29,4 +29,4 @@ router.post('/', authorize(['ADMIN', 'MANAGER']), exactBody(supplierValidation),
 router.put('/:id', authorize(['ADMIN', 'MANAGER']), idRule, exactBody(supplierValidation), validate, supplierController.updateSupplier)
 router.delete('/:id', authorize(['ADMIN']), idRule, validate, supplierController.deleteSupplier)
 
-module.exports = router
+export default router

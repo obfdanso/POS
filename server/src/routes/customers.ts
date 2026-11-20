@@ -1,19 +1,19 @@
-const express = require('express')
-const { body, param, query } = require('express-validator')
-const customerController = require('../controllers/customerController')
-const { authenticate, authorize } = require('../middleware/auth')
-const validate = require('../middleware/validate').default
-const exactBody = require('../middleware/exactBody').default
-const paginationRules = require('../middleware/pagination').default
-const { sortRules } = require('../middleware/sorting')
-const { CUSTOMER_SORTS } = require('../services/customerService')
+import express from 'express'
+import { body, param, query } from 'express-validator'
+import * as customerController from '../controllers/customerController'
+import { authenticate, authorize } from '../middleware/auth'
+import validate from '../middleware/validate'
+import exactBody from '../middleware/exactBody'
+import paginationRules from '../middleware/pagination'
+import { sortRules } from '../middleware/sorting'
+import { CUSTOMER_SORTS } from '../services/customerService'
 
 const router = express.Router()
 
 router.use(authenticate)
 
 // Built per route: validation chains are mutable, so create and update must not share instances
-function customerValidation({ nameRequired }) {
+function customerValidation({ nameRequired }: { nameRequired: boolean }) {
   const name = body('name').isString().withMessage('Name must be text').trim()
   return [
     nameRequired
@@ -48,4 +48,4 @@ router.get(
   customerController.getCustomerPurchases
 )
 
-module.exports = router
+export default router

@@ -1,13 +1,13 @@
-const express = require('express')
-const { body, param, query } = require('express-validator')
-const rateLimit = require('express-rate-limit')
-const salesController = require('../controllers/salesController')
-const { authenticate, authorize } = require('../middleware/auth')
-const { requireBranch } = require('../middleware/branch')
-const validate = require('../middleware/validate').default
-const exactBody = require('../middleware/exactBody').default
-const { sortRules } = require('../middleware/sorting')
-const { SALE_SORTS } = require('../services/salesService')
+import express from 'express'
+import { body, param, query } from 'express-validator'
+import rateLimit from 'express-rate-limit'
+import * as salesController from '../controllers/salesController'
+import { authenticate, authorize, currentUser } from '../middleware/auth'
+import { requireBranch } from '../middleware/branch'
+import validate from '../middleware/validate'
+import exactBody from '../middleware/exactBody'
+import { sortRules } from '../middleware/sorting'
+import { SALE_SORTS } from '../services/salesService'
 
 const router = express.Router()
 
@@ -76,7 +76,7 @@ router.get('/', listSalesValidation, validate, salesController.listSales)
 const lookupRateLimit = rateLimit({
   windowMs: 60 * 1000,
   max: 20,
-  keyGenerator: (req) => req.user.id,
+  keyGenerator: (req) => currentUser(req).id,
   standardHeaders: true,
   legacyHeaders: false,
   skip: () => process.env.NODE_ENV === 'test',
@@ -134,7 +134,7 @@ router.post(
 const emailRateLimit = rateLimit({
   windowMs: 60 * 1000,
   max: 10,
-  keyGenerator: (req) => req.user.id,
+  keyGenerator: (req) => currentUser(req).id,
   standardHeaders: true,
   legacyHeaders: false,
   skip: () => process.env.NODE_ENV === 'test',
@@ -160,7 +160,7 @@ router.post(
 const smsRateLimit = rateLimit({
   windowMs: 60 * 1000,
   max: 5,
-  keyGenerator: (req) => req.user.id,
+  keyGenerator: (req) => currentUser(req).id,
   standardHeaders: true,
   legacyHeaders: false,
   skip: () => process.env.NODE_ENV === 'test',
@@ -181,4 +181,4 @@ router.post(
   salesController.smsReceipt
 )
 
-module.exports = router
+export default router

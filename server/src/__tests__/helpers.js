@@ -1,7 +1,7 @@
 // Shared fixtures for integration tests: throwaway users with access tokens
 const request = require('supertest')
 const bcrypt = require('bcrypt')
-const app = require('../app')
+const app = require('../app').default
 const prisma = require('../utils/prismaClient').default
 
 const PASSWORD = 'testpass123'

@@ -1,13 +1,13 @@
-const express = require('express')
-const { body, param, query } = require('express-validator')
-const inventoryController = require('../controllers/inventoryController')
-const { authenticate, authorize } = require('../middleware/auth')
-const { requireBranch } = require('../middleware/branch')
-const validate = require('../middleware/validate').default
-const exactBody = require('../middleware/exactBody').default
-const paginationRules = require('../middleware/pagination').default
-const { sortRules } = require('../middleware/sorting')
-const { INVENTORY_SORTS } = require('../services/inventoryService')
+import express from 'express'
+import { body, param, query } from 'express-validator'
+import * as inventoryController from '../controllers/inventoryController'
+import { authenticate, authorize } from '../middleware/auth'
+import { requireBranch } from '../middleware/branch'
+import validate from '../middleware/validate'
+import exactBody from '../middleware/exactBody'
+import paginationRules from '../middleware/pagination'
+import { sortRules } from '../middleware/sorting'
+import { INVENTORY_SORTS } from '../services/inventoryService'
 
 const router = express.Router()
 
@@ -62,4 +62,4 @@ router.post(
   inventoryController.restockProduct
 )
 
-module.exports = router
+export default router

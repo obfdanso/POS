@@ -1,15 +1,15 @@
-const express = require('express')
-const { body, param, query } = require('express-validator')
-const multer = require('multer')
-const path = require('path')
-const fs = require('fs')
-const productController = require('../controllers/productController')
-const { authenticate, authorize } = require('../middleware/auth')
-const validate = require('../middleware/validate').default
-const exactBody = require('../middleware/exactBody').default
-const { sortRules } = require('../middleware/sorting')
-const { PRODUCT_SORTS } = require('../services/productService')
-const { ValidationError } = require('../utils/errors')
+import express from 'express'
+import { body, param, query } from 'express-validator'
+import multer from 'multer'
+import path from 'path'
+import fs from 'fs'
+import * as productController from '../controllers/productController'
+import { authenticate, authorize } from '../middleware/auth'
+import validate from '../middleware/validate'
+import exactBody from '../middleware/exactBody'
+import { sortRules } from '../middleware/sorting'
+import { PRODUCT_SORTS } from '../services/productService'
+import { ValidationError } from '../utils/errors'
 
 const router = express.Router()
 
@@ -126,4 +126,4 @@ function updateProductValidation() {
   ]
 }
 
-module.exports = router
+export default router

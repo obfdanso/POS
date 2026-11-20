@@ -1,19 +1,19 @@
-const express = require('express')
-const { body, param, query } = require('express-validator')
-const branchController = require('../controllers/branchController')
-const { authenticate, authorize } = require('../middleware/auth')
-const validate = require('../middleware/validate').default
-const exactBody = require('../middleware/exactBody').default
+import express from 'express'
+import { body, param, query } from 'express-validator'
+import * as branchController from '../controllers/branchController'
+import { authenticate, authorize } from '../middleware/auth'
+import validate from '../middleware/validate'
+import exactBody from '../middleware/exactBody'
 
 const router = express.Router()
 
 router.use(authenticate)
 
-const nameRule = (required) => {
+const nameRule = (required: boolean) => {
   const rule = body('name')
   return (required ? rule : rule.optional()).trim().isLength({ min: 2, max: 80 }).withMessage('Branch name must be 2–80 characters')
 }
-const codeRule = (required) => {
+const codeRule = (required: boolean) => {
   const rule = body('code')
   return (required ? rule : rule.optional())
     .trim()
@@ -45,4 +45,4 @@ router.put(
   branchController.updateBranch
 )
 
-module.exports = router
+export default router

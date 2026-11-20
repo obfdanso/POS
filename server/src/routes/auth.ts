@@ -1,10 +1,10 @@
-const express = require('express')
-const { body } = require('express-validator')
-const rateLimit = require('express-rate-limit')
-const authController = require('../controllers/authController')
-const { authenticate } = require('../middleware/auth')
-const validate = require('../middleware/validate').default
-const exactBody = require('../middleware/exactBody').default
+import express from 'express'
+import { body } from 'express-validator'
+import rateLimit from 'express-rate-limit'
+import * as authController from '../controllers/authController'
+import { authenticate } from '../middleware/auth'
+import validate from '../middleware/validate'
+import exactBody from '../middleware/exactBody'
 
 const router = express.Router()
 
@@ -64,4 +64,4 @@ router.get('/me', authenticate, authController.getMe)
 router.post('/change-password', authenticate, exactBody(changePasswordValidation), validate, authController.changePassword)
 router.put('/profile', authenticate, exactBody(profileValidation), validate, authController.updateProfile)
 
-module.exports = router
+export default router

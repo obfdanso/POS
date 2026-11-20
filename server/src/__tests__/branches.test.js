@@ -206,6 +206,14 @@ describe('Selling and returning across branches', () => {
     }
   })
 
+  it("keeps another branch's manager away from a sale's Paystack refunds", async () => {
+    const sale = (await sell(cashierB, { items: [{ product_id: item.id, quantity: 1 }] })).body.data
+    await request(app).post(`/api/sales/${sale.id}/refund`).set(managerB.headers).send({})
+    const refund = await prisma.refund.findFirst({ where: { sale_id: sale.id } })
+    const res = await request(app).post(`/api/sales/${sale.id}/refunds/${refund.id}/paystack`).set(manager.headers).send({})
+    expect(res.status).toBe(404)
+  })
+
   it("lists only the branch's sales to its manager", async () => {
     const res = await request(app).get('/api/sales?per_page=100').set(managerB.headers)
     expect(res.status).toBe(200)

@@ -1,6 +1,7 @@
 const salesService = require('../services/salesService')
 const gatewayRefundService = require('../services/gatewayRefundService')
 const { recordAudit } = require('../utils/audit')
+const { NotFoundError } = require('../utils/errors')
 
 const without = (obj, keys) => Object.fromEntries(Object.entries(obj).filter(([key]) => !keys.includes(key)))
 
@@ -123,6 +124,13 @@ async function smsReceipt(req, res, next) {
 
 async function sendRefundToPaystack(req, res, next) {
   try {
+    // Only staff who may see the sale, and for managers only refunds their own branch paid out
+    const before = await salesService.getSaleById(req.params.id)
+    salesService.assertCanSeeSale(before, req.user)
+    const refund = before.refunds.find((r) => r.id === req.params.refundId)
+    if (req.user.role === 'MANAGER' && refund && refund.branch_id !== req.user.branch_id) {
+      throw new NotFoundError('Refund not found')
+    }
     await gatewayRefundService.sendOrRefreshGatewayRefund(req.params.id, req.params.refundId, req.user.id)
     const sale = await salesService.getSaleById(req.params.id)
     res.json({ success: true, data: normalizeSale(sale) })

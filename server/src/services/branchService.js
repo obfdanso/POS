@@ -42,20 +42,22 @@ async function createBranch({ name, code, address, phone }, userId) {
 
 async function updateBranch(id, data, userId) {
   const existing = await getBranch(id)
-  // An open drawer has to be counted and closed before its branch closes
-  if (data.is_active === false && existing.is_active) {
-    const open = await prisma.shift.count({ where: { branch_id: id, status: 'OPEN' } })
-    if (open > 0) {
-      const message = `Close the ${open} open shift${open === 1 ? '' : 's'} at this branch first`
-      throw new ValidationError(message, [{ field: 'is_active', message }])
-    }
-  }
   const changes = {}
   for (const key of ['name', 'code', 'address', 'phone', 'is_active']) {
     if (data[key] !== undefined) changes[key] = data[key] === '' ? null : data[key]
   }
   try {
     return await prisma.$transaction(async (tx) => {
+      // An open drawer has to be counted and closed before its branch closes. The row lock makes a
+      // shift opening at the same moment wait (openShift takes the same lock).
+      if (data.is_active === false && existing.is_active) {
+        await tx.$queryRaw`SELECT id FROM "Branch" WHERE id = ${id} FOR UPDATE`
+        const open = await tx.shift.count({ where: { branch_id: id, status: 'OPEN' } })
+        if (open > 0) {
+          const message = `Close the ${open} open shift${open === 1 ? '' : 's'} at this branch first`
+          throw new ValidationError(message, [{ field: 'is_active', message }])
+        }
+      }
       const branch = await tx.branch.update({ where: { id }, data: changes })
       await recordAudit(
         { userId, action: 'BRANCH_UPDATED', entity: 'Branch', entityId: id, details: JSON.stringify(changes) },

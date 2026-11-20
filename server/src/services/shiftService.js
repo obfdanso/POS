@@ -74,9 +74,14 @@ async function openShift(userId, { opening_float, notes }, branchId) {
     throw new ConflictError('You already have an open shift. Close it before opening another.')
   }
   try {
-    const shift = await prisma.shift.create({
-      data: { user_id: userId, opening_float, notes: notes || null, branch_id: branchId },
-      include: PEOPLE,
+    const shift = await prisma.$transaction(async (tx) => {
+      // Waits for a branch being closed right now, then refuses if it was
+      const [branch] = await tx.$queryRaw`SELECT is_active FROM "Branch" WHERE id = ${branchId} FOR SHARE`
+      if (!branch?.is_active) throw new ConflictError('This branch is closed')
+      return tx.shift.create({
+        data: { user_id: userId, opening_float, notes: notes || null, branch_id: branchId },
+        include: PEOPLE,
+      })
     })
     return withTotals(shift)
   } catch (err) {

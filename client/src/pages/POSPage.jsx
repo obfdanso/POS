@@ -492,7 +492,7 @@ function isTypingTarget(el) {
 
 export default function POSPage() {
   const { user } = useAuth()
-  const { branchId, isAllBranches } = useBranch()
+  const { branchId, isAllBranches, branchesLoaded } = useBranch()
   const { loyalty_points_rate, currency_symbol, refreshSettings, require_open_shift } = useSettings()
   const fmt = (v) => formatCurrency(v, currency_symbol || 'GH₵')
   const { items, cartDiscount, customer, redeemPoints, maxPoints, pointValue, pointsDiscount, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, setRedeemPoints, clearCart, syncItems, promotions, setPromotions } = useCart()
@@ -874,6 +874,15 @@ export default function POSPage() {
   const itemCount = items.reduce((sum, i) => sum + i.quantity, 0)
   const loyaltyRate = parseFloat(loyalty_points_rate) || 0
   const pointsEarned = customer && loyaltyRate > 0 ? Math.floor(total / loyaltyRate) : 0
+
+  // Until the branch list arrives, a remembered branch isn't confirmed yet: don't flash the picker
+  if (isAllBranches && !branchesLoaded) {
+    return (
+      <DashboardLayout>
+        <p className="mt-16 text-center text-sm text-gray-500 dark:text-gray-400">Loading branch…</p>
+      </DashboardLayout>
+    )
+  }
 
   if (isAllBranches) {
     return (

@@ -16,6 +16,7 @@ import {
 } from 'recharts'
 import { DashboardLayout } from '../layouts/DashboardLayout'
 import { reportsService } from '../services/reports'
+import { useBranch } from '../hooks/useBranch'
 import { inventoryService } from '../services/inventory'
 import { toISODate, daysFromToday } from '../utils/date'
 import { formatCurrency } from '../utils/formatCurrency'
@@ -50,6 +51,8 @@ function KpiCard({ title, value, subtitle, icon, color }) {
 
 export default function DashboardPage() {
   const { currency_symbol } = useSettings()
+  const { isAllBranches, currentBranch } = useBranch()
+  const [branchToday, setBranchToday] = useState([])
   const today = toISODate()
   const sevenDaysAgo = daysFromToday(-6)
 
@@ -87,6 +90,14 @@ export default function DashboardPage() {
       .finally(() => setLoadingCharts(false))
   }, [sevenDaysAgo, today])
 
+  // Today's takings at each branch, when an admin is looking at the whole chain
+  useEffect(() => {
+    if (!isAllBranches) return
+    reportsService.branchPerformance({ start_date: today, end_date: today })
+      .then((res) => setBranchToday(res.data?.data ?? []))
+      .catch(() => toast.error('Failed to load branch figures'))
+  }, [isAllBranches, today])
+
   // Includes out-of-stock items, lowest stock first
   useEffect(() => {
     inventoryService.lowStock()
@@ -106,7 +117,7 @@ export default function DashboardPage() {
             </h1>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
               {new Date().toLocaleDateString('en-GH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-              {' '}— here&apos;s how your store is performing today
+              {' '}— here&apos;s how {currentBranch ? currentBranch.name : isAllBranches ? 'all your branches are' : 'your store is'} performing today
             </p>
           </div>
           <Link
@@ -267,6 +278,30 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
+
+        {isAllBranches && branchToday.length > 0 && (
+          <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm p-6">
+            <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-4">Branches today</h2>
+            <table className="w-full text-sm">
+              <thead className="text-xs text-gray-500 dark:text-gray-400">
+                <tr>
+                  <th scope="col" className="text-left font-medium pb-2">Branch</th>
+                  <th scope="col" className="text-right font-medium pb-2">Sales</th>
+                  <th scope="col" className="text-right font-medium pb-2">Revenue</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                {branchToday.map((b) => (
+                  <tr key={b.id}>
+                    <td className="py-2 text-gray-900 dark:text-gray-100">{b.label}</td>
+                    <td className="py-2 text-right text-gray-600 dark:text-gray-400">{b.transactions}</td>
+                    <td className="py-2 text-right font-semibold text-gray-900 dark:text-gray-100">{formatCurrency(b.value, currency_symbol)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {/* Low stock alerts — full width */}
         <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm p-6">

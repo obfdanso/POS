@@ -9,7 +9,7 @@ const auth = (who) => who.headers
 const sell = (body) => request(app).post('/api/sales').set(auth(cashier)).send(body)
 const refund = (saleId, body, who = manager) => request(app).post(`/api/sales/${saleId}/refund`).set(auth(who)).send(body)
 const lineFor = (sale, product) => sale.items.find((i) => i.product_id === product.id)
-const stockOf = async (product) => (await stockAt(product.id))
+const stockOf = (product) => stockAt(product.id)
 
 beforeAll(async () => {
   originalSettings = await prisma.settings.findMany({ where: { key: { in: Object.keys(TEST_SETTINGS) } } })

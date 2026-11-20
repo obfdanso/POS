@@ -4,6 +4,14 @@ Notable changes to QuickMart POS, newest first.
 
 ## 2026-11-20
 
+### Added
+- **Multiple branches.** QuickMart now runs as a chain. An admin creates branches (name, short code, address, phone) on the new **Branches** page and can close or reopen them. Products and prices are shared; each branch stocks its own selection, with its own counts and low-stock levels (new `BranchStock` table; the old `Product.quantity` moved into a "Main Branch" on upgrade).
+  - Cashiers and managers belong to one branch and only see and change its stock, sales, shifts and purchase orders. Admins pick a branch in the header, or **All branches** for combined figures and a new branch comparison report (`GET /api/reports/branch-performance`).
+  - The product form has a **Stocked at** section; the till only offers what its branch stocks and says when a scanned product isn't stocked there.
+  - Returns can be made at any branch: a manager finds the sale by its transaction ID and receipt total, the goods go into their branch's stock and cash comes from their drawer.
+  - Receipts, refund slips, emails and texts show the branch's name, address and phone. Customer histories, shifts, orders and sales lists show the branch.
+  - Seed data has two branches, Kumasi Central and Accra Mall, and a second cashier (`cashier2`) at Accra.
+
 ### Fixed
 - **Cash refunds always come out of a drawer.** A refund by someone with no open shift is now counted against the shift the sale was rung up on, if that is still open. When shifts are required and no drawer is open, cash can't be given back until one is opened.
 

@@ -2,6 +2,11 @@
 
 Notable changes to QuickMart POS, newest first.
 
+## 2026-11-20
+
+### Fixed
+- **Cash refunds always come out of a drawer.** A refund by someone with no open shift is now counted against the shift the sale was rung up on, if that is still open. When shifts are required and no drawer is open, cash can't be given back until one is opened.
+
 ## 2026-11-18
 
 ### Added

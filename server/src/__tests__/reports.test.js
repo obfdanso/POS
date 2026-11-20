@@ -6,11 +6,11 @@ const PREFIX = 'reptest'
 const RANGE = 'start_date=2001-03-05&end_date=2001-03-07'
 let manager, cashier, catA, catB, pen, book
 
-async function createSale(n, { day, items, status = 'COMPLETED', user }) {
+async function createSale(n, { day, items, status = 'COMPLETED', user, branchId }) {
   const subtotal = items.reduce((sum, i) => sum + i.qty * i.price, 0)
   return prisma.sale.create({
     data: {
-      branch_id: (await testBranch()).id,
+      branch_id: branchId ?? (await testBranch()).id,
       transaction_id: `TXN-REPTEST-${n}`,
       user_id: user.id,
       subtotal,
@@ -49,6 +49,8 @@ afterAll(async () => {
   await prisma.product.deleteMany({ where: { sku: { startsWith: 'REPTEST' } } })
   await prisma.category.deleteMany({ where: { name: { startsWith: 'RepTest' } } })
   await deleteTestUsers(PREFIX)
+  await deleteTestUsers(`${PREFIX}a`)
+  await prisma.branch.deleteMany({ where: { code: 'RPB' } })
   await prisma.$disconnect()
 })
 
@@ -138,5 +140,40 @@ describe('Report access and validation', () => {
     expect((await get('sales-summary?start_date=2001-03-07&end_date=2001-03-05')).status).toBe(422)
     expect((await get('top-products?limit=0')).status).toBe(422)
     expect((await get('top-products?by=price')).status).toBe(422)
+  })
+})
+
+describe('Reports by branch', () => {
+  let admin, other
+
+  beforeAll(async () => {
+    admin = await createUserWithToken('ADMIN', `${PREFIX}a`)
+    other = await prisma.branch.upsert({ where: { code: 'RPB' }, update: {}, create: { name: 'RepTest Branch', code: 'RPB' } })
+    // Mar 6: one book (20 at 2 × 10) at the other branch
+    await createSale(6, { day: new Date(2001, 2, 6, 12), user: manager.user, branchId: other.id, items: [{ product: book, qty: 2, price: 10 }] })
+  })
+
+  const asAdmin = (path, branch) =>
+    request(app).get(`/api/reports/${path}`).set(branch ? { ...admin.headers, 'X-Branch-Id': branch.id } : { Authorization: admin.headers.Authorization })
+
+  it("keeps each branch's figures apart, and adds them up for all branches", async () => {
+    expect((await get(`sales-summary?${RANGE}`)).body.data.total_revenue).toBe(36)
+    expect((await asAdmin(`sales-summary?${RANGE}`, other)).body.data).toMatchObject({ total_revenue: 20, transaction_count: 1 })
+    expect((await asAdmin(`sales-summary?${RANGE}`)).body.data).toMatchObject({ total_revenue: 56, transaction_count: 4 })
+    const top = (await asAdmin(`top-products?${RANGE}`, other)).body.data
+    expect(top.map((p) => [p.label, p.quantity])).toEqual([['RepTest Book', 2]])
+  })
+
+  it('compares branches side by side', async () => {
+    const res = await asAdmin(`branch-performance?${RANGE}`)
+    expect(res.status).toBe(200)
+    expect(res.body.data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'Test Branch', value: 36, transactions: 3 }),
+      expect.objectContaining({ label: 'RepTest Branch', value: 20, transactions: 1 }),
+    ]))
+  })
+
+  it("keeps the branch comparison for admins", async () => {
+    expect((await get(`branch-performance?${RANGE}`)).status).toBe(403)
   })
 })

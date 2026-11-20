@@ -96,6 +96,19 @@ describe('Branches API', () => {
     expect(me.body.data.branch).toMatchObject({ id: branchA.id, name: 'BranchTest A', code: 'BTA' })
   })
 
-  it.todo("staff can't act on another branch by sending its id in the header")
-  it.todo('admin needs to choose a branch before changing stock')
+  it("staff can't act on another branch by sending its id in the header", async () => {
+    const elsewhere = await prisma.branch.create({ data: { name: 'BranchTest Elsewhere', code: 'BTE' } })
+    CODES.push('BTE')
+    const res = await request(app).get('/api/inventory').set({ ...cashier.headers, 'X-Branch-Id': elsewhere.id })
+    expect(res.status).toBe(200)
+    expect(res.body.data.every((row) => row.branch_id === branchA.id)).toBe(true)
+  })
+
+  it('admin needs to choose a branch before changing stock', async () => {
+    const res = await request(app).post('/api/inventory/restock')
+      .set({ Authorization: admin.headers.Authorization })
+      .send({ product_id: '00000000-0000-4000-8000-000000000000', quantity: 1 })
+    expect(res.status).toBe(422)
+    expect(res.body.error.details[0]).toMatchObject({ field: 'branch', message: 'Choose a branch first' })
+  })
 })

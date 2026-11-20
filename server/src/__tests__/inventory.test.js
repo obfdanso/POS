@@ -1,69 +1,43 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
-const request = require('supertest')
-const app = require('../app')
-const prisma = require('../utils/prismaClient')
-const bcrypt = require('bcrypt')
+const { app, prisma, request, createUserWithToken, deleteTestUsers, testBranch, createTestProduct, stockAt } = require('./helpers')
 
+const PREFIX = 'invtest'
 let managerToken
 let cashierToken
 let testCategory
 let testProduct
-let managerUser
-let cashierUser
+let branch, other, manager, cashier, otherManager
+
+const stockKey = () => ({ branch_id_product_id: { branch_id: branch.id, product_id: testProduct.id } })
+const stockRow = () => prisma.branchStock.findUnique({ where: stockKey() })
+const setStock = (data) => prisma.branchStock.update({ where: stockKey(), data })
 
 beforeAll(async () => {
-  const hash = await bcrypt.hash('testpass123', 12)
-  managerUser = await prisma.user.create({
-    data: {
-      username: 'inv_test_manager',
-      email: 'inv_test_manager@test.com',
-      password_hash: hash,
-      full_name: 'Inventory Test Manager',
-      role: 'MANAGER',
-    },
-  })
-  cashierUser = await prisma.user.create({
-    data: {
-      username: 'inv_test_cashier',
-      email: 'inv_test_cashier@test.com',
-      password_hash: hash,
-      full_name: 'Inventory Test Cashier',
-      role: 'CASHIER',
-    },
-  })
-
-  const managerLogin = await request(app)
-    .post('/api/auth/login')
-    .send({ username: 'inv_test_manager', password: 'testpass123' })
-  managerToken = managerLogin.body.data.accessToken
-
-  const cashierLogin = await request(app)
-    .post('/api/auth/login')
-    .send({ username: 'inv_test_cashier', password: 'testpass123' })
-  cashierToken = cashierLogin.body.data.accessToken
+  branch = await testBranch()
+  other = await prisma.branch.upsert({ where: { code: 'IVB' }, update: { is_active: true }, create: { name: 'InvTest Branch', code: 'IVB' } })
+  manager = await createUserWithToken('MANAGER', PREFIX)
+  cashier = await createUserWithToken('CASHIER', PREFIX)
+  otherManager = await createUserWithToken('MANAGER', `${PREFIX}o`, { branchId: other.id })
+  managerToken = manager.token
+  cashierToken = cashier.token
 
   testCategory = await prisma.category.create({
     data: { name: 'Inv_Test_Category_XYZ' },
   })
-  testProduct = await prisma.product.create({
-    data: {
-      name: 'Inventory Test Product',
-      sku: 'INV-TEST-001',
-      barcode: '9990000000001',
-      category_id: testCategory.id,
-      price: 15.0,
-      quantity: 50,
-      low_stock_threshold: 10,
-    },
-  })
+  testProduct = await createTestProduct(
+    { name: 'Inventory Test Product', sku: 'INV-TEST-001', barcode: '9990000000001', category_id: testCategory.id, price: 15.0 },
+    { quantity: 50, low_stock_threshold: 10 }
+  )
+  await prisma.branchStock.create({ data: { branch_id: other.id, product_id: testProduct.id, quantity: 50, low_stock_threshold: 10 } })
 })
 
 afterAll(async () => {
   await prisma.inventoryLog.deleteMany({ where: { product_id: testProduct.id } })
+  await prisma.branchStock.deleteMany({ where: { product_id: testProduct.id } })
   await prisma.product.delete({ where: { id: testProduct.id } })
   await prisma.category.delete({ where: { id: testCategory.id } })
-  await prisma.authLog.deleteMany({ where: { user_id: { in: [managerUser.id, cashierUser.id] } } })
-  await prisma.user.deleteMany({ where: { id: { in: [managerUser.id, cashierUser.id] } } })
+  await deleteTestUsers(PREFIX)
+  await deleteTestUsers(`${PREFIX}o`)
   await prisma.$disconnect()
 })
 
@@ -88,10 +62,7 @@ describe('GET /api/inventory', () => {
 describe('GET /api/inventory/low-stock', () => {
   it('returns products at or below low_stock_threshold', async () => {
     // Set product quantity to exactly low_stock_threshold to ensure it appears
-    await prisma.product.update({
-      where: { id: testProduct.id },
-      data: { quantity: 5, low_stock_threshold: 10 },
-    })
+    await setStock({ quantity: 5, low_stock_threshold: 10 })
 
     const res = await request(app)
       .get('/api/inventory/low-stock')
@@ -104,16 +75,13 @@ describe('GET /api/inventory/low-stock', () => {
     expect(found.quantity).toBeLessThanOrEqual(found.low_stock_threshold)
 
     // Restore quantity
-    await prisma.product.update({
-      where: { id: testProduct.id },
-      data: { quantity: 50 },
-    })
+    await setStock({ quantity: 50 })
   })
 })
 
 describe('POST /api/inventory/restock', () => {
   it('increases stock and creates RESTOCK inventory log', async () => {
-    const before = await prisma.product.findUnique({ where: { id: testProduct.id } })
+    const before = await stockRow()
 
     const res = await request(app)
       .post('/api/inventory/restock')
@@ -123,7 +91,7 @@ describe('POST /api/inventory/restock', () => {
     expect(res.status).toBe(200)
     expect(res.body.success).toBe(true)
 
-    const after = await prisma.product.findUnique({ where: { id: testProduct.id } })
+    const after = await stockRow()
     expect(after.quantity).toBe(before.quantity + 20)
 
     const log = await prisma.inventoryLog.findFirst({
@@ -166,7 +134,7 @@ describe('POST /api/inventory/restock', () => {
 
 describe('POST /api/inventory/adjust', () => {
   it('adjusts stock up and creates ADJUSTMENT log', async () => {
-    const before = await prisma.product.findUnique({ where: { id: testProduct.id } })
+    const before = await stockRow()
 
     const res = await request(app)
       .post('/api/inventory/adjust')
@@ -175,12 +143,12 @@ describe('POST /api/inventory/adjust', () => {
 
     expect(res.status).toBe(200)
 
-    const after = await prisma.product.findUnique({ where: { id: testProduct.id } })
+    const after = await stockRow()
     expect(after.quantity).toBe(before.quantity + 5)
   })
 
   it('adjusts stock down with negative quantity_change', async () => {
-    const before = await prisma.product.findUnique({ where: { id: testProduct.id } })
+    const before = await stockRow()
 
     const res = await request(app)
       .post('/api/inventory/adjust')
@@ -189,12 +157,12 @@ describe('POST /api/inventory/adjust', () => {
 
     expect(res.status).toBe(200)
 
-    const after = await prisma.product.findUnique({ where: { id: testProduct.id } })
+    const after = await stockRow()
     expect(after.quantity).toBe(before.quantity - 5)
   })
 
   it('rejects adjustment that would result in negative stock', async () => {
-    const before = await prisma.product.findUnique({ where: { id: testProduct.id } })
+    const before = await stockRow()
 
     const res = await request(app)
       .post('/api/inventory/adjust')
@@ -254,7 +222,7 @@ describe('GET /api/inventory/log/:productId', () => {
 
 describe('Concurrent stock adjustments', () => {
   it('applies every change exactly once and never goes below zero', async () => {
-    await prisma.product.update({ where: { id: testProduct.id }, data: { quantity: 3 } })
+    await setStock({ quantity: 3 })
 
     const adjust = (quantity_change) =>
       request(app)
@@ -265,7 +233,43 @@ describe('Concurrent stock adjustments', () => {
     const results = await Promise.all([adjust(-1), adjust(-1), adjust(-1), adjust(-1), adjust(-1)])
     expect(results.filter((r) => r.status === 200)).toHaveLength(3)
 
-    const product = await prisma.product.findUnique({ where: { id: testProduct.id } })
+    const product = await stockRow()
     expect(product.quantity).toBe(0)
+  })
+})
+
+describe('Stock per branch', () => {
+  it('restocking one branch leaves the other alone', async () => {
+    const before = await stockAt(testProduct.id, other.id)
+    const res = await request(app).post('/api/inventory/restock').set(manager.headers).send({ product_id: testProduct.id, quantity: 4 })
+    expect(res.status).toBe(200)
+    expect(await stockAt(testProduct.id, other.id)).toBe(before)
+    const log = await prisma.inventoryLog.findUnique({ where: { id: res.body.data.log.id } })
+    expect(log.branch_id).toBe(branch.id)
+  })
+
+  it('low stock is worked out per branch', async () => {
+    await setStock({ quantity: 2, low_stock_threshold: 5 })
+    try {
+      const mine = await request(app).get('/api/inventory/low-stock').set(manager.headers)
+      expect(mine.body.data.map((p) => p.id)).toContain(testProduct.id)
+      const theirs = await request(app).get('/api/inventory/low-stock').set(otherManager.headers)
+      expect(theirs.body.data.map((p) => p.id)).not.toContain(testProduct.id)
+    } finally {
+      await setStock({ quantity: 50, low_stock_threshold: 10 })
+    }
+  })
+
+  it("lists only the branch's own stock rows, sortable by quantity", async () => {
+    const res = await request(app).get('/api/inventory?search=INV-TEST&sort=quantity&order=desc').set(manager.headers)
+    expect(res.status).toBe(200)
+    expect(res.body.data).toHaveLength(1)
+    expect(res.body.data[0]).toMatchObject({ id: testProduct.id, branch_id: branch.id, branch: { code: 'TEST' } })
+  })
+
+  it("shows a product's history for the branch only", async () => {
+    const res = await request(app).get(`/api/inventory/log/${testProduct.id}`).set(otherManager.headers)
+    expect(res.status).toBe(200)
+    expect(res.body.data.every((l) => l.branch_id === other.id)).toBe(true)
   })
 })

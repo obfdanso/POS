@@ -84,6 +84,25 @@ describe('User management (admin only)', () => {
     expect(demote.body.error.details[0].field).toBe('branch_id')
   })
 
+  it('lets an admin edit or deactivate staff of a closed branch without moving them', async () => {
+    const shut = await prisma.branch.create({ data: { name: 'UserTest Shut', code: 'UTS', is_active: false } })
+    const worker = await prisma.user.create({
+      data: { username: `${PREFIX}_shutworker`, email: `${PREFIX}_shutworker@test.local`, password_hash: 'x', full_name: 'Old Name', role: 'CASHIER', branch_id: shut.id },
+    })
+    try {
+      const res = await request(app).put(`/api/users/${worker.id}`).set(auth(admin)).send({ full_name: 'New Name', is_active: false })
+      expect(res.status).toBe(200)
+      expect(res.body.data).toMatchObject({ full_name: 'New Name', is_active: false })
+      // Moving someone to a closed branch is still refused
+      const move = await request(app).put(`/api/users/${cashier.user.id}`).set(auth(admin)).send({ branch_id: shut.id })
+      expect(move.status).toBe(422)
+    } finally {
+      await prisma.auditLog.deleteMany({ where: { entity_id: worker.id } })
+      await prisma.user.delete({ where: { id: worker.id } })
+      await prisma.branch.delete({ where: { id: shut.id } })
+    }
+  })
+
   it("can't move someone to another branch while their shift is open", async () => {
     const other = await prisma.branch.upsert({ where: { code: 'UTB' }, update: {}, create: { name: 'UserTest Branch', code: 'UTB' } })
     const shift = await prisma.shift.create({ data: { user_id: cashier.user.id, opening_float: 0, branch_id: branch.id } })

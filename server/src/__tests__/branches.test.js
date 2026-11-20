@@ -2,7 +2,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '../../.env') }
 const { app, prisma, request, createUserWithToken, deleteTestUsers } = require('./helpers')
 
 const PREFIX = 'branchtest'
-const CODES = ['BTA', 'BTB', 'BTC', 'BTX', 'BTS', 'BTE']
+const CODES = ['BTA', 'BTB', 'BTC', 'BTX', 'BTS', 'BTE', 'BTY']
 let admin, manager, cashier, branchA
 
 beforeAll(async () => {
@@ -38,6 +38,21 @@ describe('Branches API', () => {
     const closed = await request(app).put(`/api/branches/${created.body.data.id}`).set(admin.headers).send({ is_active: false })
     expect(closed.status).toBe(200)
     expect(closed.body.data.is_active).toBe(false)
+  })
+
+  it('refuses to close a branch while a drawer is open there', async () => {
+    const shop = await prisma.branch.create({ data: { name: 'BranchTest Busy', code: 'BTY' } })
+    CODES.push('BTY')
+    const worker = await createUserWithToken('CASHIER', `${PREFIX}y`, { branchId: shop.id })
+    const shift = await prisma.shift.create({ data: { user_id: worker.user.id, opening_float: 0, branch_id: shop.id } })
+    try {
+      const res = await request(app).put(`/api/branches/${shop.id}`).set(admin.headers).send({ is_active: false })
+      expect(res.status).toBe(422)
+      expect(res.body.error.details[0]).toMatchObject({ field: 'is_active', message: 'Close the 1 open shift at this branch first' })
+    } finally {
+      await prisma.shift.delete({ where: { id: shift.id } })
+      await deleteTestUsers(`${PREFIX}y`)
+    }
   })
 
   it("managers and cashiers can't manage branches, but can list the open ones", async () => {
@@ -176,7 +191,12 @@ describe('Selling and returning across branches', () => {
 
     // Branch A's manager can't browse branch B's sales, but finds this one by its transaction ID
     expect((await request(app).get(`/api/sales/${sale.id}`).set(manager.headers)).status).toBe(404)
-    const found = await request(app).get(`/api/sales/lookup/${sale.transaction_id}`).set(manager.headers)
+    // The receipt's total is needed too, so transaction IDs can't simply be tried one after another
+    expect((await request(app).get(`/api/sales/lookup/${sale.transaction_id}`).set(manager.headers)).status).toBe(422)
+    const wrongTotal = await request(app).get(`/api/sales/lookup/${sale.transaction_id}?total=1.23`).set(manager.headers)
+    expect(wrongTotal.status).toBe(404)
+    expect(wrongTotal.body.error.message).toBe('No sale with that transaction ID and total')
+    const found = await request(app).get(`/api/sales/lookup/${sale.transaction_id}?total=${sale.total_amount}`).set(manager.headers)
     expect(found.status).toBe(200)
     expect(found.body.data).toMatchObject({ id: sale.id, branch: { code: 'BTB' } })
 
@@ -194,7 +214,7 @@ describe('Selling and returning across branches', () => {
     const customer = await prisma.customer.create({ data: { name: 'BranchTest Buyer', phone: '020-555-0101', email: 'buyer@branchtest.local' } })
     try {
       const sale = (await sell(cashierB, { items: [{ product_id: item.id, quantity: 1 }], customer_id: customer.id })).body.data
-      const res = await request(app).get(`/api/sales/lookup/${sale.transaction_id}`).set(manager.headers)
+      const res = await request(app).get(`/api/sales/lookup/${sale.transaction_id}?total=${sale.total_amount}`).set(manager.headers)
       expect(res.status).toBe(200)
       expect(res.body.data.customer).toEqual({ id: customer.id, name: 'BranchTest Buyer' })
       expect(res.body.data.payments.every((p) => !('reference' in p))).toBe(true)
@@ -222,7 +242,7 @@ describe('Selling and returning across branches', () => {
   })
 
   it("doesn't let cashiers look sales up by transaction ID", async () => {
-    expect((await request(app).get('/api/sales/lookup/TXN-20260101-0001').set(cashier.headers)).status).toBe(403)
+    expect((await request(app).get('/api/sales/lookup/TXN-20260101-0001?total=1').set(cashier.headers)).status).toBe(403)
   })
 
   it("doesn't use an admin's shift at one branch for a sale at another", async () => {

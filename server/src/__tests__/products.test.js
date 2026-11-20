@@ -255,6 +255,18 @@ describe('Branch stock', () => {
     expect(detail.body.data.stocks.map((s) => s.quantity).sort()).toEqual([5, 7])
   })
 
+  it('keeps products no branch stocks when sorting all branches by stock', async () => {
+    const nowhere = await prisma.product.create({ data: { name: 'ProdTest Nowhere', sku: 'PRODTEST-NOWHERE', category_id: category.id, price: 1 } })
+    const asc = await request(app).get('/api/products?search=ProdTest&sort=quantity&order=asc&per_page=100').set(allBranches())
+    expect(asc.status).toBe(200)
+    expect(asc.body.data.map((p) => p.id)).toContain(nowhere.id)
+    expect(asc.body.data.length).toBe(asc.body.meta.total)
+    expect(asc.body.data[0].quantity).toBe(0)
+    const desc = await request(app).get('/api/products?search=ProdTest&sort=quantity&order=desc&per_page=100').set(allBranches())
+    expect(desc.body.data.at(-1).quantity).toBe(0)
+    expect(desc.body.data.map((p) => p.id)).toContain(nowhere.id)
+  })
+
   it('sorts by stock at the branch', async () => {
     const res = await request(app).get('/api/products?search=ProdTest&sort=quantity&order=desc&per_page=100').set(auth(manager))
     expect(res.status).toBe(200)

@@ -194,6 +194,20 @@ describe('Purchase orders', () => {
       expect(ids).not.toContain(rice.id)
     })
 
+    it('refuses deliveries to a closed branch', async () => {
+      const created = await api.create({ supplier_id: supplier.id, items: [{ product_id: soap.id, quantity: 2, unit_cost: 3 }] }, managerB)
+      await prisma.branch.update({ where: { id: branchB.id }, data: { is_active: false } })
+      try {
+        const admin = await createUserWithToken('ADMIN', `${PREFIX}a`)
+        const res = await request(app).post(`/api/purchase-orders/${created.body.data.id}/receive`).set({ Authorization: admin.headers.Authorization }).send({})
+        expect(res.status).toBe(422)
+        expect(res.body.error.details[0]).toMatchObject({ field: 'branch', message: 'POTest Branch is closed, so it can\'t receive goods' })
+      } finally {
+        await prisma.branch.update({ where: { id: branchB.id }, data: { is_active: true } })
+        await deleteTestUsers(`${PREFIX}a`)
+      }
+    })
+
     it("keeps each branch's managers to their own orders", async () => {
       const home = await testBranch()
       const mine = await request(app).get('/api/purchase-orders?per_page=100').set(auth(managerB))

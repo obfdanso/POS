@@ -89,7 +89,11 @@ router.get(
   authorize(['ADMIN', 'MANAGER']),
   lookupRateLimit,
   param('transactionId').trim().matches(/^TXN-\d{8}-\d{4,}$/).withMessage('Enter a transaction ID like TXN-20260101-0001'),
-  query('total').isFloat({ min: 0, max: 100000000 }).withMessage("Enter the total printed on the receipt"),
+  query('total')
+    .custom((value) => typeof value === 'string')
+    .withMessage('Enter the total printed on the receipt once')
+    .isFloat({ min: 0, max: 100000000 })
+    .withMessage('Enter the total printed on the receipt'),
   validate,
   salesController.lookupSale
 )

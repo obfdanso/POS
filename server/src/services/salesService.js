@@ -418,7 +418,9 @@ async function getSaleById(id) {
  */
 async function getSaleByTransactionId(transactionId, total) {
   const found = await prisma.sale.findUnique({ where: { transaction_id: transactionId }, select: { id: true, total_amount: true } })
-  if (!found || Math.abs(parseFloat(found.total_amount) - total) >= 0.005) {
+  // Compared in whole pesewas, and failing closed on anything that isn't a number
+  const pesewas = (v) => Math.round(Number(v) * 100)
+  if (!found || !Number.isFinite(total) || pesewas(found.total_amount) !== pesewas(total)) {
     throw new NotFoundError('No sale with that transaction ID and total')
   }
   return getSaleById(found.id)

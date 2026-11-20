@@ -193,6 +193,9 @@ describe('Selling and returning across branches', () => {
     expect((await request(app).get(`/api/sales/${sale.id}`).set(manager.headers)).status).toBe(404)
     // The receipt's total is needed too, so transaction IDs can't simply be tried one after another
     expect((await request(app).get(`/api/sales/lookup/${sale.transaction_id}`).set(manager.headers)).status).toBe(422)
+    // A repeated total can't slip past the check
+    const doubled = await request(app).get(`/api/sales/lookup/${sale.transaction_id}?total=1&total=2`).set(manager.headers)
+    expect([404, 422]).toContain(doubled.status)
     const wrongTotal = await request(app).get(`/api/sales/lookup/${sale.transaction_id}?total=1.23`).set(manager.headers)
     expect(wrongTotal.status).toBe(404)
     expect(wrongTotal.body.error.message).toBe('No sale with that transaction ID and total')

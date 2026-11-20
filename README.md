@@ -63,6 +63,8 @@ A web-based point of sale system for a retail shop, built as a final-year capsto
 | ![Reports](docs/screenshots/reports.png) **Reports**: charts and CSV export | ![Login](docs/screenshots/login.png) **Login** |
 | ![Loyalty points at the till](docs/screenshots/pos-points.png) **Loyalty points**: a customer spends points at checkout | ![Shifts](docs/screenshots/shifts.png) **Shifts**: cash drawer sessions with over/short |
 | ![Return dialog](docs/screenshots/return.png) **Returns**: give back part of a sale | ![Refund slip](docs/screenshots/refund-slip.png) **Refund slip**: printed for the customer to sign |
+| ![Branches](docs/screenshots/branches.png) **Branches**: the shops in the chain, with the branch switcher in the header | ![Branch comparison](docs/screenshots/branch-report.png) **Branch report**: revenue at each branch side by side |
+| ![Stocked at](docs/screenshots/product-branches.png) **Stocked at**: which branches carry a product, with each one's stock and low-stock level | |
 
 ---
 

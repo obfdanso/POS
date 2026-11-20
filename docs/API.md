@@ -121,7 +121,7 @@ Any of the create fields plus `is_active` (closing or reopening). There is no de
 ## Products
 
 ### GET /products — *sortable*
-**Query:** `page`, `per_page`, `search` (matches name, SKU, or barcode), `category_id`, `status` (`active` default, `inactive`, `all`; cashiers always get `active`), `group_variants` (`true` lists only main products, each with its active `variants`; the till uses it for browsing). Every row includes `parent` (for a variant) and `_count.variants`.
+**Query:** `page`, `per_page`, `search` (matches name, SKU, or barcode), `category_id`, `status` (`active` default, `inactive`, `all`; cashiers always get `active`), `group_variants` (`true` lists only main products, each with its active `variants`; the till uses it for browsing; a main product is listed when it or one of its variants is stocked at the branch), `include_unstocked` (managers and admins: `true` also lists products the branch does not stock yet, with quantity 0). Every row includes `parent` (for a variant) and `_count.variants`.
 
 **Sort fields:** `name` (default), `sku`, `category`, `price`, `cost_price`, `quantity`, `is_active`, `created_at`.
 

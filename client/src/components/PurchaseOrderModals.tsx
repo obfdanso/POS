@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, type FormEvent } from 'react'
 import toast from 'react-hot-toast'
 import { Button } from './Button'
 import { Input } from './Input'
@@ -9,8 +9,9 @@ import { productsService } from '../services/products'
 import { formatCurrency } from '../utils/formatCurrency'
 import { getErrorMessage, getFieldErrors } from '../utils/apiErrors'
 import { PO_STATUS, orderTotal } from '../utils/purchaseOrders'
+import type { MoneyLike, Product, PurchaseOrderDetail, PurchaseOrderStatus, Supplier } from '../types'
 
-export function PoStatusBadge({ status }) {
+export function PoStatusBadge({ status }: { status: PurchaseOrderStatus }) {
   const s = PO_STATUS[status] ?? { label: status, variant: 'default' }
   return <Badge variant={s.variant}>{s.label}</Badge>
 }
@@ -21,9 +22,15 @@ const cellInput =
   'w-full text-right border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg py-1 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500'
 
 // Search box that offers matching products to add as order lines
-function ProductPicker({ onPick, exclude }) {
+interface ProductPickerProps {
+  onPick: (product: Product) => void
+  /** Ids of products already on the order */
+  exclude: Set<string>
+}
+
+function ProductPicker({ onPick, exclude }: ProductPickerProps) {
   const [query, setQuery] = useState('')
-  const [results, setResults] = useState([])
+  const [results, setResults] = useState<Product[]>([])
   const latest = useRef(0)
 
   useEffect(() => {
@@ -68,13 +75,30 @@ function ProductPicker({ onPick, exclude }) {
 }
 
 /** Form for a new purchase order: supplier, lines (with low-stock suggestions), expected date, notes. */
-export function NewPurchaseOrderModal({ onClose, onCreated }) {
-  const [suppliers, setSuppliers] = useState([])
+/** An order line as typed into the form (inputs give strings) */
+interface OrderLine {
+  product_id: string
+  name: string
+  sku: string
+  quantity: string
+  unit_cost: string
+}
+
+/** What a line is added from: a product found by search, or a low-stock suggestion */
+type LineSource = Pick<Product, 'id' | 'name' | 'sku'> & { cost_price: MoneyLike | null }
+
+export interface NewPurchaseOrderModalProps {
+  onClose: () => void
+  onCreated: (po: PurchaseOrderDetail) => void
+}
+
+export function NewPurchaseOrderModal({ onClose, onCreated }: NewPurchaseOrderModalProps) {
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [supplierId, setSupplierId] = useState('')
-  const [lines, setLines] = useState([])
+  const [lines, setLines] = useState<OrderLine[]>([])
   const [expectedAt, setExpectedAt] = useState('')
   const [notes, setNotes] = useState('')
-  const [errors, setErrors] = useState({})
+  const [errors, setErrors] = useState<Record<string, string | undefined>>({})
   const [isSaving, setIsSaving] = useState(false)
   const [isSuggesting, setIsSuggesting] = useState(false)
 
@@ -84,7 +108,7 @@ export function NewPurchaseOrderModal({ onClose, onCreated }) {
       .catch(() => toast.error('Failed to load suppliers'))
   }, [])
 
-  function addLine(product, quantity = 1, unitCost = product.cost_price) {
+  function addLine(product: LineSource, quantity = 1, unitCost = product.cost_price) {
     setLines((prev) =>
       prev.some((l) => l.product_id === product.id)
         ? prev
@@ -93,7 +117,7 @@ export function NewPurchaseOrderModal({ onClose, onCreated }) {
     setErrors((prev) => ({ ...prev, items: undefined }))
   }
 
-  function updateLine(productId, field, value) {
+  function updateLine(productId: string, field: 'quantity' | 'unit_cost', value: string) {
     setLines((prev) => prev.map((l) => (l.product_id === productId ? { ...l, [field]: value } : l)))
   }
 
@@ -112,7 +136,7 @@ export function NewPurchaseOrderModal({ onClose, onCreated }) {
   }
 
   function validate() {
-    const errs = {}
+    const errs: Record<string, string> = {}
     if (!supplierId) errs.supplier_id = 'Choose a supplier'
     if (lines.length === 0) errs.items = 'Add at least one product'
     for (const l of lines) {
@@ -124,7 +148,7 @@ export function NewPurchaseOrderModal({ onClose, onCreated }) {
     return errs
   }
 
-  async function handleSubmit(e) {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const errs = validate()
     setErrors(errs)
@@ -231,9 +255,16 @@ export function NewPurchaseOrderModal({ onClose, onCreated }) {
 }
 
 /** One order with what has arrived so far; open orders can receive a delivery or be cancelled. */
-export function PurchaseOrderDetailModal({ orderId, onClose, onChanged }) {
-  const [po, setPo] = useState(null)
-  const [receiving, setReceiving] = useState({})
+export interface PurchaseOrderDetailModalProps {
+  orderId: string
+  onClose: () => void
+  /** Called after a delivery is received or the order is cancelled */
+  onChanged: () => void
+}
+
+export function PurchaseOrderDetailModal({ orderId, onClose, onChanged }: PurchaseOrderDetailModalProps) {
+  const [po, setPo] = useState<PurchaseOrderDetail | null>(null)
+  const [receiving, setReceiving] = useState<Record<string, string>>({})
   const [updateCost, setUpdateCost] = useState(true)
   const [deliveryNote, setDeliveryNote] = useState('')
   const [isSaving, setIsSaving] = useState(false)
@@ -261,13 +292,15 @@ export function PurchaseOrderDetailModal({ orderId, onClose, onChanged }) {
   const toReceive = po ? po.items.map((i) => ({ item_id: i.id, quantity: parseInt(receiving[i.id], 10) || 0 })).filter((i) => i.quantity > 0) : []
   const overReceived = po?.items.find((i) => (parseInt(receiving[i.id], 10) || 0) > i.quantity_outstanding)
 
-  function refresh(order) {
+  function refresh(order: PurchaseOrderDetail) {
     setPo(order)
     setReceiving(Object.fromEntries(order.items.map((i) => [i.id, String(i.quantity_outstanding)])))
     onChanged()
   }
 
   async function handleReceive() {
+    // Only offered once the order has loaded
+    if (!po) return
     setIsSaving(true)
     try {
       const res = await purchaseOrdersService.receive(po.id, { items: toReceive, update_cost: updateCost, ...(deliveryNote.trim() && { notes: deliveryNote.trim() }) })
@@ -282,6 +315,8 @@ export function PurchaseOrderDetailModal({ orderId, onClose, onChanged }) {
   }
 
   async function handleCancel() {
+    // Only offered once the order has loaded
+    if (!po) return
     setIsSaving(true)
     try {
       const res = await purchaseOrdersService.cancel(po.id)

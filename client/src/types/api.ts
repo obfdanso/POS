@@ -6,6 +6,11 @@ export interface ApiSuccess<T> {
   message?: string
 }
 
+/** A success response whose endpoint always says what it did (shown to the user as a toast) */
+export interface ApiMessage<T> extends ApiSuccess<T> {
+  message: string
+}
+
 export interface PaginationMeta {
   page: number
   per_page: number

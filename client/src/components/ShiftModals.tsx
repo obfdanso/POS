@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type FormEvent, type ReactNode } from 'react'
 import toast from 'react-hot-toast'
 import { Modal } from './Modal'
 import { Input } from './Input'
@@ -7,8 +7,16 @@ import { shiftsService } from '../services/shifts'
 import { formatCurrency } from '../utils/formatCurrency'
 import { getErrorMessage, getFieldErrors } from '../utils/apiErrors'
 import { round2 } from '../utils/saleTotals'
+import type { MoneyLike, ShiftWithSummary } from '../types'
 
-function Line({ label, value, strong = false, className = '' }) {
+interface LineProps {
+  label: ReactNode
+  value: ReactNode
+  strong?: boolean
+  className?: string
+}
+
+function Line({ label, value, strong = false, className = '' }: LineProps) {
   return (
     <div className={`flex justify-between text-sm ${strong ? 'font-semibold text-gray-900 dark:text-gray-100' : 'text-gray-600 dark:text-gray-300'} ${className}`}>
       <span>{label}</span>
@@ -18,7 +26,7 @@ function Line({ label, value, strong = false, className = '' }) {
 }
 
 /** Counted minus expected: green when it balances, amber when over, red when short. */
-export function CashDifference({ difference }) {
+export function CashDifference({ difference }: { difference: MoneyLike | null | undefined }) {
   const d = round2(Number(difference) || 0)
   if (d === 0) return <span className="text-success-600 font-semibold">Balanced</span>
   return d > 0
@@ -27,7 +35,7 @@ export function CashDifference({ difference }) {
 }
 
 /** Takings for a shift: float, sales by payment method, refunds, and the cash the drawer should hold. */
-export function ShiftSummary({ shift }) {
+export function ShiftSummary({ shift }: { shift: ShiftWithSummary }) {
   const s = shift.summary
   return (
     <div className="space-y-1.5 rounded-lg border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 p-3">
@@ -47,13 +55,19 @@ export function ShiftSummary({ shift }) {
   )
 }
 
-export function OpenShiftModal({ isOpen, onClose, onOpened }) {
+export interface OpenShiftModalProps {
+  isOpen: boolean
+  onClose: () => void
+  onOpened: (shift: ShiftWithSummary) => void
+}
+
+export function OpenShiftModal({ isOpen, onClose, onOpened }: OpenShiftModalProps) {
   const [openingFloat, setOpeningFloat] = useState('')
   const [notes, setNotes] = useState('')
-  const [errors, setErrors] = useState({})
+  const [errors, setErrors] = useState<Record<string, string>>({})
   const [isSaving, setIsSaving] = useState(false)
 
-  async function handleSubmit(e) {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const amount = Number(openingFloat)
     if (openingFloat === '' || !Number.isFinite(amount) || amount < 0) {
@@ -104,19 +118,27 @@ export function OpenShiftModal({ isOpen, onClose, onOpened }) {
 }
 
 /** Count the drawer and close the shift; then shows the result until dismissed. */
-export function CloseShiftModal({ shift, onClose, onClosed }) {
+export interface CloseShiftModalProps {
+  shift: ShiftWithSummary | null
+  onClose: () => void
+  onClosed: (shift: ShiftWithSummary) => void
+}
+
+export function CloseShiftModal({ shift, onClose, onClosed }: CloseShiftModalProps) {
   const [countedCash, setCountedCash] = useState('')
   const [notes, setNotes] = useState('')
-  const [errors, setErrors] = useState({})
+  const [errors, setErrors] = useState<Record<string, string>>({})
   const [isSaving, setIsSaving] = useState(false)
-  const [closedShift, setClosedShift] = useState(null)
+  const [closedShift, setClosedShift] = useState<ShiftWithSummary | null>(null)
 
   const expected = shift?.summary?.expected_cash ?? 0
   const counted = Number(countedCash)
   const hasCount = countedCash !== '' && Number.isFinite(counted) && counted >= 0
 
-  async function handleSubmit(e) {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    // The form only renders with a shift
+    if (!shift) return
     if (!hasCount) {
       setErrors({ counted_cash: 'Enter the cash counted in the drawer, 0 or more' })
       return

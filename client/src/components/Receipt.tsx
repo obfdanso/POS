@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Button } from './Button'
 import { EmailReceiptForm } from './EmailReceiptForm'
 import { SmsReceiptForm } from './SmsReceiptForm'
@@ -6,17 +6,26 @@ import { useSettings } from '../context/SettingsContext'
 import { formatCurrency } from '../utils/formatCurrency'
 import { escapeHtml, printDocument, RECEIPT_STYLES } from '../utils/print'
 import { methodLabel, paymentLines } from '../utils/payments'
+import type { MoneyLike, Sale, SaleItem, Settings } from '../types'
+
+/** A receipt line: a sale item, which may carry its own name when it has no product */
+type ReceiptLine = SaleItem & { name?: string }
+
+/** A sale as returned by the API (with `items` and `payment`) */
+export type ReceiptSale = Omit<Sale, 'items'> & { items?: ReceiptLine[] }
+
+type Formatter = (value: MoneyLike | null | undefined) => string
 
 // A line's discount is its promotion plus any discount the cashier added; receipts show them apart
-function discountParts(item) {
+function discountParts(item: ReceiptLine) {
   const promotion = parseFloat(item.promotion_discount) || 0
-  const manual = Math.round((parseFloat(item.discount || 0) - promotion) * 100) / 100
+  const manual = Math.round((parseFloat(String(item.discount || 0)) - promotion) * 100) / 100
   return { promotion, manual, promotionName: item.promotion?.name || 'Promotion' }
 }
 
 // Builds a standalone 80mm thermal receipt document for the print window
 /** The branch a sale was made at, with its address and phone falling back to the store's. */
-function storeHeader(sale, settings) {
+function storeHeader(sale: ReceiptSale, settings: Settings) {
   return {
     branch: sale.branch?.name ?? null,
     address: sale.branch?.address || settings.store_address,
@@ -24,7 +33,7 @@ function storeHeader(sale, settings) {
   }
 }
 
-function buildReceiptHtml(sale, settings, fmt) {
+function buildReceiptHtml(sale: ReceiptSale, settings: Settings, fmt: Formatter) {
   const header = storeHeader(sale, settings)
   const esc = escapeHtml
   const { transaction_id, created_at, user, customer, items, subtotal, discount_amount, tax_amount, total_amount, payment_method, payment_status } = sale
@@ -97,7 +106,13 @@ function buildReceiptHtml(sale, settings, fmt) {
 </html>`
 }
 
-function Row({ label, value, className = '' }) {
+interface RowProps {
+  label: ReactNode
+  value: ReactNode
+  className?: string
+}
+
+function Row({ label, value, className = '' }: RowProps) {
   return (
     <div className={`flex justify-between ${className}`}>
       <span>{label}</span>
@@ -111,12 +126,18 @@ function Row({ label, value, className = '' }) {
  * Shown on screen in a modal; "Print" opens an 80mm thermal layout and calls window.print().
  * `actions` renders extra buttons (e.g. Refund) to the left of Close/Print.
  */
-export function Receipt({ sale, onClose, actions }) {
+export interface ReceiptProps {
+  sale: ReceiptSale
+  onClose: () => void
+  actions?: ReactNode
+}
+
+export function Receipt({ sale, onClose, actions }: ReceiptProps) {
   const settings = useSettings()
   const header = storeHeader(sale, settings)
-  const fmt = (v) => formatCurrency(v, settings.currency_symbol || 'GH₵')
+  const fmt: Formatter = (v) => formatCurrency(v, settings.currency_symbol || 'GH₵')
   // 'email' or 'sms' while that form is open
-  const [sending, setSending] = useState(null)
+  const [sending, setSending] = useState<'email' | 'sms' | null>(null)
 
   if (!sale) return null
 

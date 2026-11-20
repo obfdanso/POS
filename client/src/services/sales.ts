@@ -1,4 +1,4 @@
-import type { ApiPaginated, ApiSuccess, CreateSalePayload, QueryParams, ReceiptData, RefundPayload, Sale } from '../types'
+import type { ApiMessage, ApiPaginated, ApiSuccess, CreateSalePayload, QueryParams, ReceiptData, RefundPayload, Sale } from '../types'
 import api from './api'
 
 export const salesService = {
@@ -14,9 +14,9 @@ export const salesService = {
   // data: { items?: [{ sale_item_id, quantity, restock }], reason }; no items refunds everything left
   refund: (id: string, data: RefundPayload = {}) => api.post<ApiSuccess<Sale>>(`/sales/${id}/refund`, data),
   // data: { email? }; without one the receipt goes to the customer's email on file
-  emailReceipt: (id: string, data: { email?: string } = {}) => api.post<ApiSuccess<{ to: string | null }>>(`/sales/${id}/email-receipt`, data),
+  emailReceipt: (id: string, data: { email?: string } = {}) => api.post<ApiMessage<{ to: string | null }>>(`/sales/${id}/email-receipt`, data),
   // data: { phone? }; without one the receipt goes to the customer's phone on file
-  smsReceipt: (id: string, data: { phone?: string } = {}) => api.post<ApiSuccess<{ to: string | null }>>(`/sales/${id}/sms-receipt`, data),
+  smsReceipt: (id: string, data: { phone?: string } = {}) => api.post<ApiMessage<{ to: string | null }>>(`/sales/${id}/sms-receipt`, data),
   // Sends a refund's card / Mobile Money part through Paystack, or checks on one already sent
   sendRefundToPaystack: (id: string, refundId: string) => api.post<ApiSuccess<Sale>>(`/sales/${id}/refunds/${refundId}/paystack`, {}),
 }

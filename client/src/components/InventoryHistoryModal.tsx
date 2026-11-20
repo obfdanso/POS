@@ -5,13 +5,20 @@ import { Badge } from './Badge'
 import { Pagination } from './Pagination'
 import { inventoryService } from '../services/inventory'
 import { getErrorMessage } from '../utils/apiErrors'
+import type { BadgeVariant } from './Badge'
+import type { InventoryChangeType, InventoryLog, Product } from '../types'
 
-const TYPE_BADGE = { SALE: 'primary', RESTOCK: 'success', ADJUSTMENT: 'warning', RETURN: 'default' }
+const TYPE_BADGE: Record<InventoryChangeType, BadgeVariant> = { SALE: 'primary', RESTOCK: 'success', ADJUSTMENT: 'warning', RETURN: 'default' }
+
+export interface InventoryHistoryModalProps {
+  product: Pick<Product, 'id' | 'name' | 'sku' | 'quantity'>
+  onClose: () => void
+}
 
 /** Paginated stock-change history (Inventory_Log) for one product. */
-export function InventoryHistoryModal({ product, onClose }) {
-  const [logs, setLogs] = useState(null)
-  const [meta, setMeta] = useState({ page: 1, total_pages: 1, total: 0 })
+export function InventoryHistoryModal({ product, onClose }: InventoryHistoryModalProps) {
+  const [logs, setLogs] = useState<InventoryLog[] | null>(null)
+  const [meta, setMeta] = useState<{ page: number; total_pages: number; total: number }>({ page: 1, total_pages: 1, total: 0 })
   const [page, setPage] = useState(1)
 
   useEffect(() => {

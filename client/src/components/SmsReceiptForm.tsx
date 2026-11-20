@@ -1,34 +1,42 @@
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import toast from 'react-hot-toast'
 import { Button } from './Button'
 import { Input } from './Input'
 import { salesService } from '../services/sales'
 import { getErrorMessage, getFieldErrors } from '../utils/apiErrors'
+import type { Sale } from '../types'
 
-/** Sends a sale's receipt by email, defaulting to the customer's address on file. */
-export function EmailReceiptForm({ sale, onSent, onCancel }) {
-  const [email, setEmail] = useState(sale.customer?.email || '')
+export interface SmsReceiptFormProps {
+  sale: Pick<Sale, 'id' | 'customer'>
+  onSent: () => void
+  onCancel: () => void
+}
+
+/** Texts a sale's receipt, defaulting to the customer's phone number on file. */
+export function SmsReceiptForm({ sale, onSent, onCancel }: SmsReceiptFormProps) {
+  const [phone, setPhone] = useState(sale.customer?.phone || '')
   const [error, setError] = useState('')
   const [isSending, setIsSending] = useState(false)
 
-  async function handleSubmit(e) {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     // Enter would otherwise also reach the POS shortcuts behind the dialog
     e.stopPropagation()
-    const address = email.trim()
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
-      setError('Enter a valid email address')
+    const number = phone.trim()
+    // The server checks the number properly; this only catches obvious typos
+    if (!/^\+?[\d\s\-().]{7,20}$/.test(number)) {
+      setError('Enter a valid phone number, e.g. 024-123-4567')
       return
     }
     setIsSending(true)
     try {
-      const res = await salesService.emailReceipt(sale.id, { email: address })
+      const res = await salesService.smsReceipt(sale.id, { phone: number })
       toast.success(res.data.message)
       onSent()
     } catch (err) {
-      const fieldError = getFieldErrors(err).email
+      const fieldError = getFieldErrors(err).phone
       if (fieldError) setError(fieldError)
-      else toast.error(getErrorMessage(err, 'Could not send the receipt'))
+      else toast.error(getErrorMessage(err, 'Could not text the receipt'))
     } finally {
       setIsSending(false)
     }
@@ -38,12 +46,12 @@ export function EmailReceiptForm({ sale, onSent, onCancel }) {
     <form onSubmit={handleSubmit} className="mt-4 flex items-start gap-2" noValidate>
       <div className="flex-1">
         <Input
-          type="email"
-          aria-label="Customer email"
-          placeholder="customer@example.com"
-          value={email}
+          type="tel"
+          aria-label="Customer phone number"
+          placeholder="024-123-4567"
+          value={phone}
           onChange={(e) => {
-            setEmail(e.target.value)
+            setPhone(e.target.value)
             setError('')
           }}
           error={error}

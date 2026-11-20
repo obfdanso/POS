@@ -257,6 +257,9 @@ export interface Shift extends Timestamps {
   sales_count?: number
 }
 
+/** A single shift response (current, open, close, get): always has its takings */
+export type ShiftWithSummary = Shift & { summary: ShiftSummary }
+
 export interface InventoryLog extends Timestamps {
   id: string
   product_id: string
@@ -332,6 +335,14 @@ export interface PurchaseOrder extends Timestamps {
   item_count?: number
   units_ordered?: number
   units_received?: number
+}
+
+/** A single purchase order response (create, get, receive, cancel): with its supplier, creator and lines */
+export type PurchaseOrderDetail = Omit<PurchaseOrder, 'supplier' | 'created_by' | 'branch' | 'items'> & {
+  supplier: Pick<Supplier, 'id' | 'name' | 'phone' | 'email'>
+  created_by: UserRef
+  branch: BranchRef
+  items: (PurchaseOrderItem & { product: Pick<Product, 'id' | 'name' | 'sku' | 'cost_price'> })[]
 }
 
 /** `GET /purchase-orders/suggestions`: a low-stock product to reorder */

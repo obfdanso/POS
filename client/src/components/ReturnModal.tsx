@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import toast from 'react-hot-toast'
 import { Modal } from './Modal'
 import { Button } from './Button'
@@ -8,23 +8,32 @@ import { formatCurrency } from '../utils/formatCurrency'
 import { estimateRefund } from '../utils/refunds'
 import { methodLabel, splitOtherMethods, splitRefundCash } from '../utils/payments'
 import { getErrorMessage, getFieldErrors } from '../utils/apiErrors'
+import type { Sale, SaleItem } from '../types'
 
-export function ReturnModal({ sale, onClose, onDone }) {
+export interface ReturnModalProps {
+  /** A single sale response, with its items */
+  sale: Sale & { items: SaleItem[] }
+  onClose: () => void
+  /** Gets the sale as updated by the refund */
+  onDone: (sale: Sale) => void
+}
+
+export function ReturnModal({ sale, onClose, onDone }: ReturnModalProps) {
   const returnable = sale.items.filter((i) => i.quantity > (i.refunded_quantity || 0))
-  const [quantities, setQuantities] = useState({})
-  const [damaged, setDamaged] = useState({})
+  const [quantities, setQuantities] = useState<Record<string, number>>({})
+  const [damaged, setDamaged] = useState<Record<string, boolean>>({})
   const [reason, setReason] = useState('')
-  const [errors, setErrors] = useState({})
+  const [errors, setErrors] = useState<Record<string, string>>({})
   const [isSaving, setIsSaving] = useState(false)
 
-  const remaining = (item) => item.quantity - (item.refunded_quantity || 0)
+  const remaining = (item: SaleItem) => item.quantity - (item.refunded_quantity || 0)
   const refund = estimateRefund(sale, quantities)
   const units = Object.values(quantities).reduce((n, q) => n + (q || 0), 0)
   const method = methodLabel(sale.payment_method).toLowerCase()
   // A split sale pays back cash first (from the drawer), the rest by card or Mobile Money
   const cashBack = sale.payment_method === 'SPLIT' ? splitRefundCash(sale, refund) : null
 
-  function setQuantity(item, value) {
+  function setQuantity(item: SaleItem, value: string) {
     const q = Math.max(0, Math.min(remaining(item), parseInt(value, 10) || 0))
     setQuantities((prev) => ({ ...prev, [item.id]: q }))
     setErrors({})
@@ -35,9 +44,9 @@ export function ReturnModal({ sale, onClose, onDone }) {
     setErrors({})
   }
 
-  async function handleSubmit(e) {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    const errs = {}
+    const errs: Record<string, string> = {}
     if (units === 0) errs.items = 'Choose at least one item to return'
     if (!reason.trim()) errs.reason = 'Say why the items are being returned'
     if (Object.keys(errs).length) { setErrors(errs); return }

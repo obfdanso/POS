@@ -14,6 +14,7 @@ import ShiftsPage from './pages/ShiftsPage'
 import PurchaseOrdersPage from './pages/PurchaseOrdersPage'
 import PromotionsPage from './pages/PromotionsPage'
 import UsersPage from './pages/UsersPage'
+import BranchesPage from './pages/BranchesPage'
 import SettingsPage from './pages/SettingsPage'
 import CashierDashboardPage from './pages/CashierDashboardPage'
 import CashierSalesPage from './pages/CashierSalesPage'
@@ -223,6 +224,14 @@ export default function App() {
         element={
           <ProtectedRoute roles={['MANAGER', 'ADMIN']}>
             <ReportsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/branches"
+        element={
+          <ProtectedRoute roles={['ADMIN']}>
+            <BranchesPage />
           </ProtectedRoute>
         }
       />

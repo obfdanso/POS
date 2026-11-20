@@ -1,8 +1,8 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
-const { app, prisma, request, createUserWithToken, deleteTestUsers } = require('./helpers')
+const { app, prisma, request, createUserWithToken, deleteTestUsers, testBranch } = require('./helpers')
 
 const PREFIX = 'usertest'
-let admin, manager, cashier, originalSettings
+let admin, manager, cashier, originalSettings, branch
 
 beforeAll(async () => {
   [admin, manager, cashier] = await Promise.all([
@@ -11,6 +11,7 @@ beforeAll(async () => {
     createUserWithToken('CASHIER', PREFIX),
   ])
   originalSettings = await prisma.settings.findMany()
+  branch = await testBranch()
 })
 
 afterAll(async () => {
@@ -34,8 +35,9 @@ describe('User management (admin only)', () => {
 
   it('creates a user who can then log in', async () => {
     const res = await request(app).post('/api/users').set(auth(admin))
-      .send({ username: `${PREFIX}_new`, email: `${PREFIX}_new@test.local`, password: 'secret12', full_name: 'New Person', role: 'CASHIER' })
+      .send({ username: `${PREFIX}_new`, email: `${PREFIX}_new@test.local`, password: 'secret12', full_name: 'New Person', role: 'CASHIER', branch_id: branch.id })
     expect(res.status).toBe(201)
+    expect(res.body.data.branch).toMatchObject({ id: branch.id, code: 'TEST' })
     expect(res.body.data).not.toHaveProperty('password_hash')
     createdId = res.body.data.id
     expect((await login(`${PREFIX}_new`, 'secret12')).status).toBe(200)
@@ -63,6 +65,39 @@ describe('User management (admin only)', () => {
     expect(res.status).toBe(200)
     expect(res.body.data).toMatchObject({ role: 'MANAGER', is_active: false })
     expect((await login(`${PREFIX}_new`, 'secret12')).status).toBe(401)
+  })
+
+  it('requires a branch for cashiers and managers, and never gives admins one', async () => {
+    const missing = await request(app).post('/api/users').set(auth(admin))
+      .send({ username: `${PREFIX}_nobranch`, email: `${PREFIX}_nobranch@test.local`, password: 'secret12', full_name: 'X', role: 'MANAGER' })
+    expect(missing.status).toBe(422)
+    expect(missing.body.error.details[0].field).toBe('branch_id')
+
+    const boss = await request(app).post('/api/users').set(auth(admin))
+      .send({ username: `${PREFIX}_boss`, email: `${PREFIX}_boss@test.local`, password: 'secret12', full_name: 'X', role: 'ADMIN', branch_id: branch.id })
+    expect(boss.status).toBe(201)
+    expect(boss.body.data.branch).toBeNull()
+
+    // Promoting someone to admin takes them off their branch; demoting needs a branch again
+    const demote = await request(app).put(`/api/users/${boss.body.data.id}`).set(auth(admin)).send({ role: 'CASHIER' })
+    expect(demote.status).toBe(422)
+    expect(demote.body.error.details[0].field).toBe('branch_id')
+  })
+
+  it("can't move someone to another branch while their shift is open", async () => {
+    const other = await prisma.branch.upsert({ where: { code: 'UTB' }, update: {}, create: { name: 'UserTest Branch', code: 'UTB' } })
+    const shift = await prisma.shift.create({ data: { user_id: cashier.user.id, opening_float: 0, branch_id: branch.id } })
+    try {
+      const res = await request(app).put(`/api/users/${cashier.user.id}`).set(auth(admin)).send({ branch_id: other.id })
+      expect(res.status).toBe(422)
+      expect(res.body.error.details[0].field).toBe('branch_id')
+    } finally {
+      await prisma.shift.delete({ where: { id: shift.id } })
+    }
+    const moved = await request(app).put(`/api/users/${cashier.user.id}`).set(auth(admin)).send({ branch_id: other.id })
+    expect(moved.status).toBe(200)
+    expect(moved.body.data.branch.code).toBe('UTB')
+    await request(app).put(`/api/users/${cashier.user.id}`).set(auth(admin)).send({ branch_id: branch.id })
   })
 
   it('stops admins removing their own admin access', async () => {

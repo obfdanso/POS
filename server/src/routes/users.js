@@ -12,6 +12,32 @@ const router = express.Router()
 
 router.use(authenticate)
 
+const USER_FIELDS = {
+  id: true,
+  username: true,
+  email: true,
+  full_name: true,
+  role: true,
+  is_active: true,
+  created_at: true,
+  branch: { select: { id: true, name: true, code: true } },
+}
+const branchIdRule = body('branch_id').optional({ nullable: true }).isUUID().withMessage('Choose a valid branch')
+const branchError = (message) => new ValidationError(message, [{ field: 'branch_id', message }])
+
+/**
+ * The branch a user with this role should have: none for admins; an open branch for cashiers and
+ * managers (their current one when the request doesn't name another).
+ */
+async function branchForRole(role, requestedId, currentId = null) {
+  if (role === 'ADMIN') return null
+  const id = requestedId ?? currentId
+  if (!id) throw branchError('Cashiers and managers need a branch')
+  const branch = await prisma.branch.findFirst({ where: { id, is_active: true }, select: { id: true } })
+  if (!branch) throw branchError('That branch does not exist or is closed')
+  return branch.id
+}
+
 // Minimal staff directory (names only) so managers can filter sales by cashier
 router.get('/staff', authorize(['ADMIN', 'MANAGER']), async (req, res, next) => {
   try {
@@ -32,7 +58,7 @@ router.use(authorize(['ADMIN']))
 router.get('/', async (req, res, next) => {
   try {
     const users = await prisma.user.findMany({
-      select: { id: true, username: true, email: true, full_name: true, role: true, is_active: true, locked_until: true, created_at: true },
+      select: { ...USER_FIELDS, locked_until: true },
       orderBy: { created_at: 'asc' },
     })
     const now = new Date()
@@ -55,6 +81,7 @@ router.post(
     body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
     body('full_name').trim().notEmpty().withMessage('Full name is required'),
     body('role').isIn(['ADMIN', 'MANAGER', 'CASHIER']).withMessage('Valid role required'),
+    branchIdRule,
   ]),
   validate,
   async (req, res, next) => {
@@ -68,10 +95,11 @@ router.post(
           ? new ConflictError('Email already in use', 'email')
           : new ConflictError('Username already taken', 'username')
       }
+      const branch_id = await branchForRole(role, req.body.branch_id)
       const password_hash = await bcrypt.hash(password, 12)
       const user = await prisma.user.create({
-        data: { username, email, password_hash, full_name, role },
-        select: { id: true, username: true, email: true, full_name: true, role: true, is_active: true, created_at: true },
+        data: { username, email, password_hash, full_name, role, branch_id },
+        select: USER_FIELDS,
       })
       await recordAudit({ userId: req.user.id, action: 'USER_CREATED', entity: 'User', entityId: user.id, details: `${user.username} (${user.role})` })
       res.status(201).json({ success: true, data: user, message: 'User created successfully' })
@@ -91,6 +119,7 @@ router.put(
       body('is_active').optional().isBoolean({ strict: true }).withMessage('is_active must be true or false').toBoolean(),
       body('full_name').optional().trim().notEmpty().withMessage('Full name cannot be empty'),
       body('email').optional().isEmail().withMessage('Valid email required'),
+      branchIdRule,
     ]),
   ],
   validate,
@@ -106,12 +135,23 @@ router.put(
           { field: role !== undefined && role !== 'ADMIN' ? 'role' : 'is_active', message: 'Ask another admin to change your own role or status' },
         ])
       }
+      const branch_id = await branchForRole(role ?? user.role, req.body.branch_id, user.branch_id)
+      // Their open drawer belongs to the old branch, so it has to be closed before they move
+      if (branch_id !== user.branch_id && (await prisma.shift.count({ where: { user_id: user.id, status: 'OPEN' } }))) {
+        throw branchError('Close their open shift before moving them to another branch')
+      }
       const updated = await prisma.user.update({
         where: { id: req.params.id },
-        data: { ...(role !== undefined && { role }), ...(is_active !== undefined && { is_active }), ...(full_name && { full_name }), ...(email && { email }) },
-        select: { id: true, username: true, email: true, full_name: true, role: true, is_active: true, created_at: true },
+        data: {
+          ...(role !== undefined && { role }),
+          ...(is_active !== undefined && { is_active }),
+          ...(full_name && { full_name }),
+          ...(email && { email }),
+          branch_id,
+        },
+        select: USER_FIELDS,
       })
-      const changes = Object.entries({ role, is_active, full_name, email })
+      const changes = Object.entries({ role, is_active, full_name, email, branch_id })
         .filter(([key, value]) => value !== undefined && value !== user[key])
         .map(([key, value]) => `${key}: ${user[key]} → ${value}`)
       if (changes.length) {

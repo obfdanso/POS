@@ -36,3 +36,12 @@ export function requireBranch(req: Request, res: Response, next: NextFunction) {
   if (!req.branchId) return next(branchError('Choose a branch first'))
   next()
 }
+
+/**
+ * The branch an action acts on, for handlers behind `requireBranch` (which always guarantees one).
+ * Throws the same error `requireBranch` would if a route ever forgets that middleware.
+ */
+export function actingBranchId(req: Request): string {
+  if (!req.branchId) throw branchError('Choose a branch first')
+  return req.branchId
+}

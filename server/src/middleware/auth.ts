@@ -5,6 +5,7 @@ import prisma from '../utils/prismaClient'
 import { UnauthorizedError, ForbiddenError } from '../utils/errors'
 import { issuedBeforeCutoff } from '../services/authService'
 import { resolveBranch } from './branch'
+import type { AuthUser } from '../types/express'
 
 const NO_BRANCH = 'You are not assigned to a branch. Ask an admin.'
 
@@ -75,4 +76,13 @@ export function authorize(roles: Role | Role[]): RequestHandler {
     }
     next()
   }
+}
+
+/**
+ * The signed-in user, for handlers behind `authenticate` (which always sets it). Throws the same
+ * error `authorize` would if a route ever forgets that middleware.
+ */
+export function currentUser(req: Request): AuthUser {
+  if (!req.user) throw new UnauthorizedError('Not authenticated')
+  return req.user
 }

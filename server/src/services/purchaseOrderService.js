@@ -155,8 +155,14 @@ async function receivePurchaseOrder(id, user, { items, update_cost = true, notes
     // Lock the order so two people receiving the same delivery can't both add the stock
     const locked = await tx.$queryRaw`SELECT id FROM "PurchaseOrder" WHERE id = ${id} FOR UPDATE`
     if (locked.length === 0) throw new NotFoundError('Purchase order not found')
-    const po = await tx.purchaseOrder.findUnique({ where: { id }, include: { items: { include: { product: { select: { name: true } } } } } })
+    const po = await tx.purchaseOrder.findUnique({
+      where: { id },
+      include: { items: { include: { product: { select: { name: true } } } }, branch: { select: { name: true, is_active: true } } },
+    })
     assertBranchAccess(po, user)
+    if (!po.branch.is_active) {
+      throw new ValidationError('Branch closed', [{ field: 'branch', message: `${po.branch.name} is closed, so it can't receive goods` }])
+    }
     if (!['ORDERED', 'PARTIALLY_RECEIVED'].includes(po.status)) {
       throw new ValidationError('Order closed', [{ field: 'status', message: `This order is ${po.status.toLowerCase().replace('_', ' ')} and can't receive more goods` }])
     }

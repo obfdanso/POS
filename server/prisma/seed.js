@@ -22,20 +22,21 @@ function mulberry32(seed) {
 
 const round2 = (n) => Math.round(n * 100) / 100
 
-// Logs each product's starting quantity so inventory history is complete
-async function seedOpeningStock(products, admin) {
+// Logs each branch's starting quantity of each product so inventory history is complete
+async function seedOpeningStock(stockRows, admin) {
   const openedAt = new Date()
   openedAt.setDate(openedAt.getDate() - 31)
   openedAt.setHours(8, 0, 0, 0)
   await prisma.inventoryLog.createMany({
-    data: Object.values(products)
-      .filter((p) => p.quantity > 0)
-      .map((p) => ({
-        product_id: p.id,
+    data: stockRows
+      .filter((r) => r.quantity > 0)
+      .map((r) => ({
+        product_id: r.product_id,
+        branch_id: r.branch_id,
         change_type: 'RESTOCK',
-        quantity_change: p.quantity,
+        quantity_change: r.quantity,
         previous_quantity: 0,
-        new_quantity: p.quantity,
+        new_quantity: r.quantity,
         user_id: admin.id,
         notes: 'Opening stock',
         created_at: openedAt,
@@ -43,13 +44,15 @@ async function seedOpeningStock(products, admin) {
   })
 }
 
-// Creates 20 completed sales spread over the past 30 days (one later refunded),
-// deducting stock, logging inventory changes, and awarding loyalty points
-async function seedSales({ products, customers, staff, admin, taxRate, loyaltyRate }) {
+// Creates 20 completed sales spread over the past 30 days (one later refunded) across the branches,
+// deducting each branch's stock, logging inventory changes, and awarding loyalty points.
+// `branches` is [{ branch, staff }]; `stockRows` is updated in place with the final quantities
+async function seedSales({ products, customers, branches, stockRows, admin, taxRate, loyaltyRate }) {
   const rand = mulberry32(20260319)
   const pick = (list) => list[Math.floor(rand() * list.length)]
-  const stock = new Map(Object.values(products).map((p) => [p.id, p.quantity]))
-  const sellable = Object.values(products).filter((p) => p.quantity >= 20)
+  const key = (branchId, productId) => `${branchId}:${productId}`
+  const stock = new Map(stockRows.map((r) => [key(r.branch_id, r.product_id), r.quantity]))
+  const sellableAt = (branchId) => Object.values(products).filter((p) => (stock.get(key(branchId, p.id)) ?? 0) >= 20)
 
   // 20 sale times across the last 30 days, oldest first, during opening hours
   const saleTimes = Array.from({ length: 20 }, () => {
@@ -75,6 +78,9 @@ async function seedSales({ products, customers, staff, admin, taxRate, loyaltyRa
     const dateStr = `${createdAt.getFullYear()}${String(createdAt.getMonth() + 1).padStart(2, '0')}${String(createdAt.getDate()).padStart(2, '0')}`
     const transactionId = `TXN-${dateStr}-${String(perDayCount.get(dayKey)).padStart(4, '0')}`
 
+    // Every third sale is at the second branch
+    const { branch, staff } = branches[i % 3 === 2 ? 1 : 0]
+    const sellable = sellableAt(branch.id)
     // 1–4 distinct products, 1–3 units each
     const lineCount = 1 + Math.floor(rand() * 4)
     const chosen = new Set()
@@ -108,6 +114,7 @@ async function seedSales({ products, customers, staff, admin, taxRate, loyaltyRa
       data: {
         transaction_id: transactionId,
         user_id: cashierUser.id,
+        branch_id: branch.id,
         customer_id: customer?.id ?? null,
         subtotal,
         discount_amount: discount,
@@ -141,11 +148,12 @@ async function seedSales({ products, customers, staff, admin, taxRate, loyaltyRa
     })
 
     for (const l of lines) {
-      const before = stock.get(l.product.id)
-      stock.set(l.product.id, before - l.quantity)
+      const before = stock.get(key(branch.id, l.product.id))
+      stock.set(key(branch.id, l.product.id), before - l.quantity)
       await prisma.inventoryLog.create({
         data: {
           product_id: l.product.id,
+          branch_id: branch.id,
           change_type: 'SALE',
           quantity_change: -l.quantity,
           previous_quantity: before,
@@ -160,11 +168,12 @@ async function seedSales({ products, customers, staff, admin, taxRate, loyaltyRa
     if (refunded) {
       const refundedAt = new Date(createdAt.getTime() + 2 * 60 * 60 * 1000)
       for (const l of lines) {
-        const before = stock.get(l.product.id)
-        stock.set(l.product.id, before + l.quantity)
+        const before = stock.get(key(branch.id, l.product.id))
+        stock.set(key(branch.id, l.product.id), before + l.quantity)
         await prisma.inventoryLog.create({
           data: {
             product_id: l.product.id,
+            branch_id: branch.id,
             change_type: 'RETURN',
             quantity_change: l.quantity,
             previous_quantity: before,
@@ -187,12 +196,8 @@ async function seedSales({ products, customers, staff, admin, taxRate, loyaltyRa
     }
   }
 
-  // Persist the final stock levels
-  for (const p of Object.values(products)) {
-    if (stock.get(p.id) !== p.quantity) {
-      await prisma.product.update({ where: { id: p.id }, data: { quantity: stock.get(p.id) } })
-    }
-  }
+  // Hand back the final stock levels
+  for (const r of stockRows) r.quantity = stock.get(key(r.branch_id, r.product_id))
 }
 
 async function main() {
@@ -201,15 +206,24 @@ async function main() {
   // Clean up existing data (in reverse FK order)
   await prisma.auditLog.deleteMany()
   await prisma.authLog.deleteMany()
+  await prisma.revokedToken.deleteMany()
   await prisma.inventoryLog.deleteMany()
   await prisma.payment.deleteMany()
+  await prisma.refundItem.deleteMany()
+  await prisma.refund.deleteMany()
   await prisma.saleItem.deleteMany()
   await prisma.sale.deleteMany()
+  await prisma.shift.deleteMany()
+  await prisma.purchaseOrder.deleteMany()
+  await prisma.promotion.deleteMany()
   await prisma.customer.deleteMany()
+  await prisma.branchStock.deleteMany()
+  await prisma.product.updateMany({ data: { parent_id: null } })
   await prisma.product.deleteMany()
   await prisma.category.deleteMany()
   await prisma.supplier.deleteMany()
   await prisma.user.deleteMany()
+  await prisma.branch.deleteMany()
   await prisma.settings.deleteMany()
 
   // Settings
@@ -228,12 +242,21 @@ async function main() {
   })
   console.log('Settings created')
 
+  // Branches: the original Kumasi shop and a smaller one in Accra
+  const kumasi = await prisma.branch.create({
+    data: { name: 'Kumasi Central', code: 'KSI', address: '27 Kwame Nkrumah Ave, Kumasi, Ghana', phone: '032-204-1234' },
+  })
+  const accra = await prisma.branch.create({
+    data: { name: 'Accra Mall', code: 'ACC', address: 'Accra Mall, Spintex Rd, Accra', phone: '030-281-5500' },
+  })
+  console.log('2 branches created')
+
   // Staff Users
   const adminHash = await bcrypt.hash('admin123', BCRYPT_COST)
   const managerHash = await bcrypt.hash('manager123', BCRYPT_COST)
   const cashierHash = await bcrypt.hash('cashier123', BCRYPT_COST)
 
-  const [admin, manager, cashier] = await Promise.all([
+  const [admin, manager, cashier, cashier2] = await Promise.all([
     prisma.user.create({
       data: {
         username: 'admin',
@@ -250,6 +273,7 @@ async function main() {
         password_hash: managerHash,
         full_name: 'Kwame Asante',
         role: 'MANAGER',
+        branch_id: kumasi.id,
       },
     }),
     prisma.user.create({
@@ -259,6 +283,17 @@ async function main() {
         password_hash: cashierHash,
         full_name: 'Ama Mensah',
         role: 'CASHIER',
+        branch_id: kumasi.id,
+      },
+    }),
+    prisma.user.create({
+      data: {
+        username: 'cashier2',
+        email: 'cashier2@quickmart.com',
+        password_hash: cashierHash,
+        full_name: 'Akosua Boateng',
+        role: 'CASHIER',
+        branch_id: accra.id,
       },
     }),
   ])
@@ -401,14 +436,27 @@ async function main() {
         supplier_id: suppliers[p.supplier]?.id ?? null,
         price: p.price,
         cost_price: p.cost_price,
-        quantity: p.quantity,
-        low_stock_threshold: p.low_stock_threshold,
         image_url: p.image_url ?? null,
       },
     })
-    products[p.sku] = { ...created, originalQuantity: p.quantity }
+    products[p.sku] = created
   }
   console.log(`${productData.length} products created`)
+
+  // Kumasi stocks everything; Accra, the smaller branch, about two thirds of it at half the quantity
+  const stockRows = []
+  for (const [i, p] of productData.entries()) {
+    const product_id = products[p.sku].id
+    stockRows.push({ branch_id: kumasi.id, product_id, quantity: p.quantity, low_stock_threshold: p.low_stock_threshold })
+    if (i % 3 !== 2) {
+      stockRows.push({
+        branch_id: accra.id,
+        product_id,
+        quantity: Math.ceil(p.quantity / 2),
+        low_stock_threshold: Math.ceil(p.low_stock_threshold / 2),
+      })
+    }
+  }
 
   // Customer records (no login accounts — customers are for sales/loyalty tracking only)
   const customerData = [
@@ -438,23 +486,30 @@ async function main() {
   }
   console.log('10 customer records created')
 
-  await seedOpeningStock(products, admin)
+  await seedOpeningStock(stockRows, admin)
   await seedSales({
     products,
     customers,
-    // Weighted so most sales are rung up by the cashier
-    staff: [cashier, cashier, cashier, cashier, cashier, cashier, cashier, manager, manager, admin],
+    branches: [
+      // Weighted so most Kumasi sales are rung up by its cashier
+      { branch: kumasi, staff: [cashier, cashier, cashier, cashier, cashier, manager, manager, admin] },
+      { branch: accra, staff: [cashier2] },
+    ],
+    stockRows,
     admin,
     taxRate: TAX_RATE,
     loyaltyRate: LOYALTY_RATE,
   })
+  await prisma.branchStock.createMany({ data: stockRows })
+  console.log(`${stockRows.length} branch stock rows created`)
 
   console.log('Database seeding completed successfully!')
   console.log('')
   console.log('Staff credentials:')
   console.log('  Admin:   admin / admin123')
   console.log('  Manager: manager / manager123')
-  console.log('  Cashier: cashier / cashier123')
+  console.log('  Cashier: cashier / cashier123 (Kumasi Central)')
+  console.log('  Cashier: cashier2 / cashier123 (Accra Mall)')
 }
 
 main()

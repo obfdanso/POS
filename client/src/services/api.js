@@ -15,6 +15,14 @@ export function clearAccessToken() {
   _accessToken = null
 }
 
+// The branch an admin is working in (null = all branches). Staff always work at their own branch,
+// which the server knows, so they never send it
+let _branchId = null
+
+export function setBranchId(id) {
+  _branchId = id || null
+}
+
 const api = axios.create({
   baseURL: '/api',
   withCredentials: true, // send/receive cookies (refresh token)
@@ -26,6 +34,10 @@ api.interceptors.request.use((config) => {
   const token = getAccessToken()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
+  }
+  // A request may name its own branch (e.g. a sale queued offline before the admin switched)
+  if (_branchId && !config.headers['X-Branch-Id']) {
+    config.headers['X-Branch-Id'] = _branchId
   }
   // Let the browser set Content-Type (including multipart boundary) for FormData
   if (config.data instanceof FormData) {

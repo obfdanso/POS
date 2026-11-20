@@ -125,8 +125,10 @@ The Vite dev server proxies `/api`, `/uploads`, and `/product-images` to the bac
 
 | Command | What it does |
 |---|---|
-| `npm run dev` | API with auto-restart (nodemon) |
-| `npm start` | API without auto-restart |
+| `npm run dev` | API with auto-restart, straight from the TypeScript sources (`tsx watch src/app.ts`) |
+| `npm run build` | Compile the TypeScript sources into `dist/` |
+| `npm start` | Compiled API without auto-restart (`node dist/app.js`; run `npm run build` first) |
+| `npm run typecheck` | TypeScript check of the sources, tests, seed and scripts (`tsc --noEmit`) |
 | `npm test` | Jest + Supertest with coverage (see *Tests* below) |
 | `npm run lint` | ESLint |
 | `npm run db:migrate` | `prisma migrate dev`: create and apply a migration after editing `schema.prisma` |
@@ -236,7 +238,7 @@ pos-system/
 │       ├── types/              API response envelopes, models and request payloads
 │       ├── utils/              formatCurrency, date, apiErrors
 │       └── test/               Vitest tests
-├── server/                     Node.js + Express
+├── server/                     Node.js + Express, strict TypeScript
 │   ├── src/
 │   │   ├── routes/             auth, products, categories, suppliers, inventory, sales,
 │   │   │                       customers, reports, users, settings
@@ -244,8 +246,9 @@ pos-system/
 │   │   ├── services/           Business logic, one per module
 │   │   ├── middleware/         auth, validate, exactBody, pagination, sorting, errorHandler, logger
 │   │   ├── utils/              prismaClient, errors, generateTransactionId, dateRange, paystack
+│   │   ├── types/              Express request augmentation (req.user, req.branchId)
 │   │   └── __tests__/          Jest + Supertest integration tests
-│   ├── prisma/                 schema.prisma, migrations/, seed.js
+│   ├── prisma/                 schema.prisma, migrations/, seed.ts
 │   ├── scripts/                backup, restore, unlock-user, clear-sales, import-product-images
 │   └── product-images/         Seed product photos, served at /product-images
 └── docs/                       API.md, DATABASE.md, SETUP.md, screenshots/

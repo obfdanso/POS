@@ -204,7 +204,7 @@ Request bodies, query parameters, roles and error codes: [docs/API.md](docs/API.
 
 ```
 client/   React app in TypeScript: pages/, components/, context/ (auth, cart, settings), services/ (API calls), types/
-server/   Express API: routes/ → controllers/ → services/ (business logic), middleware/, prisma/
+server/   Express API in TypeScript: routes/ → controllers/ → services/ (business logic), middleware/, prisma/
 docs/     API.md, DATABASE.md, SETUP.md, screenshots/
 ```
 

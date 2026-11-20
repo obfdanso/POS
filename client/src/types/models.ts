@@ -105,6 +105,9 @@ export interface Product extends Timestamps {
   _count?: { variants: number }
 }
 
+/** A product's stock at one branch on the inventory page; with all branches shown, `id` is made unique per branch and `product_id` keeps the product's */
+export type StockRow = Product & { branch_id?: string; branch?: BranchRef; product_id?: string }
+
 export interface Customer extends Timestamps {
   id: string
   name: string

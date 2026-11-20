@@ -13,10 +13,7 @@ import { formatCurrency } from '../utils/formatCurrency'
 import { useBranch } from '../hooks/useBranch'
 import { apiErrorBody } from '../utils/apiErrors'
 import { defineColumns, type TableSort } from '../utils/tableColumns'
-import type { BranchRef, PaginationMeta, Product, QueryParams } from '../types'
-
-/** A product's stock at one branch; with all branches shown, `id` is made unique per branch and `product_id` keeps the product's */
-type StockRow = Product & { branch_id?: string; branch?: BranchRef; product_id?: string }
+import type { PaginationMeta, QueryParams, StockRow } from '../types'
 
 const TABS = [
   { key: 'all', label: 'All Products' },

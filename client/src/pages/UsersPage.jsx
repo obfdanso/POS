@@ -9,6 +9,7 @@ import { Pagination } from '../components/Pagination'
 import { Badge } from '../components/Badge'
 import { usersService } from '../services/users'
 import { useAuth } from '../hooks/useAuth'
+import { useBranch } from '../hooks/useBranch'
 import { getFieldErrors, getErrorMessage } from '../utils/apiErrors'
 
 const ROLE_BADGE = {
@@ -25,13 +26,15 @@ const ROLE_DISPLAY = {
 
 const ROLES = ['ADMIN', 'MANAGER', 'CASHIER']
 
-const EMPTY_CREATE = { username: '', email: '', password: '', full_name: '', role: 'CASHIER' }
-const EMPTY_EDIT = { full_name: '', email: '', role: 'CASHIER', is_active: true }
+const EMPTY_CREATE = { username: '', email: '', password: '', full_name: '', role: 'CASHIER', branch_id: '' }
+const EMPTY_EDIT = { full_name: '', email: '', role: 'CASHIER', is_active: true, branch_id: '' }
 
 function validate(form, mode) {
   const errors = {}
   if (!form.full_name?.trim()) errors.full_name = 'Full name is required'
   if (!form.email?.trim()) errors.email = 'Email is required'
+  // Cashiers and managers work at one branch; admins work across all of them
+  if (form.role !== 'ADMIN' && !form.branch_id) errors.branch_id = 'Choose the branch they work at'
   else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = 'Invalid email address'
   if (mode === 'create') {
     if (!form.username?.trim()) errors.username = 'Username is required'
@@ -39,6 +42,28 @@ function validate(form, mode) {
     else if (form.password.length < 6) errors.password = 'Password must be at least 6 characters'
   }
   return errors
+}
+
+const selectClass =
+  'block w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 disabled:opacity-60'
+
+/** The branch a cashier or manager works at; hidden for admins. */
+function BranchField({ form, onChange, error, branches, disabled = false, id }) {
+  if (form.role === 'ADMIN') {
+    return <p className="text-xs text-gray-500 dark:text-gray-400">Admins work across all branches.</p>
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      <label htmlFor={id} className="text-sm font-medium text-gray-700 dark:text-gray-300">Branch *</label>
+      <select id={id} name="branch_id" value={form.branch_id} onChange={onChange} disabled={disabled} className={selectClass}>
+        <option value="">Choose a branch</option>
+        {branches.map((b) => (
+          <option key={b.id} value={b.id}>{b.name}</option>
+        ))}
+      </select>
+      {error && <p className="text-xs text-danger-600 dark:text-danger-400">{error}</p>}
+    </div>
+  )
 }
 
 function LockIcon({ className = '' }) {
@@ -51,6 +76,7 @@ function LockIcon({ className = '' }) {
 
 export default function UsersPage() {
   const { user: currentUser } = useAuth()
+  const { branches } = useBranch()
   const [users, setUsers] = useState([])
   const [meta, setMeta] = useState({ page: 1, total_pages: 1 })
   const [page, setPage] = useState(1)
@@ -114,6 +140,7 @@ export default function UsersPage() {
         password: createForm.password,
         full_name: createForm.full_name.trim(),
         role: createForm.role,
+        branch_id: createForm.role === 'ADMIN' ? null : createForm.branch_id,
       })
       toast.success('User created successfully')
       setCreateOpen(false)
@@ -136,6 +163,7 @@ export default function UsersPage() {
       email: user.email ?? '',
       role: user.role ?? 'CASHIER',
       is_active: user.is_active ?? true,
+      branch_id: user.branch?.id ?? '',
     })
     setEditErrors({})
     setNewPassword('')
@@ -161,6 +189,7 @@ export default function UsersPage() {
         email: editForm.email.trim(),
         role: editForm.role,
         is_active: editForm.is_active,
+        ...(editForm.role !== 'ADMIN' && { branch_id: editForm.branch_id }),
       })
       toast.success('User updated')
       setEditOpen(false)
@@ -230,6 +259,13 @@ export default function UsersPage() {
       },
     },
     { key: 'email', sortable: true, label: 'Email' },
+    {
+      key: 'branch',
+      sortable: true,
+      sortValue: (row) => row.branch?.name ?? '',
+      label: 'Branch',
+      render: (v, row) => v?.name ?? (row.role === 'ADMIN' ? <span className="text-gray-400">All branches</span> : '—'),
+    },
     {
       key: 'role',
       sortable: true,
@@ -356,6 +392,7 @@ export default function UsersPage() {
               ))}
             </select>
           </div>
+          <BranchField id="create-branch" form={createForm} onChange={handleCreateChange} error={createErrors.branch_id} branches={branches} />
           <div className="flex justify-end gap-3 pt-2">
             <Button type="button" variant="secondary" onClick={() => setCreateOpen(false)}>
               Cancel
@@ -401,6 +438,7 @@ export default function UsersPage() {
               ))}
             </select>
           </div>
+          <BranchField id="edit-branch" form={editForm} onChange={handleEditChange} error={editErrors.branch_id} branches={branches} />
           <div className="flex items-center gap-3">
             <input
               type="checkbox"

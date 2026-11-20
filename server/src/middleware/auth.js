@@ -1,6 +1,8 @@
 const jwt = require('jsonwebtoken')
 const prisma = require('../utils/prismaClient')
 const { UnauthorizedError, ForbiddenError } = require('../utils/errors')
+
+const NO_BRANCH = 'You are not assigned to a branch. Ask an admin.'
 const { issuedBeforeCutoff } = require('../services/authService')
 const { resolveBranch } = require('./branch')
 
@@ -39,6 +41,8 @@ async function authenticate(req, res, next) {
     if (user.role !== 'ADMIN' && user.branch && !user.branch.is_active) {
       throw new UnauthorizedError('Your branch is closed')
     }
+    // Without a branch a cashier or manager would otherwise see every branch
+    if (user.role !== 'ADMIN' && !user.branch_id) throw new ForbiddenError(NO_BRANCH)
     delete user.tokens_valid_after
     delete user.branch
 

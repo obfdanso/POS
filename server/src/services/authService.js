@@ -126,6 +126,10 @@ async function login(username, password, ipAddress, userAgent) {
     await logAuthEvent(user.id, 'LOGIN_BLOCKED', ipAddress, userAgent, 'Branch closed')
     throw new UnauthorizedError('Your branch is closed')
   }
+  if (user.role !== 'ADMIN' && !user.branch_id) {
+    await logAuthEvent(user.id, 'LOGIN_BLOCKED', ipAddress, userAgent, 'No branch assigned')
+    throw new UnauthorizedError('You are not assigned to a branch. Ask an admin.')
+  }
 
   // Reset failed attempts on success
   await prisma.user.update({

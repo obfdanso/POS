@@ -80,6 +80,17 @@ describe('Branches API', () => {
     expect(login.status).toBe(401)
   })
 
+  it('refuses a cashier who has no branch instead of showing them every branch', async () => {
+    const worker = await createUserWithToken('CASHIER', `${PREFIX}n`)
+    await prisma.user.update({ where: { id: worker.user.id }, data: { branch_id: null } })
+    const res = await request(app).get('/api/branches').set({ Authorization: worker.headers.Authorization })
+    expect(res.status).toBe(403)
+    expect(res.body.error.message).toBe('You are not assigned to a branch. Ask an admin.')
+    const login = await request(app).post('/api/auth/login').send({ username: worker.user.username, password: 'testpass123' })
+    expect(login.status).toBe(401)
+    await deleteTestUsers(`${PREFIX}n`)
+  })
+
   it('tells staff which branch they work at', async () => {
     const me = await request(app).get('/api/auth/me').set(cashier.headers)
     expect(me.body.data.branch).toMatchObject({ id: branchA.id, name: 'BranchTest A', code: 'BTA' })

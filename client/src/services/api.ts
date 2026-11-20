@@ -1,25 +1,26 @@
-import axios from 'axios'
+import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios'
+import type { ApiSuccess } from '../types'
 
 // In-memory access token store (not localStorage — security best practice)
-let _accessToken = null
+let _accessToken: string | null = null
 
-export function setAccessToken(token) {
+export function setAccessToken(token: string): void {
   _accessToken = token
 }
 
-export function getAccessToken() {
+export function getAccessToken(): string | null {
   return _accessToken
 }
 
-export function clearAccessToken() {
+export function clearAccessToken(): void {
   _accessToken = null
 }
 
 // The branch an admin is working in (null = all branches). Staff always work at their own branch,
 // which the server knows, so they never send it
-let _branchId = null
+let _branchId: string | null = null
 
-export function setBranchId(id) {
+export function setBranchId(id: string | null | undefined): void {
   _branchId = id || null
 }
 
@@ -49,12 +50,12 @@ api.interceptors.request.use((config) => {
 // One refresh request at a time: concurrent callers (several 401s, or React StrictMode
 // running the startup auth check twice) share it. Refresh tokens rotate on every use,
 // so a second parallel request would present an already-revoked token and log the user out.
-let refreshPromise = null
+let refreshPromise: Promise<string> | null = null
 
-export function refreshAccessToken() {
+export function refreshAccessToken(): Promise<string> {
   if (!refreshPromise) {
     refreshPromise = axios
-      .post('/api/auth/refresh', {}, { withCredentials: true })
+      .post<ApiSuccess<{ accessToken: string }>>('/api/auth/refresh', {}, { withCredentials: true })
       .then(({ data }) => {
         const token = data.data.accessToken
         setAccessToken(token)
@@ -67,11 +68,14 @@ export function refreshAccessToken() {
   return refreshPromise
 }
 
+/** A request config marked once it has been retried after a token refresh */
+type RetriableRequestConfig = InternalAxiosRequestConfig & { _retry?: boolean }
+
 // Silent token refresh on 401
 api.interceptors.response.use(
   (response) => response,
-  async (error) => {
-    const originalRequest = error.config
+  async (error: AxiosError) => {
+    const originalRequest: RetriableRequestConfig | undefined = error.config
 
     // A 401 from login means bad credentials, not an expired session — show it as-is
     const isLogin = originalRequest?.url === '/auth/login'

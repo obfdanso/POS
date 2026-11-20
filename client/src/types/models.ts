@@ -45,6 +45,8 @@ export interface User extends Timestamps {
   branch_id?: string | null
   branch?: BranchRef | null
   /** `GET /users` only */
+  locked_until?: string | null
+  /** `GET /users` only */
   is_locked?: boolean
 }
 
@@ -65,6 +67,10 @@ export interface Supplier extends Timestamps {
   email: string | null
   address: string | null
   website: string | null
+  /** `GET /suppliers` rows */
+  product_count?: number
+  /** `GET /suppliers/:id`: its active products */
+  products?: Product[]
 }
 
 export interface BranchStock {

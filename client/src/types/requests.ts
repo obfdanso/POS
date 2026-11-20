@@ -62,3 +62,9 @@ export interface PromotionPayload {
   ends_at?: string | null
   is_active?: boolean
 }
+
+/** A JSON body for endpoints whose fields come straight from a form (each endpoint validates them) */
+export type JsonBody = Record<string, unknown>
+
+/** `POST /products` and `PUT /products/:id`: JSON, or multipart when uploading an image */
+export type ProductBody = JsonBody | FormData

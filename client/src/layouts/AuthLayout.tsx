@@ -1,4 +1,6 @@
-export function AuthLayout({ children }) {
+import type { ReactNode } from 'react'
+
+export function AuthLayout({ children }: { children?: ReactNode }) {
   return (
     <div className="min-h-screen flex">
       {/* ── Left: Branding panel ── */}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../context/SettingsContext'
@@ -6,6 +6,7 @@ import { useCart } from '../context/CartContext'
 import { BranchSwitcher } from '../components/BranchSwitcher'
 import { Modal } from '../components/Modal'
 import toast from 'react-hot-toast'
+import type { Role } from '../types'
 
 const icons = {
   branches: (
@@ -84,15 +85,24 @@ const icons = {
       <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
     </svg>
   ),
-}
+} satisfies Record<string, ReactNode>
 
-const roleBadge = {
+type IconName = keyof typeof icons
+
+const roleBadge: Record<Role, string> = {
   ADMIN: 'bg-danger-100 text-danger-700 dark:bg-danger-900/30 dark:text-danger-400',
   MANAGER: 'bg-warning-100 text-warning-700 dark:bg-warning-900/30 dark:text-warning-400',
   CASHIER: 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400',
 }
 
-function NavItem({ to, icon, label, end = false }) {
+interface NavItemProps {
+  to: string
+  icon: ReactNode
+  label: string
+  end?: boolean
+}
+
+function NavItem({ to, icon, label, end = false }: NavItemProps) {
   return (
     <NavLink
       to={to}
@@ -111,7 +121,7 @@ function NavItem({ to, icon, label, end = false }) {
   )
 }
 
-const ADMIN_LINKS = [
+const ADMIN_LINKS: { to: string; icon: IconName; label: string }[] = [
   { to: '/branches', icon: 'branches', label: 'Branches' },
   { to: '/users', icon: 'users', label: 'Users' },
   { to: '/settings', icon: 'settings', label: 'Settings' },
@@ -120,14 +130,14 @@ const ADMIN_LINKS = [
 // The admin-only pages, grouped under one header item so the bar fits on a 1280px screen
 function AdminMenu() {
   const [open, setOpen] = useState(false)
-  const ref = useRef(null)
+  const ref = useRef<HTMLDivElement>(null)
   const { pathname } = useLocation()
   const isActive = ADMIN_LINKS.some((l) => pathname.startsWith(l.to))
 
   useEffect(() => {
     if (!open) return undefined
-    const onClick = (e) => { if (!ref.current?.contains(e.target)) setOpen(false) }
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    const onClick = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node | null)) setOpen(false) }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
     document.addEventListener('mousedown', onClick)
     document.addEventListener('keydown', onKey)
     return () => {
@@ -177,7 +187,7 @@ function AdminMenu() {
   )
 }
 
-function MobileNavItem({ to, icon, label, end = false, onClick }) {
+function MobileNavItem({ to, icon, label, end = false, onClick }: NavItemProps & { onClick?: () => void }) {
   return (
     <NavLink
       to={to}
@@ -229,7 +239,13 @@ function ThemeToggle() {
   )
 }
 
-export function DashboardLayout({ children, noPad = false }) {
+export interface DashboardLayoutProps {
+  children?: ReactNode
+  /** Lets the page fill the width with no padding (the POS screen) */
+  noPad?: boolean
+}
+
+export function DashboardLayout({ children, noPad = false }: DashboardLayoutProps) {
   const { user, logout } = useAuth()
   const { clearCart } = useCart()
   const navigate = useNavigate()
@@ -320,7 +336,7 @@ export function DashboardLayout({ children, noPad = false }) {
               </div>
               <div className="hidden 2xl:block leading-tight">
                 <p className="text-sm font-medium text-gray-900 dark:text-gray-100 leading-none mb-0.5">{user?.role ? user.role[0] + user.role.slice(1).toLowerCase() : '—'}</p>
-                <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${roleBadge[user?.role]}`}>{user?.role}</span>
+                <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${user ? roleBadge[user.role] : undefined}`}>{user?.role}</span>
               </div>
             </div>
 
@@ -367,7 +383,7 @@ export function DashboardLayout({ children, noPad = false }) {
                 <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
                   {user?.role ? user.role[0] + user.role.slice(1).toLowerCase() : '—'}
                 </p>
-                <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${roleBadge[user?.role]}`}>{user?.role}</span>
+                <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${user ? roleBadge[user.role] : undefined}`}>{user?.role}</span>
               </div>
             </div>
 

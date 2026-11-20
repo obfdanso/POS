@@ -1,6 +1,6 @@
 const prisma = require('../utils/prismaClient')
 const { buildOrderBy } = require('../middleware/sorting')
-const { NotFoundError, ValidationError, AppError, ConflictError } = require('../utils/errors')
+const { NotFoundError, ValidationError, AppError, ConflictError, ForbiddenError } = require('../utils/errors')
 const { recordAudit } = require('../utils/audit')
 const { verifyPaystackPayment } = require('../utils/paystack')
 const { logger } = require('../middleware/logger')
@@ -12,8 +12,14 @@ const { isSmsConfigured, normalizePhone, isAllowedDestination, sendSms } = requi
 const { buildReceiptSms } = require('../utils/receiptSms')
 const { activePromotionsFor, bestPromotionFor } = require('./promotionService')
 const { autoRefundsEnabled, planGatewayRefund, sendGatewayRefund } = require('./gatewayRefundService')
+const { changeStock, branchStockFor } = require('../utils/branchStock')
 
-async function createSale({ items, customer_id, payment_method, amount_paid, discount_amount = 0, redeem_points = 0, notes, reference, payments, client_ref }, user) {
+// The user's open drawer at this branch; a shift open at another branch doesn't count here
+const openShiftAt = (db, userId, branchId) =>
+  db.shift.findFirst({ where: { user_id: userId, status: 'OPEN', branch_id: branchId }, select: { id: true } })
+
+/** A sale at `branchId`: its stock is checked and deducted, and the sale is recorded there. */
+async function createSale({ items, customer_id, payment_method, amount_paid, discount_amount = 0, redeem_points = 0, notes, reference, payments, client_ref }, user, branchId) {
   // Support legacy callers that pass userId as a string
   const userId = typeof user === 'string' ? user : user.id
 
@@ -25,7 +31,7 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
 
   // Checked up front (before any card charge is verified) and again inside the transaction
   const requireShift = (await getSettingValue('require_open_shift', 'false')) === 'true'
-  if (requireShift && !(await prisma.shift.findFirst({ where: { user_id: userId, status: 'OPEN' }, select: { id: true } }))) {
+  if (requireShift && !(await openShiftAt(prisma, userId, branchId))) {
     throw noOpenShiftError()
   }
 
@@ -38,17 +44,24 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
   })
 
   const productMap = new Map(products.map((p) => [p.id, p]))
+  const stock = await branchStockFor(productIds, branchId)
 
   for (const item of items) {
     const product = productMap.get(item.product_id)
     if (!product) {
       throw new NotFoundError(`Product ${item.product_id} not found or inactive`)
     }
-    if (product.quantity < item.quantity) {
+    const available = stock.get(item.product_id)
+    if (!available) {
+      throw new ValidationError('Not stocked at this branch', [
+        { field: 'items', message: `"${product.name}" is not stocked at this branch` },
+      ])
+    }
+    if (available.quantity < item.quantity) {
       throw new ValidationError('Insufficient stock', [
         {
           field: 'items',
-          message: `Insufficient stock for "${product.name}". Available: ${product.quantity}, requested: ${item.quantity}`,
+          message: `Insufficient stock for "${product.name}". Available: ${available.quantity}, requested: ${item.quantity}`,
         },
       ])
     }
@@ -160,7 +173,7 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
     const transaction_id = generateTransactionId(now, lastSequence + 1)
 
     // The sale belongs to the cashier's open shift, so the drawer count at close includes it
-    const openShift = await tx.shift.findFirst({ where: { user_id: userId, status: 'OPEN' }, select: { id: true } })
+    const openShift = await openShiftAt(tx, userId, branchId)
     if (!openShift && requireShift) throw noOpenShiftError()
 
     // The balance guard stops two tills spending the same points at once
@@ -192,6 +205,7 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
         notes: notes || null,
         loyalty_points_earned: pointsEarned,
         shift_id: openShift?.id ?? null,
+        branch_id: branchId,
         client_ref: client_ref || null,
       },
     })
@@ -214,33 +228,20 @@ async function createSale({ items, customer_id, payment_method, amount_paid, dis
     // One payment row per method; only verified card and Mobile Money parts carry a reference
     await tx.payment.createMany({ data: paymentRows.map((row) => ({ sale_id: newSale.id, ...row })) })
 
-    // Deduct stock atomically — the quantity guard stops concurrent sales from overselling
+    // Deduct the branch's stock atomically — the quantity guard stops concurrent sales from overselling
     for (const item of saleItems) {
-      const { count } = await tx.product.updateMany({
-        where: { id: item.product_id, quantity: { gte: item.quantity } },
-        data: { quantity: { decrement: item.quantity } },
-      })
-      if (count === 0) {
-        throw new ValidationError('Insufficient stock', [
-          { field: 'items', message: `Insufficient stock for "${item.product_name}" — it may have just been sold` },
-        ])
+      try {
+        await changeStock(tx, {
+          branchId, productId: item.product_id, change: -item.quantity, type: 'SALE', userId, notes: `Sale ${transaction_id}`,
+        })
+      } catch (err) {
+        if (err instanceof ValidationError && err.details?.[0]?.field === 'quantity') {
+          throw new ValidationError('Insufficient stock', [
+            { field: 'items', message: `Insufficient stock for "${item.product_name}" — it may have just been sold` },
+          ])
+        }
+        throw err
       }
-      const { quantity: newQty } = await tx.product.findUnique({
-        where: { id: item.product_id },
-        select: { quantity: true },
-      })
-
-      await tx.inventoryLog.create({
-        data: {
-          product_id: item.product_id,
-          change_type: 'SALE',
-          quantity_change: -item.quantity,
-          previous_quantity: newQty + item.quantity,
-          new_quantity: newQty,
-          user_id: userId,
-          notes: `Sale ${transaction_id}`,
-        },
-      })
     }
 
     if (pointsEarned > 0) {
@@ -387,6 +388,7 @@ async function getSaleById(id) {
     where: { id },
     include: {
       user: { select: { id: true, username: true, full_name: true } },
+      branch: { select: { id: true, name: true, code: true, address: true, phone: true } },
       customer: { select: { id: true, name: true, phone: true, email: true } },
       sale_items: {
         include: {
@@ -399,6 +401,7 @@ async function getSaleById(id) {
       refunds: {
         include: {
           user: { select: { id: true, full_name: true } },
+          branch: { select: { id: true, name: true, code: true } },
           items: { select: { sale_item_id: true, quantity: true, amount: true, restocked: true } },
         },
         orderBy: { created_at: 'asc' },
@@ -407,6 +410,27 @@ async function getSaleById(id) {
   })
   if (!sale) throw new NotFoundError('Sale not found')
   return sale
+}
+
+/** A sale found by its receipt number, at any branch (for returns made at another branch). */
+async function getSaleByTransactionId(transactionId) {
+  const found = await prisma.sale.findUnique({ where: { transaction_id: transactionId }, select: { id: true } })
+  if (!found) throw new NotFoundError('No sale with that transaction ID')
+  return getSaleById(found.id)
+}
+
+/**
+ * Who may open a sale: admins any; cashiers their own; managers their branch's, plus sales from
+ * another branch they have handled a return for.
+ */
+function assertCanSeeSale(sale, user, cashierMessage = 'You can only view your own sales') {
+  if (user.role === 'ADMIN') return
+  if (user.role === 'CASHIER') {
+    if (sale.user_id !== user.id) throw new ForbiddenError(cashierMessage)
+    return
+  }
+  const handledHere = sale.branch_id === user.branch_id || sale.refunds?.some((r) => r.branch_id === user.branch_id)
+  if (!handledHere) throw new NotFoundError('Sale not found')
 }
 
 const SALE_SORTS = {
@@ -419,7 +443,7 @@ const SALE_SORTS = {
   customer: (dir) => [{ customer: { name: dir } }, { created_at: 'desc' }],
 }
 
-async function listSales({ page = 1, per_page = 20, start_date, end_date, user_id, customer_id, payment_status, payment_method, search, sort, order } = {}) {
+async function listSales({ page = 1, per_page = 20, start_date, end_date, user_id, customer_id, payment_status, payment_method, search, sort, order, branchId = null } = {}) {
   const skip = (page - 1) * per_page
   const take = Math.min(per_page, 100)
 
@@ -430,6 +454,7 @@ async function listSales({ page = 1, per_page = 20, start_date, end_date, user_i
   if (payment_status) where.payment_status = payment_status
   if (payment_method) where.payment_method = payment_method
   if (search) where.transaction_id = { contains: search.trim(), mode: 'insensitive' }
+  if (branchId) where.branch_id = branchId
 
   const [sales, total] = await Promise.all([
     prisma.sale.findMany({
@@ -456,7 +481,11 @@ async function listSales({ page = 1, per_page = 20, start_date, end_date, user_i
  * cart discount, including tax); the final return of a sale refunds exactly what is left, so
  * rounding never makes the refunds add up to more or less than the sale total.
  */
-async function processRefund(saleId, userId, { items, reason } = {}) {
+/**
+ * Processed at `branchId`, which may differ from the branch that made the sale: returned goods go
+ * into that branch's stock and any cash comes out of its drawer.
+ */
+async function processRefund(saleId, userId, { items, reason } = {}, branchId) {
   const refund = await prisma.$transaction(async (tx) => {
     // Lock the sale so simultaneous returns against it are processed one after the other
     const locked = await tx.$queryRaw`SELECT id FROM "Sale" WHERE id = ${saleId} FOR UPDATE`
@@ -562,7 +591,7 @@ async function processRefund(saleId, userId, { items, reason } = {}) {
       cashAmount = Math.max(0, Math.min(amount, cashLeft))
     }
 
-    const shiftId = await refundShiftId(tx, userId, sale, cashAmount)
+    const shiftId = await refundShiftId(tx, userId, sale, cashAmount, branchId)
     const refundReason = reason?.trim() || (completesSale && !items ? 'Full refund' : 'Return')
     const gateway = await planGatewayRefund(tx, sale, amount, cashAmount)
     const created = await tx.refund.create({
@@ -570,6 +599,7 @@ async function processRefund(saleId, userId, { items, reason } = {}) {
         sale_id: saleId,
         user_id: userId,
         shift_id: shiftId,
+        branch_id: branchId,
         amount,
         method: sale.payment_method,
         cash_amount: cashAmount,
@@ -586,23 +616,16 @@ async function processRefund(saleId, userId, { items, reason } = {}) {
       },
     })
 
-    // Put returned goods back on the shelf, logging each stock change
+    // Put returned goods back on this branch's shelf, logging each stock change
     for (const item of refundItems.filter((i) => i.restock)) {
-      const { quantity: newQty } = await tx.product.update({
-        where: { id: item.product_id },
-        data: { quantity: { increment: item.quantity } },
-        select: { quantity: true },
-      })
-      await tx.inventoryLog.create({
-        data: {
-          product_id: item.product_id,
-          change_type: 'RETURN',
-          quantity_change: item.quantity,
-          previous_quantity: newQty - item.quantity,
-          new_quantity: newQty,
-          user_id: userId,
-          notes: `Return for sale ${sale.transaction_id}`,
-        },
+      await changeStock(tx, {
+        branchId,
+        productId: item.product_id,
+        change: item.quantity,
+        type: 'RETURN',
+        userId,
+        notes: `Return for sale ${sale.transaction_id}`,
+        createIfMissing: true,
       })
     }
 
@@ -662,20 +685,27 @@ async function getReceiptData(saleId) {
     getSettingValue('store_phone', ''),
   ])
 
+  // The branch's own address and phone, falling back to the store's
   return {
-    store: { name: storeName, address: storeAddress, phone: storePhone },
+    store: {
+      name: storeName,
+      branch: sale.branch?.name ?? null,
+      address: sale.branch?.address || storeAddress,
+      phone: sale.branch?.phone || storePhone,
+    },
     sale,
   }
 }
 
 /**
- * The drawer a refund is counted against: the refunder's open shift, or else the shift the sale was
- * rung up on if it is still open. When shifts are required, cash can't leave without an open drawer.
+ * The drawer a refund is counted against, at the branch paying it out: the refunder's open shift
+ * there, or else (for a return at the sale's own branch) the shift the sale was rung up on if it is
+ * still open. When shifts are required, cash can't leave without an open drawer.
  */
-async function refundShiftId(tx, userId, sale, cashAmount) {
-  const own = await tx.shift.findFirst({ where: { user_id: userId, status: 'OPEN' }, select: { id: true } })
+async function refundShiftId(tx, userId, sale, cashAmount, branchId) {
+  const own = await openShiftAt(tx, userId, branchId)
   if (own) return own.id
-  if (sale.shift_id) {
+  if (sale.shift_id && sale.branch_id === branchId) {
     const original = await tx.shift.findFirst({ where: { id: sale.shift_id, status: 'OPEN' }, select: { id: true } })
     if (original) return original.id
   }
@@ -791,4 +821,15 @@ async function getNumericSetting(key, defaultValue) {
   return isNaN(val) ? defaultValue : val
 }
 
-module.exports = { SALE_SORTS, createSale, getSaleById, listSales, processRefund, getReceiptData, emailReceipt, smsReceipt }
+module.exports = {
+  SALE_SORTS,
+  createSale,
+  getSaleById,
+  getSaleByTransactionId,
+  assertCanSeeSale,
+  listSales,
+  processRefund,
+  getReceiptData,
+  emailReceipt,
+  smsReceipt,
+}

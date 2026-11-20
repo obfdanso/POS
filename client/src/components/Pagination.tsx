@@ -1,7 +1,13 @@
-export function Pagination({ page, total_pages, onPageChange }) {
+export interface PaginationProps {
+  page: number
+  total_pages: number
+  onPageChange: (page: number) => void
+}
+
+export function Pagination({ page, total_pages, onPageChange }: PaginationProps) {
   if (total_pages <= 1) return null
 
-  const pages = []
+  const pages: (number | '...')[] = []
   const delta = 2
   const left = Math.max(1, page - delta)
   const right = Math.min(total_pages, page + delta)

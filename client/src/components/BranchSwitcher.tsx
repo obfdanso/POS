@@ -11,7 +11,12 @@ const pin = (
  * Admins pick the branch they are working in (or all branches); everyone else sees their branch.
  * `compact` keeps it narrow for the header.
  */
-export function BranchSwitcher({ className = '', compact = false }) {
+export interface BranchSwitcherProps {
+  className?: string
+  compact?: boolean
+}
+
+export function BranchSwitcher({ className = '', compact = false }: BranchSwitcherProps) {
   const { branches, branchId, currentBranch, canSwitch, setBranchId } = useBranch()
 
   if (!canSwitch) {

@@ -1,6 +1,12 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
+import type { SortOrder, TableColumn, TableSort } from '../utils/tableColumns'
 
-function SortIcon({ direction }) {
+/** A row's field by name (columns name fields as strings) */
+function field(row: object, key: string | undefined): unknown {
+  return key === undefined ? undefined : (row as Record<string, unknown>)[key]
+}
+
+function SortIcon({ direction }: { direction: SortOrder | null }) {
   return (
     <svg className={`w-3 h-3 flex-shrink-0 ${direction ? 'text-primary-600 dark:text-primary-400' : 'text-gray-300 dark:text-gray-600'}`} viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
       {direction !== 'desc' && <path d="M6 2l3 4H3z" />}
@@ -9,7 +15,7 @@ function SortIcon({ direction }) {
   )
 }
 
-function compareValues(a, b) {
+function compareValues(a: unknown, b: unknown): number {
   if (a == null && b == null) return 0
   if (a == null) return 1 // empty values last
   if (b == null) return -1
@@ -28,22 +34,32 @@ function compareValues(a, b) {
  * Pass `sort` + `onSortChange` to sort on the server (paginated lists); otherwise
  * sortable columns sort the given rows in the browser.
  */
-export function Table({ columns, data, isLoading, emptyMessage = 'No data found.', onRowClick, sort, onSortChange }) {
-  const [localSort, setLocalSort] = useState(null)
+export interface TableProps<T extends object> {
+  columns: readonly TableColumn<T>[]
+  data?: readonly T[] | null
+  isLoading?: boolean
+  emptyMessage?: ReactNode
+  onRowClick?: (row: T) => void
+  sort?: TableSort | null
+  onSortChange?: (sort: TableSort) => void
+}
+
+export function Table<T extends object>({ columns, data, isLoading, emptyMessage = 'No data found.', onRowClick, sort, onSortChange }: TableProps<T>) {
+  const [localSort, setLocalSort] = useState<TableSort | null>(null)
   const serverSorted = Boolean(onSortChange)
   const activeSort = serverSorted ? sort : localSort
 
-  function handleSort(col) {
+  function handleSort(col: TableColumn<T>) {
     const key = col.sortKey ?? col.key
-    const order = activeSort?.key === key && activeSort.order === 'asc' ? 'desc' : 'asc'
-    if (serverSorted) onSortChange({ key, order })
+    const order: SortOrder = activeSort?.key === key && activeSort.order === 'asc' ? 'desc' : 'asc'
+    if (onSortChange) onSortChange({ key, order })
     else setLocalSort({ key, order })
   }
 
   let rows = data || []
   if (!serverSorted && localSort) {
     const col = columns.find((c) => (c.sortKey ?? c.key) === localSort.key)
-    const getValue = col?.sortValue ?? ((row) => row[col?.key])
+    const getValue = col?.sortValue ?? ((row: T) => field(row, col?.key))
     rows = [...rows].sort((a, b) => compareValues(getValue(a), getValue(b)) * (localSort.order === 'desc' ? -1 : 1))
   }
 
@@ -117,13 +133,14 @@ export function Table({ columns, data, isLoading, emptyMessage = 'No data found.
         <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-800">
           {rows.map((row, i) => (
             <tr
-              key={row.id || i}
+              key={String(field(row, 'id') || i)}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
               className={`hover:bg-gray-50 dark:hover:bg-gray-800 transition${onRowClick ? ' cursor-pointer' : ''}`}
             >
               {columns.map((col, colIdx) => (
                 <td key={`${col.key}-${colIdx}`} className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
-                  {col.render ? col.render(row[col.key], row) : row[col.key]}
+                  {/* The cell's value is row[key], the type each column's render was declared for */}
+                  {col.render ? col.render(field(row, col.key) as never, row) : (field(row, col.key) as ReactNode)}
                 </td>
               ))}
             </tr>

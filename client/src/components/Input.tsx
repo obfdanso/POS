@@ -1,6 +1,12 @@
-import { useId } from 'react'
+import { useId, type InputHTMLAttributes, type ReactNode } from 'react'
 
-export function Input({ label, error, className = '', id, name, ...props }) {
+export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
+  label?: ReactNode
+  /** Inline validation message shown under the input */
+  error?: string | null
+}
+
+export function Input({ label, error, className = '', id, name, ...props }: InputProps) {
   // Always link the label to its input, even when no id or name is passed
   const generatedId = useId()
   const inputId = id || name || generatedId

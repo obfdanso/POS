@@ -1,17 +1,27 @@
-import { useEffect, useId } from 'react'
+import { useEffect, useId, type ReactNode } from 'react'
 
-export function Modal({ isOpen, onClose, title, children, size = 'md' }) {
+export type ModalSize = 'sm' | 'md' | 'lg' | 'xl'
+
+export interface ModalProps {
+  isOpen: boolean
+  onClose: () => void
+  title?: ReactNode
+  children?: ReactNode
+  size?: ModalSize
+}
+
+export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalProps) {
   const titleId = useId()
   useEffect(() => {
     if (!isOpen) return
-    function onKey(e) { if (e.key === 'Escape') onClose() }
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [isOpen, onClose])
 
   if (!isOpen) return null
 
-  const sizes = { sm: 'max-w-md', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl' }
+  const sizes: Record<ModalSize, string> = { sm: 'max-w-md', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl' }
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">

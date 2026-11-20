@@ -62,12 +62,36 @@
 | `supplier_id` | UUID FK? | → Supplier, `ON DELETE SET NULL` |
 | `price` | Decimal(10,2) | `CHECK >= 0` |
 | `cost_price` | Decimal(10,2)? | `CHECK >= 0`. Used by the profit report |
-| `quantity` | Int | `CHECK >= 0`. Changed only through sales, refunds, and inventory endpoints |
-| `low_stock_threshold` | Int | Default 10, `CHECK >= 0` |
 | `image_url` | String? | `/uploads/products/…` (uploaded) or `/product-images/…` (seeded) |
 | `is_active` | Boolean | Soft-delete flag |
 | `parent_id` | UUID FK? | → the main Product when this is a variant (size, flavour), `ON DELETE RESTRICT`. One level only. `CHECK` it isn't the product itself. Indexed |
 | `variant_name` | String? | The option's label, e.g. `1.5L`. `CHECK` required for variants. Unique with `parent_id` |
+
+Stock is kept per branch in **BranchStock**, not on the product.
+
+### Branch
+A shop in the chain.
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | |
+| `name` | String | Unique |
+| `code` | String | Unique, 2–6 capital letters, e.g. `KSI` |
+| `address`, `phone` | String? | Printed on that branch's receipts; blank falls back to the store settings |
+| `is_active` | Boolean | Closing a branch signs its staff out and stops new sales and stock changes there |
+
+### BranchStock
+How many of a product a branch holds. No row means the branch doesn't stock it.
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | |
+| `branch_id` | UUID FK | → Branch, `ON DELETE RESTRICT` |
+| `product_id` | UUID FK | → Product, `ON DELETE CASCADE` (products are only soft-deleted) |
+| `quantity` | Int | `CHECK (quantity >= 0)`. Changed only through `changeStock` (sales, returns, inventory, purchase orders, starting stock), which logs every change |
+| `low_stock_threshold` | Int | Default 10 |
+
+Unique on (`branch_id`, `product_id`); indexed on `product_id`.
+
+**Branch columns elsewhere.** `User.branch_id` (required for cashiers and managers, null for admins), and a required `branch_id` on `Sale`, `Shift`, `Refund` (the branch that took the return back), `InventoryLog` and `PurchaseOrder` (where the goods are delivered). All indexed.
 
 ### Customer
 | Column | Type | Notes |
@@ -270,7 +294,8 @@ Key–value store, edited on the Settings page.
 - **Soft-deleted products.** Deactivating sets `is_active = false`. `SaleItem.product_id` is `ON DELETE RESTRICT`, so a product with sales history can never be removed.
 - **Historical prices.** `SaleItem.unit_price` and `unit_cost` record the price and cost when the sale happened, and `Sale.loyalty_points_earned` the points awarded, so later changes don't rewrite old sales, profit reports, or refunds.
 - **Atomic sales.** The sale, its items, the payment, stock deductions, inventory logs, and loyalty points are all written in one `prisma.$transaction`. Any failure rolls back everything.
-- **No overselling.** Stock is decremented with a conditional update (`WHERE quantity >= n`) inside the transaction, so two tills selling the last unit at the same moment can't both succeed. The `CHECK (quantity >= 0)` constraint is a final safety net.
+- **No overselling.** A branch's stock is decremented with a conditional update (`WHERE branch_id = b AND quantity >= n`) inside the transaction, so two tills selling the last unit at the same moment can't both succeed, and one branch's sales never touch another's stock. The `CHECK (quantity >= 0)` constraint is a final safety net.
+- **Upgrading to branches.** The `add_branches` migration creates a "Main Branch" from the store's address and phone, copies every product's quantity and threshold into its `BranchStock` row, and gives existing users (except admins), sales, shifts, refunds, logs and purchase orders that branch before dropping the old product columns.
 - **Safe refunds.** A refund flips the status with a conditional update, so even simultaneous refund requests restore stock exactly once.
 - **Sign out everywhere.** Changing or resetting a password sets `User.tokens_valid_after`. Every access and refresh token issued before it stops working.
 - **Account lockout.** Failed attempts are counted with an atomic increment, so parallel guesses can't outrun the lock. The 5th consecutive failed login locks the account until an admin unlocks it (`POST /api/users/:id/unlock`, or resetting the password). If no admin can log in, run `npm run unlock-user -- <username>` on the server.
@@ -282,9 +307,10 @@ Key–value store, edited on the Settings page.
 
 `npx prisma db seed` **wipes** every table, then creates:
 
-- 3 users (admin, manager, cashier) and default settings: 3% tax, 1 point per GHS 8
-- 6 categories, 25 Ghanaian suppliers, 52 products with images and EAN-13 barcodes, each with an opening-stock log entry
+- 2 branches: **Kumasi Central** (`KSI`) and **Accra Mall** (`ACC`)
+- 4 users: admin (all branches), manager and cashier at Kumasi, `cashier2` at Accra; default settings: 3% tax, 1 point per GHS 8, shifts required
+- 6 categories, 25 Ghanaian suppliers, 52 products with images and EAN-13 barcodes. Kumasi stocks all of them; Accra about two thirds, at half the quantity. Each stock row has an opening-stock log entry
 - 10 customers with loyalty points
-- 20 sales over the past 30 days, two of them earlier today and one refunded, with matching stock deductions, inventory logs, and loyalty points
+- 20 sales over the past 30 days across both branches, two of them earlier today and one refunded, with matching stock deductions, inventory logs, and loyalty points
 
 The sample sales are generated deterministically, so every reseed produces the same data, apart from the dates, which are relative to today.

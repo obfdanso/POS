@@ -7,6 +7,7 @@ const { buildOrderBy } = require('../middleware/sorting')
 const PEOPLE = {
   user: { select: { id: true, username: true, full_name: true } },
   closed_by: { select: { id: true, username: true, full_name: true } },
+  branch: { select: { id: true, name: true, code: true } },
 }
 
 // Half-up to 2 decimals; EPSILON stops values like 1.005 (stored as 1.00499…) rounding down
@@ -67,13 +68,14 @@ async function getCurrentShift(userId) {
   return withTotals(await getOpenShift(userId))
 }
 
-async function openShift(userId, { opening_float, notes }) {
+/** Opens a drawer at `branchId`; a user has at most one open shift, wherever it is. */
+async function openShift(userId, { opening_float, notes }, branchId) {
   if (await getOpenShift(userId)) {
     throw new ConflictError('You already have an open shift. Close it before opening another.')
   }
   try {
     const shift = await prisma.shift.create({
-      data: { user_id: userId, opening_float, notes: notes || null },
+      data: { user_id: userId, opening_float, notes: notes || null, branch_id: branchId },
       include: PEOPLE,
     })
     return withTotals(shift)
@@ -84,10 +86,13 @@ async function openShift(userId, { opening_float, notes }) {
   }
 }
 
-/** Cashiers may only see and close their own shifts; managers and admins any. */
+/** Cashiers may only see and close their own shifts; managers their branch's; admins any. */
 function assertCanAccess(shift, user) {
   if (user.role === 'CASHIER' && shift.user_id !== user.id) {
     throw new ForbiddenError('You can only view your own shifts')
+  }
+  if (user.role === 'MANAGER' && shift.branch_id !== user.branch_id) {
+    throw new NotFoundError('Shift not found')
   }
 }
 
@@ -150,9 +155,10 @@ const SHIFT_SORTS = {
   cashier: (dir) => [{ user: { full_name: dir } }, { opened_at: 'desc' }],
 }
 
-async function listShifts({ page = 1, per_page = 20, user_id, status, start_date, end_date, sort, order }) {
+async function listShifts({ page = 1, per_page = 20, user_id, status, start_date, end_date, sort, order, branchId = null }) {
   const take = Math.min(per_page, 100)
   const where = {}
+  if (branchId) where.branch_id = branchId
   if (user_id) where.user_id = user_id
   if (status) where.status = status
   if (start_date || end_date) where.opened_at = buildDateRange(start_date, end_date)

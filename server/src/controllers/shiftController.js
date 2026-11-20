@@ -11,7 +11,7 @@ async function getCurrentShift(req, res, next) {
 
 async function openShift(req, res, next) {
   try {
-    const shift = await shiftService.openShift(req.user.id, req.body)
+    const shift = await shiftService.openShift(req.user.id, req.body, req.branchId)
     res.status(201).json({ success: true, data: shift, message: 'Shift opened' })
   } catch (err) {
     next(err)
@@ -44,7 +44,7 @@ async function listShifts(req, res, next) {
     // Cashiers only see their own shifts
     const user_id = req.user.role === 'CASHIER' ? req.user.id : req.query.user_id
 
-    const result = await shiftService.listShifts({ page, per_page, user_id, status, start_date, end_date, sort, order })
+    const result = await shiftService.listShifts({ page, per_page, user_id, status, start_date, end_date, sort, order, branchId: req.branchId })
     const shifts = result.shifts.map(({ _count, ...s }) => ({ ...s, sales_count: _count?.sales ?? 0 }))
     res.json({
       success: true,

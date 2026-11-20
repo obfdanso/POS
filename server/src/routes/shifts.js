@@ -2,6 +2,7 @@ const express = require('express')
 const { body, param, query } = require('express-validator')
 const shiftController = require('../controllers/shiftController')
 const { authenticate } = require('../middleware/auth')
+const { requireBranch } = require('../middleware/branch')
 const validate = require('../middleware/validate')
 const exactBody = require('../middleware/exactBody')
 const paginationRules = require('../middleware/pagination')
@@ -11,7 +12,7 @@ const { SHIFT_SORTS } = require('../services/shiftService')
 const router = express.Router()
 
 // Every role works a till, so every role can open and close its own shift.
-// Cashiers are limited to their own shifts in the service; managers and admins see all.
+// Cashiers are limited to their own shifts in the service, managers to their branch's; admins see all.
 router.use(authenticate)
 
 // A function: validation chains are mutable, so each route needs its own instance
@@ -22,6 +23,7 @@ router.get('/current', shiftController.getCurrentShift)
 
 router.post(
   '/open',
+  requireBranch,
   exactBody([
     body('opening_float').isFloat({ min: 0, max: 1000000 }).withMessage('Opening float must be between 0 and 1,000,000').toFloat(),
     notes(),

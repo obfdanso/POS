@@ -254,7 +254,7 @@ Each row includes `user`, `customer`, and `items_count`.
 The full sale with `items`, `payment`, cashier, and customer. Cashiers can only open their own.
 
 ### GET /sales/lookup/:transactionId — ADMIN, MANAGER
-A sale from **any branch** by the transaction ID on its receipt, so items bought at one branch can be returned at another. Returns only what a return needs: the customer's name but no contact details, and no payment references. Every lookup is audited (`SALE_LOOKUP`) and limited to 20 a minute per user. Returned goods go into the stock of the branch processing the return, and cash comes out of its drawer (`Refund.branch_id`); the sale's figures stay with the branch that made it.
+A sale from **any branch** by the transaction ID and `?total=` printed on its receipt (both must match, so IDs can't simply be tried one by one), so items bought at one branch can be returned at another. `422` without a total, `404` "No sale with that transaction ID and total" when either is wrong. Returns only what a return needs: the customer's name but no contact details, and no payment references. Every lookup is audited (`SALE_LOOKUP`) and limited to 20 a minute per user. Returned goods go into the stock of the branch processing the return, and cash comes out of its drawer (`Refund.branch_id`); the sale's figures stay with the branch that made it.
 
 ### GET /sales/:id/receipt
 Receipt data for reprinting: `{ "store": { "name", "address", "phone" }, "sale": { … } }`.

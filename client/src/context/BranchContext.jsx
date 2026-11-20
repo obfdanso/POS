@@ -32,14 +32,17 @@ export function BranchProvider({ children }) {
   const isAdmin = user?.role === 'ADMIN'
   const [branches, setBranches] = useState([])
   const [loaded, setLoaded] = useState(false)
+  const [loadFailed, setLoadFailed] = useState(false)
   const [chosen, setChosen] = useState(() => readStored())
 
   const loadBranches = useCallback(async () => {
     try {
       const res = await api.get('/branches', { params: { active: 'true' } })
       setBranches(res.data.data || [])
+      setLoadFailed(false)
     } catch {
       setBranches([])
+      setLoadFailed(true)
     } finally {
       setLoaded(true)
     }
@@ -88,8 +91,10 @@ export function BranchProvider({ children }) {
       canSwitch: isAdmin,
       setBranchId,
       reloadBranches: loadBranches,
+      branchesLoaded: loaded,
+      branchesFailed: loadFailed,
     }),
-    [branches, branchId, currentBranch, isAdmin, setBranchId, loadBranches]
+    [branches, branchId, currentBranch, isAdmin, setBranchId, loadBranches, loaded, loadFailed]
   )
 
   return <BranchContext.Provider value={value}>{children}</BranchContext.Provider>

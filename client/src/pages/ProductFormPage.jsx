@@ -19,8 +19,16 @@ const isWholeAtLeastZero = (v) => v !== '' && Number.isInteger(Number(v)) && Num
  * admin, their own for a manager): a tick box, a starting quantity for branches that newly stock it,
  * and the branch's low-stock level. Stock that is already there changes through Inventory.
  */
-function StockedAt({ rows, onChange, errors }) {
-  if (rows.length === 0) return <p className="text-sm text-gray-400">Loading branches…</p>
+function StockedAt({ rows, onChange, errors, loaded, failed, onRetry }) {
+  if (failed) {
+    return (
+      <p className="text-sm text-danger-600">
+        Couldn&apos;t load the branches.{' '}
+        <button type="button" onClick={onRetry} className="font-semibold underline">Try again</button>
+      </p>
+    )
+  }
+  if (!loaded) return <p className="text-sm text-gray-400">Loading branches…</p>
   return (
     <div className="space-y-2">
       <div className="hidden sm:grid grid-cols-[1fr_8rem_8rem] gap-3 px-1 text-xs font-medium text-gray-500 dark:text-gray-400">
@@ -77,7 +85,7 @@ function StockedAt({ rows, onChange, errors }) {
 export default function ProductFormPage() {
   const navigate = useNavigate()
   const { id } = useParams()
-  const { branches } = useBranch()
+  const { branches, branchesLoaded, branchesFailed, reloadBranches } = useBranch()
   // Stock rows as loaded (edit) and as being edited, by branch id
   const [loadedStocks, setLoadedStocks] = useState(null)
   const [stockEdits, setStockEdits] = useState({})
@@ -250,6 +258,8 @@ export default function ProductFormPage() {
     if (!form.category_id) errs.category_id = 'Category is required'
     if (!form.price || parseFloat(form.price) <= 0) errs.price = 'Price must be greater than 0'
     if (form.cost_price && parseFloat(form.cost_price) < 0) errs.cost_price = 'Cost price cannot be negative'
+    // A new product has to be sold somewhere
+    if (!isEditing && !stockRows.some((r) => r.stocked)) errs.stocks = 'Tick at least one branch that sells this product'
     for (const row of stockRows.filter((r) => r.stocked)) {
       if (!row.existing && !isWholeAtLeastZero(row.quantity)) errs[`quantity-${row.branch_id}`] = 'A whole number, 0 or more'
       if (!isWholeAtLeastZero(row.low_stock_threshold)) errs[`threshold-${row.branch_id}`] = 'A whole number, 0 or more'
@@ -494,7 +504,7 @@ export default function ProductFormPage() {
                 Tick each branch that sells this product. {isEditing ? 'To change stock that is already there, use the Inventory page.' : ''}
               </p>
             </div>
-            <StockedAt rows={stockRows} onChange={editStock} errors={errors} />
+            <StockedAt rows={stockRows} onChange={editStock} errors={errors} loaded={branchesLoaded} failed={branchesFailed} onRetry={reloadBranches} />
           </div>
 
           {/* Image upload */}
@@ -614,7 +624,7 @@ export default function ProductFormPage() {
             >
               Cancel
             </Button>
-            <Button type="submit" variant="primary" isLoading={isSubmitting}>
+            <Button type="submit" variant="primary" isLoading={isSubmitting} disabled={!branchesLoaded || branchesFailed}>
               {isEditing ? 'Save Changes' : 'Create Product'}
             </Button>
           </div>

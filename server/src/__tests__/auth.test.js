@@ -3,6 +3,7 @@ const request = require('supertest')
 const app = require('../app')
 const prisma = require('../utils/prismaClient')
 const bcrypt = require('bcrypt')
+const { testBranch } = require('./helpers')
 
 let testUser
 
@@ -16,6 +17,7 @@ beforeAll(async () => {
       password_hash: hash,
       full_name: 'Test User',
       role: 'CASHIER',
+      branch_id: (await testBranch()).id,
     },
   })
 })

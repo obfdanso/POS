@@ -9,9 +9,9 @@ const pin = (
 
 /**
  * Admins pick the branch they are working in (or all branches); everyone else sees their branch.
- * `compact` drops the label for tight spaces.
+ * `compact` keeps it narrow for the header.
  */
-export function BranchSwitcher({ className = '' }) {
+export function BranchSwitcher({ className = '', compact = false }) {
   const { branches, branchId, currentBranch, canSwitch, setBranchId } = useBranch()
 
   if (!canSwitch) {
@@ -19,7 +19,7 @@ export function BranchSwitcher({ className = '' }) {
     return (
       <span className={`inline-flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-300 ${className}`} title="Your branch">
         {pin}
-        <span className="truncate max-w-[10rem]">{currentBranch.name}</span>
+        <span className={`truncate ${compact ? 'max-w-[8rem]' : 'max-w-[12rem]'}`}>{currentBranch.name}</span>
       </span>
     )
   }
@@ -32,7 +32,7 @@ export function BranchSwitcher({ className = '' }) {
         aria-label="Branch"
         value={branchId ?? ''}
         onChange={(e) => setBranchId(e.target.value || null)}
-        className="max-w-[11rem] rounded-full border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 text-sm py-1 pl-3 pr-8 focus:outline-none focus:ring-2 focus:ring-primary-500"
+        className={`${compact ? 'w-[9.5rem]' : 'max-w-[12rem]'} rounded-full border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 text-sm py-1 pl-3 pr-8 focus:outline-none focus:ring-2 focus:ring-primary-500`}
       >
         <option value="">All branches</option>
         {branches.map((b) => (

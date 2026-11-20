@@ -1,5 +1,5 @@
-import { Fragment, useState } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { Fragment, useEffect, useRef, useState } from 'react'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../context/SettingsContext'
 import { useCart } from '../context/CartContext'
@@ -99,7 +99,7 @@ function NavItem({ to, icon, label, end = false }) {
       to={to}
       end={end}
       className={({ isActive }) =>
-        `flex items-center gap-1.5 px-2 xl:px-2.5 h-full text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
+        `flex items-center gap-1.5 px-1.5 2xl:px-2.5 h-full text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
           isActive
             ? 'border-teal-600 text-teal-600 dark:text-teal-400 dark:border-teal-400'
             : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'
@@ -109,6 +109,72 @@ function NavItem({ to, icon, label, end = false }) {
       <span className="hidden 2xl:block w-4 h-4 flex-shrink-0">{icon}</span>
       <span>{label}</span>
     </NavLink>
+  )
+}
+
+const ADMIN_LINKS = [
+  { to: '/branches', icon: 'branches', label: 'Branches' },
+  { to: '/users', icon: 'users', label: 'Users' },
+  { to: '/settings', icon: 'settings', label: 'Settings' },
+]
+
+// The admin-only pages, grouped under one header item so the bar fits on a 1280px screen
+function AdminMenu() {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  const { pathname } = useLocation()
+  const isActive = ADMIN_LINKS.some((l) => pathname.startsWith(l.to))
+
+  useEffect(() => {
+    if (!open) return undefined
+    const onClick = (e) => { if (!ref.current?.contains(e.target)) setOpen(false) }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onClick)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative flex items-stretch">
+      <button
+        type="button"
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className={`flex items-center gap-1 px-2 xl:px-2.5 h-full text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
+          isActive
+            ? 'border-teal-600 text-teal-600 dark:text-teal-400 dark:border-teal-400'
+            : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'
+        }`}
+      >
+        Admin
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-44 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-lg py-1 z-40">
+          {ADMIN_LINKS.map((l) => (
+            <NavLink
+              key={l.to}
+              to={l.to}
+              onClick={() => setOpen(false)}
+              className={({ isActive: active }) =>
+                `flex items-center gap-2 px-3 py-2 text-sm ${
+                  active ? 'text-teal-700 dark:text-teal-400 bg-teal-50 dark:bg-teal-900/30' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+                }`
+              }
+            >
+              <span className="w-4 h-4 flex-shrink-0">{icons[l.icon]}</span>
+              {l.label}
+            </NavLink>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -200,7 +266,7 @@ export function DashboardLayout({ children, noPad = false }) {
               <circle cx="22" cy="55" r="4" fill="white"/>
               <circle cx="38" cy="55" r="4" fill="white"/>
             </svg>
-            <span className="text-sm font-bold text-gray-900 dark:text-gray-100 hidden sm:block">QuickMart</span>
+            <span className="text-sm font-bold text-gray-900 dark:text-gray-100 hidden sm:block lg:hidden 2xl:block">QuickMart</span>
           </div>
 
           {/* Desktop Nav */}
@@ -210,10 +276,10 @@ export function DashboardLayout({ children, noPad = false }) {
               <>
                 <NavItem to="/cashier/dashboard" icon={icons.home} label="Home" end />
                 <NavItem to="/pos" icon={icons.pos} label="New Sale" end />
-                <div className="w-px bg-gray-200 dark:bg-gray-700 mx-1 xl:mx-2 my-3 flex-shrink-0" />
+                <div className="w-px bg-gray-200 dark:bg-gray-700 mx-1 2xl:mx-2 my-3 flex-shrink-0" />
                 <NavItem to="/cashier/sales" icon={icons.mySales} label="My Sales" />
                 <NavItem to="/cashier/customers" icon={icons.customers} label="Customer Lookup" />
-                <div className="w-px bg-gray-200 dark:bg-gray-700 mx-1 xl:mx-2 my-3 flex-shrink-0" />
+                <div className="w-px bg-gray-200 dark:bg-gray-700 mx-1 2xl:mx-2 my-3 flex-shrink-0" />
                 <NavItem to="/cashier/profile" icon={icons.profile} label="My Profile" />
               </>
             )}
@@ -223,32 +289,30 @@ export function DashboardLayout({ children, noPad = false }) {
               <>
                 <NavItem to="/dashboard" icon={icons.dashboard} label="Overview" end />
                 <NavItem to="/pos" icon={icons.pos} label="New Sale" end />
-                <div className="w-px bg-gray-200 dark:bg-gray-700 mx-1 xl:mx-2 my-3 flex-shrink-0" />
+                <div className="w-px bg-gray-200 dark:bg-gray-700 mx-1 2xl:mx-2 my-3 flex-shrink-0" />
                 <NavItem to="/products" icon={icons.products} label="Products" />
                 <NavItem to="/inventory" icon={icons.inventory} label="Inventory" />
                 <NavItem to="/purchase-orders" icon={icons.orders} label="Orders" />
                 <NavItem to="/promotions" icon={icons.promotions} label="Promos" />
                 <NavItem to="/customers" icon={icons.customers} label="Customers" />
-                <div className="w-px bg-gray-200 dark:bg-gray-700 mx-1 xl:mx-2 my-3 flex-shrink-0" />
+                <div className="w-px bg-gray-200 dark:bg-gray-700 mx-1 2xl:mx-2 my-3 flex-shrink-0" />
                 <NavItem to="/sales" icon={icons.mySales} label="Sales" />
                 <NavItem to="/shifts" icon={icons.shifts} label="Shifts" />
                 <NavItem to="/reports" icon={icons.reports} label="Reports" />
               </>
             )}
 
-            {isAdmin && (
-              <>
-                <div className="w-px bg-gray-200 dark:bg-gray-700 mx-1 xl:mx-2 my-3 flex-shrink-0" />
-                <NavItem to="/branches" icon={icons.branches} label="Branches" />
-                <NavItem to="/users" icon={icons.users} label="Users" />
-                <NavItem to="/settings" icon={icons.settings} label="Settings" />
-              </>
-            )}
           </nav>
+          {isAdmin && (
+            <div className="hidden lg:flex items-stretch">
+              <div className="w-px bg-gray-200 dark:bg-gray-700 mx-1 my-3 flex-shrink-0" />
+              <AdminMenu />
+            </div>
+          )}
 
           {/* Right-side controls */}
           <div className="flex items-center gap-1 ml-auto">
-            <BranchSwitcher className="hidden md:inline-flex mr-1" />
+            <BranchSwitcher className="hidden md:inline-flex mr-1" compact />
             <ThemeToggle />
 
             {/* User info */}
@@ -256,7 +320,7 @@ export function DashboardLayout({ children, noPad = false }) {
               <div className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 flex items-center justify-center text-sm font-bold flex-shrink-0">
                 {user?.role?.[0]?.toUpperCase()}
               </div>
-              <div className="hidden xl:block leading-tight">
+              <div className="hidden 2xl:block leading-tight">
                 <p className="text-sm font-medium text-gray-900 dark:text-gray-100 leading-none mb-0.5">{user?.role ? user.role[0] + user.role.slice(1).toLowerCase() : '—'}</p>
                 <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${roleBadge[user?.role]}`}>{user?.role}</span>
               </div>

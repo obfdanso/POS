@@ -13,7 +13,10 @@ function forOtherBranch(sale) {
     ...sale,
     customer: sale.customer && { id: sale.customer.id, name: sale.customer.name },
     payments: sale.payments.map((payment) => without(payment, ['reference'])),
-    refunds: sale.refunds.map((refund) => without(refund, ['gateway_reference', 'gateway_refund_id', 'gateway_error'])),
+    refunds: sale.refunds.map((refund) => ({
+      ...without(refund, ['gateway_reference', 'gateway_refund_id', 'gateway_error']),
+      has_gateway_reference: Boolean(refund.gateway_reference),
+    })),
   }
 }
 
@@ -102,6 +105,7 @@ async function getReceipt(req, res, next) {
   try {
     const data = await salesService.getReceiptData(req.params.id)
     salesService.assertCanSeeSale(data.sale, req.user, 'You can only view receipts for your own sales')
+    if (isOtherBranch(data.sale, req.user)) data.sale = forOtherBranch(data.sale)
     res.json({ success: true, data })
   } catch (err) {
     next(err)
@@ -113,7 +117,9 @@ async function emailReceipt(req, res, next) {
     const sale = await salesService.getSaleById(req.params.id)
     salesService.assertCanSeeSale(sale, req.user, 'You can only email receipts for your own sales')
     const { to } = await salesService.emailReceipt(sale, req.user.id, req.body?.email)
-    res.json({ success: true, data: { to }, message: `Receipt sent to ${to}` })
+    // Another branch's customer address stays hidden when it came from their record
+    const shown = isOtherBranch(sale, req.user) && !req.body?.email ? null : to
+    res.json({ success: true, data: { to: shown }, message: `Receipt sent to ${shown ?? "the customer's email"}` })
   } catch (err) {
     next(err)
   }
@@ -124,7 +130,8 @@ async function smsReceipt(req, res, next) {
     const sale = await salesService.getSaleById(req.params.id)
     salesService.assertCanSeeSale(sale, req.user, 'You can only text receipts for your own sales')
     const { to } = await salesService.smsReceipt(sale, req.user.id, req.body?.phone)
-    res.json({ success: true, data: { to }, message: `Receipt texted to ${to}` })
+    const shown = isOtherBranch(sale, req.user) && !req.body?.phone ? null : to
+    res.json({ success: true, data: { to: shown }, message: `Receipt texted to ${shown ?? "the customer's phone"}` })
   } catch (err) {
     next(err)
   }
@@ -141,7 +148,8 @@ async function sendRefundToPaystack(req, res, next) {
     }
     await gatewayRefundService.sendOrRefreshGatewayRefund(req.params.id, req.params.refundId, req.user.id)
     const sale = await salesService.getSaleById(req.params.id)
-    res.json({ success: true, data: normalizeSale(sale) })
+    const data = isOtherBranch(sale, req.user) ? forOtherBranch(sale) : sale
+    res.json({ success: true, data: normalizeSale(data) })
   } catch (err) {
     next(err)
   }

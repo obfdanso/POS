@@ -115,7 +115,7 @@ function SaleDetailModal({ saleId, initialSale = null, onClose, onRefunded }) {
                             {fmt(r.gateway_amount)} by card / Mobile Money: {GATEWAY_STATUS[r.gateway_status].label}
                           </span>
                           {r.gateway_error && <span className="block text-gray-500 dark:text-gray-400">{r.gateway_error}</span>}
-                          {GATEWAY_STATUS[r.gateway_status].action && r.gateway_reference && (
+                          {GATEWAY_STATUS[r.gateway_status].action && (r.gateway_reference || r.has_gateway_reference) && (
                             <button
                               type="button"
                               onClick={() => sendToPaystack(r)}

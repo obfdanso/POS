@@ -24,7 +24,7 @@ export function SmsReceiptForm({ sale, onSent, onCancel }) {
     setIsSending(true)
     try {
       const res = await salesService.smsReceipt(sale.id, { phone: number })
-      toast.success(`Receipt texted to ${res.data.data.to}`)
+      toast.success(res.data.message)
       onSent()
     } catch (err) {
       const fieldError = getFieldErrors(err).phone

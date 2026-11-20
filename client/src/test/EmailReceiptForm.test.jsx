@@ -12,7 +12,7 @@ describe('EmailReceiptForm', () => {
   afterEach(() => salesService.emailReceipt.mockClear())
 
   it("starts with the customer's email and sends to it", async () => {
-    salesService.emailReceipt.mockResolvedValue({ data: { data: { to: 'ama@example.com' } } })
+    salesService.emailReceipt.mockResolvedValue({ data: { data: { to: 'ama@example.com' }, message: 'Receipt sent to ama@example.com' } })
     const onSent = vi.fn()
     render(<EmailReceiptForm sale={sale} onSent={onSent} onCancel={() => {}} />)
     expect(screen.getByLabelText('Customer email')).toHaveValue('ama@example.com')

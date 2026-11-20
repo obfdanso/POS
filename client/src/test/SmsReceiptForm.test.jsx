@@ -13,7 +13,7 @@ describe('SmsReceiptForm', () => {
   afterEach(() => salesService.smsReceipt.mockReset())
 
   it("starts with the customer's phone number and texts it", async () => {
-    salesService.smsReceipt.mockResolvedValue({ data: { data: { to: '+233245550199' } } })
+    salesService.smsReceipt.mockResolvedValue({ data: { data: { to: '+233245550199' }, message: 'Receipt texted to +233245550199' } })
     const onSent = vi.fn()
     render(<SmsReceiptForm sale={sale} onSent={onSent} onCancel={() => {}} />)
     expect(screen.getByLabelText('Customer phone number')).toHaveValue('024-555-0199')

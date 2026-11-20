@@ -23,7 +23,7 @@ export function EmailReceiptForm({ sale, onSent, onCancel }) {
     setIsSending(true)
     try {
       const res = await salesService.emailReceipt(sale.id, { email: address })
-      toast.success(`Receipt sent to ${res.data.data.to}`)
+      toast.success(res.data.message)
       onSent()
     } catch (err) {
       const fieldError = getFieldErrors(err).email

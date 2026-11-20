@@ -1,7 +1,10 @@
 import api from './api'
 
 export const salesService = {
-  create: (data) => api.post('/sales', data),
+  // branchId: send to a particular branch (a sale queued offline goes to the branch it was rung up at)
+  create: (data, branchId) => api.post('/sales', data, branchId ? { headers: { 'X-Branch-Id': branchId } } : undefined),
+  // Any branch's sale by its receipt number, for returns made at another branch
+  lookup: (transactionId) => api.get(`/sales/lookup/${encodeURIComponent(transactionId)}`),
   list: (params) => api.get('/sales', { params }),
   get: (id) => api.get(`/sales/${id}`),
   receipt: (id) => api.get(`/sales/${id}/receipt`),

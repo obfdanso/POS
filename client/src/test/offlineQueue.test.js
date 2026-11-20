@@ -39,6 +39,14 @@ describe('offline sales queue', () => {
     expect(queuedSales('u1')[0].error).toBeNull()
   })
 
+  it('sends each sale to the branch it was rung up at', async () => {
+    queueSale('u1', sale('a'), 10, 'branch-a')
+    queueSale('u1', sale('b'), 10)
+    const send = vi.fn(async () => ({}))
+    await syncQueuedSales('u1', send)
+    expect(send.mock.calls.map(([payload, branchId]) => [payload.client_ref, branchId])).toEqual([['a', 'branch-a'], ['b', null]])
+  })
+
   it('tells network errors from server answers and from bugs', () => {
     expect(isNetworkError({ isAxiosError: true, message: 'Network Error' })).toBe(true)
     expect(isNetworkError({ isAxiosError: true, response: { status: 422 } })).toBe(false)

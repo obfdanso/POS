@@ -44,8 +44,9 @@ export function newClientRef() {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`
 }
 
-export function queueSale(userId, payload, total) {
-  write([...read(), { id: payload.client_ref, user_id: userId, payload, total, queued_at: new Date().toISOString(), error: null }])
+/** `branchId`: the branch an admin was working in, so the sale goes there even after a switch. */
+export function queueSale(userId, payload, total, branchId = null) {
+  write([...read(), { id: payload.client_ref, user_id: userId, branch_id: branchId, payload, total, queued_at: new Date().toISOString(), error: null }])
 }
 
 /** This user's queued sales: waiting ones, and ones the server refused (with its reason). */
@@ -58,7 +59,7 @@ export function removeQueued(id) {
 }
 
 /**
- * Sends this user's waiting sales, oldest first, with `send(payload)`. A sale the server refuses is
+ * Sends this user's waiting sales, oldest first, with `send(payload, branchId)`. A sale the server refuses is
  * kept with its reason for a person to deal with (the customer already paid); a network error
  * (or a temporary server problem) stops the run so the rest wait for the next try.
  */
@@ -67,7 +68,7 @@ export async function syncQueuedSales(userId, send) {
   let refused = 0
   for (const entry of queuedSales(userId).filter((e) => !e.error)) {
     try {
-      await send(entry.payload)
+      await send(entry.payload, entry.branch_id ?? null)
       removeQueued(entry.id)
       synced++
     } catch (err) {

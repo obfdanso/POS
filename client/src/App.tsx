@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './hooks/useAuth'
 import { useBranch } from './hooks/useBranch'
@@ -21,10 +22,11 @@ import CashierDashboardPage from './pages/CashierDashboardPage'
 import CashierSalesPage from './pages/CashierSalesPage'
 import CashierProfilePage from './pages/CashierProfilePage'
 import CashierCustomerLookupPage from './pages/CashierCustomerLookupPage'
+import type { Role } from './types'
 
-const STAFF_ROLES = ['ADMIN', 'MANAGER', 'CASHIER']
+const STAFF_ROLES: Role[] = ['ADMIN', 'MANAGER', 'CASHIER']
 
-function getDefaultPath(role) {
+function getDefaultPath(role: Role | undefined): string {
   if (role === 'ADMIN' || role === 'MANAGER') return '/dashboard'
   if (role === 'CASHIER') return '/cashier/dashboard'
   return '/login'
@@ -44,25 +46,31 @@ function LoadingScreen() {
   )
 }
 
-function ProtectedRoute({ children, roles }) {
+export interface ProtectedRouteProps {
+  children: ReactNode
+  /** Roles allowed in; any signed-in user when left out */
+  roles?: Role[]
+}
+
+function ProtectedRoute({ children, roles }: ProtectedRouteProps) {
   const { isAuthenticated, isLoading, user } = useAuth()
 
   if (isLoading) return <LoadingScreen />
   if (!isAuthenticated) return <Navigate to="/login" replace />
 
-  if (roles && !roles.includes(user.role)) {
-    return <Navigate to={getDefaultPath(user.role)} replace />
+  if (roles && !(user && roles.includes(user.role))) {
+    return <Navigate to={getDefaultPath(user?.role)} replace />
   }
 
   return children
 }
 
-function PublicRoute({ children }) {
+function PublicRoute({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading, user } = useAuth()
 
   if (isLoading) return <LoadingScreen />
   if (isAuthenticated) {
-    return <Navigate to={getDefaultPath(user.role)} replace />
+    return <Navigate to={getDefaultPath(user?.role)} replace />
   }
 
   return children

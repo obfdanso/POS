@@ -9,15 +9,19 @@ import { SettingsProvider } from './context/SettingsContext'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { OfflineBanner } from './components/OfflineBanner'
 import { initErrorReporting } from './utils/errorReporting'
-import App from './App.jsx'
+import App from './App'
 import './index.css'
 
 // Optional: report crashes to Sentry when VITE_SENTRY_DSN is set at build time
 initErrorReporting()
 
-createRoot(document.getElementById('root')).render(
+// index.html always has it; createRoot would throw without it anyway
+const rootElement = document.getElementById('root')
+if (!rootElement) throw new Error('Missing #root element')
+
+createRoot(rootElement).render(
   <StrictMode>
-    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <BrowserRouter>
       <AuthProvider>
         <BranchProvider>
         <SettingsProvider>

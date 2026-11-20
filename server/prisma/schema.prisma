@@ -62,8 +62,12 @@ model User {
   locked_until          DateTime?
   // Sessions (access/refresh tokens) issued before this moment are rejected, e.g. after a password change
   tokens_valid_after    DateTime?
+  // The branch a cashier or manager works at; always null for admins, who work across branches
+  branch_id             String?
   created_at            DateTime  @default(now())
   updated_at            DateTime  @updatedAt
+
+  branch Branch? @relation(fields: [branch_id], references: [id], onDelete: Restrict)
 
   sales           Sale[]
   inventory_logs  InventoryLog[]
@@ -73,6 +77,47 @@ model User {
   closed_shifts   Shift[]         @relation("ShiftClosedBy")
   refunds         Refund[]
   purchase_orders PurchaseOrder[]
+
+  @@index([branch_id])
+}
+
+// A shop in the chain. Products and prices are shared; each branch keeps its own stock (BranchStock)
+model Branch {
+  id         String   @id @default(uuid())
+  name       String   @unique
+  // Short code shown in lists, e.g. "KSI"
+  code       String   @unique
+  address    String?
+  phone      String?
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  users           User[]
+  stocks          BranchStock[]
+  sales           Sale[]
+  shifts          Shift[]
+  inventory_logs  InventoryLog[]
+  refunds         Refund[]
+  purchase_orders PurchaseOrder[]
+}
+
+// How many of a product a branch holds. No row means the branch doesn't stock that product.
+// quantity >= 0 is enforced by a CHECK constraint in the migration
+model BranchStock {
+  id                  String   @id @default(uuid())
+  branch_id           String
+  product_id          String
+  quantity            Int      @default(0)
+  low_stock_threshold Int      @default(10)
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  branch  Branch  @relation(fields: [branch_id], references: [id], onDelete: Restrict)
+  product Product @relation(fields: [product_id], references: [id], onDelete: Restrict)
+
+  @@unique([branch_id, product_id])
+  @@index([product_id])
 }
 
 model Category {
@@ -101,25 +146,23 @@ model Supplier {
 }
 
 model Product {
-  id                  String   @id @default(uuid())
-  name                String
-  sku                 String   @unique
-  barcode             String?  @unique
-  category_id         String
-  supplier_id         String?
-  price               Decimal  @db.Decimal(10, 2)
-  cost_price          Decimal? @db.Decimal(10, 2)
-  quantity            Int      @default(0)
-  low_stock_threshold Int      @default(10)
-  image_url           String?
-  is_active           Boolean  @default(true)
+  id           String   @id @default(uuid())
+  name         String
+  sku          String   @unique
+  barcode      String?  @unique
+  category_id  String
+  supplier_id  String?
+  price        Decimal  @db.Decimal(10, 2)
+  cost_price   Decimal? @db.Decimal(10, 2)
+  image_url    String?
+  is_active    Boolean  @default(true)
   // Variants (sizes, flavours) are products of their own, with their own SKU, price and stock,
   // grouped under a main product. Only one level: a variant can't have variants
-  parent_id           String?
+  parent_id    String?
   // The option's label, e.g. "1.5L"; required for variants, optional for the main product
-  variant_name        String?
-  created_at          DateTime @default(now())
-  updated_at          DateTime @updatedAt
+  variant_name String?
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
 
   category             Category            @relation(fields: [category_id], references: [id])
   supplier             Supplier?           @relation(fields: [supplier_id], references: [id])
@@ -129,6 +172,7 @@ model Product {
   inventory_logs       InventoryLog[]
   purchase_order_items PurchaseOrderItem[]
   promotions           Promotion[]
+  stocks               BranchStock[]
 
   @@unique([parent_id, variant_name])
   @@index([parent_id])
@@ -182,9 +226,13 @@ model Sale {
   // The cash drawer shift the sale was rung up in
   shift_id String?
 
+  // The branch the sale was made at; its stock was deducted
+  branch_id String
+
   user       User       @relation(fields: [user_id], references: [id])
   customer   Customer?  @relation(fields: [customer_id], references: [id], onDelete: SetNull)
   shift      Shift?     @relation(fields: [shift_id], references: [id], onDelete: SetNull)
+  branch     Branch     @relation(fields: [branch_id], references: [id], onDelete: Restrict)
   sale_items SaleItem[]
   payments   Payment[]
   refunds    Refund[]
@@ -192,6 +240,7 @@ model Sale {
   @@index([transaction_id])
   @@index([created_at])
   @@index([shift_id])
+  @@index([branch_id])
 }
 
 // A cashier's session at the till: opened with a cash float, closed by counting the drawer.
@@ -209,16 +258,20 @@ model Shift {
   closed_at     DateTime?
   closed_by_id  String?
   notes         String?
+  // The branch whose drawer this is
+  branch_id     String
   created_at    DateTime    @default(now())
   updated_at    DateTime    @updatedAt
 
   user      User     @relation("ShiftCashier", fields: [user_id], references: [id])
+  branch    Branch   @relation(fields: [branch_id], references: [id], onDelete: Restrict)
   closed_by User?    @relation("ShiftClosedBy", fields: [closed_by_id], references: [id])
   sales     Sale[]
   refunds   Refund[]
 
   @@index([user_id, status])
   @@index([opened_at])
+  @@index([branch_id])
 }
 
 model SaleItem {
@@ -265,17 +318,21 @@ model Refund {
   gateway_reference String?
   gateway_refund_id String?              @unique
   gateway_error     String?
+  // The branch that processed the return: the goods went back into its stock and its drawer paid out
+  branch_id         String
   created_at        DateTime             @default(now())
   updated_at        DateTime             @updatedAt
 
-  sale  Sale         @relation(fields: [sale_id], references: [id], onDelete: Cascade)
-  user  User         @relation(fields: [user_id], references: [id])
-  shift Shift?       @relation(fields: [shift_id], references: [id], onDelete: SetNull)
-  items RefundItem[]
+  sale   Sale         @relation(fields: [sale_id], references: [id], onDelete: Cascade)
+  user   User         @relation(fields: [user_id], references: [id])
+  shift  Shift?       @relation(fields: [shift_id], references: [id], onDelete: SetNull)
+  branch Branch       @relation(fields: [branch_id], references: [id], onDelete: Restrict)
+  items  RefundItem[]
 
   @@index([sale_id])
   @@index([shift_id])
   @@index([created_at])
+  @@index([branch_id])
 }
 
 model RefundItem {
@@ -317,11 +374,16 @@ model InventoryLog {
   new_quantity      Int
   user_id           String
   notes             String?
+  // The branch whose stock changed
+  branch_id         String
   created_at        DateTime            @default(now())
   updated_at        DateTime            @updatedAt
 
   product Product @relation(fields: [product_id], references: [id], onDelete: Restrict)
   user    User    @relation(fields: [user_id], references: [id])
+  branch  Branch  @relation(fields: [branch_id], references: [id], onDelete: Restrict)
+
+  @@index([branch_id])
 }
 
 // Refresh tokens that were logged out or rotated, kept until they would have expired anyway.
@@ -392,16 +454,20 @@ model PurchaseOrder {
   expected_at   DateTime?
   received_at   DateTime?
   notes         String?
+  // The branch the goods are delivered to
+  branch_id     String
   created_at    DateTime            @default(now())
   updated_at    DateTime            @updatedAt
 
   supplier   Supplier            @relation(fields: [supplier_id], references: [id], onDelete: Restrict)
+  branch     Branch              @relation(fields: [branch_id], references: [id], onDelete: Restrict)
   created_by User                @relation(fields: [created_by_id], references: [id])
   items      PurchaseOrderItem[]
 
   @@index([supplier_id])
   @@index([status])
   @@index([created_at])
+  @@index([branch_id])
 }
 
 model PurchaseOrderItem {

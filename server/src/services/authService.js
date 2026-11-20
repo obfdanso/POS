@@ -83,6 +83,7 @@ async function login(username, password, ipAddress, userAgent) {
     where: {
       username: { equals: username, mode: 'insensitive' },
     },
+    include: { branch: { select: { is_active: true } } },
   })
 
   if (!user) {
@@ -119,6 +120,11 @@ async function login(username, password, ipAddress, userAgent) {
   if (!user.is_active) {
     await logAuthEvent(user.id, 'LOGIN_BLOCKED', ipAddress, userAgent, 'Account deactivated')
     throw new UnauthorizedError('Account is deactivated')
+  }
+
+  if (user.role !== 'ADMIN' && user.branch && !user.branch.is_active) {
+    await logAuthEvent(user.id, 'LOGIN_BLOCKED', ipAddress, userAgent, 'Branch closed')
+    throw new UnauthorizedError('Your branch is closed')
   }
 
   // Reset failed attempts on success
@@ -166,11 +172,14 @@ async function refreshToken(tokenFromCookie) {
 
   const user = await prisma.user.findUnique({
     where: { id: payload.userId },
-    select: { id: true, role: true, is_active: true, tokens_valid_after: true },
+    select: { id: true, role: true, is_active: true, tokens_valid_after: true, branch: { select: { is_active: true } } },
   })
 
   if (!user || !user.is_active) {
     throw new UnauthorizedError('User not found or inactive')
+  }
+  if (user.role !== 'ADMIN' && user.branch && !user.branch.is_active) {
+    throw new UnauthorizedError('Your branch is closed')
   }
   if (issuedBeforeCutoff(payload, user)) {
     throw new UnauthorizedError('Session ended. Please sign in again.')
@@ -199,6 +208,7 @@ async function getMe(userId) {
       role: true,
       is_active: true,
       created_at: true,
+      branch: { select: { id: true, name: true, code: true } },
     },
   })
 

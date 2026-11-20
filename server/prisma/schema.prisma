@@ -114,7 +114,8 @@ model BranchStock {
   updated_at          DateTime @updatedAt
 
   branch  Branch  @relation(fields: [branch_id], references: [id], onDelete: Restrict)
-  product Product @relation(fields: [product_id], references: [id], onDelete: Restrict)
+  // A stock row means nothing without its product (products are only soft-deleted in the app)
+  product Product @relation(fields: [product_id], references: [id], onDelete: Cascade)
 
   @@unique([branch_id, product_id])
   @@index([product_id])

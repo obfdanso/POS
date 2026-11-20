@@ -1,9 +1,22 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
 import { settingsService } from '../services/settings'
 import { useAuth } from '../hooks/useAuth'
 import { setDefaultCurrencySymbol } from '../utils/formatCurrency'
+import type { Settings } from '../types'
 
-const DEFAULT_SETTINGS = {
+export type Theme = 'light' | 'dark' | 'system'
+
+export interface SettingsContextValue extends Settings {
+  /** Reloads the settings; resolves to them, or null if they couldn't be fetched (does nothing without a provider) */
+  refreshSettings: () => Promise<Settings | null> | void
+}
+
+export interface ThemeContextValue {
+  theme: Theme
+  setTheme: (theme: Theme) => void
+}
+
+const DEFAULT_SETTINGS: Settings = {
   store_name: 'QuickMart',
   store_address: '27 Kwame Nkrumah Ave, Kumasi, Ghana',
   store_phone: '032-204-1234',
@@ -14,10 +27,10 @@ const DEFAULT_SETTINGS = {
   receipt_footer: 'Thank you for choosing QuickMart!',
 }
 
-export const SettingsContext = createContext({ ...DEFAULT_SETTINGS, refreshSettings: () => {} })
-export const ThemeContext = createContext({ theme: 'system', setTheme: () => {} })
+export const SettingsContext = createContext<SettingsContextValue>({ ...DEFAULT_SETTINGS, refreshSettings: () => {} })
+export const ThemeContext = createContext<ThemeContextValue>({ theme: 'system', setTheme: () => {} })
 
-function applyTheme(theme) {
+function applyTheme(theme: Theme): void {
   const root = document.documentElement
   if (theme === 'dark') {
     root.classList.add('dark')
@@ -34,12 +47,13 @@ function applyTheme(theme) {
   }
 }
 
-export function SettingsProvider({ children }) {
+export function SettingsProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated } = useAuth()
   const [settings, setSettings] = useState(DEFAULT_SETTINGS)
 
-  const [theme, setThemeState] = useState(() => {
-    return localStorage.getItem('pos-theme') || 'system'
+  const [theme, setThemeState] = useState<Theme>(() => {
+    // Only setTheme writes this key
+    return (localStorage.getItem('pos-theme') as Theme | null) || 'system'
   })
 
   useEffect(() => {
@@ -54,14 +68,14 @@ export function SettingsProvider({ children }) {
     return () => mq.removeEventListener('change', handler)
   }, [theme])
 
-  function setTheme(newTheme) {
+  function setTheme(newTheme: Theme): void {
     localStorage.setItem('pos-theme', newTheme)
     setThemeState(newTheme)
     applyTheme(newTheme)
   }
 
   // Resolves to the loaded settings, or null if they couldn't be fetched
-  const loadSettings = useCallback(() => {
+  const loadSettings = useCallback((): Promise<Settings | null> => {
     return settingsService
       .get()
       .then((res) => {
@@ -86,7 +100,7 @@ export function SettingsProvider({ children }) {
     if (isAuthenticated) loadSettings()
   }, [isAuthenticated, loadSettings])
 
-  const contextValue = {
+  const contextValue: SettingsContextValue = {
     ...settings,
     refreshSettings: loadSettings,
   }
@@ -98,10 +112,10 @@ export function SettingsProvider({ children }) {
   )
 }
 
-export function useSettings() {
+export function useSettings(): SettingsContextValue {
   return useContext(SettingsContext)
 }
 
-export function useTheme() {
+export function useTheme(): ThemeContextValue {
   return useContext(ThemeContext)
 }

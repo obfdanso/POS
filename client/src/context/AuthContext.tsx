@@ -1,16 +1,38 @@
-import { createContext, useReducer, useEffect } from 'react'
+import { createContext, useReducer, useEffect, type ReactNode } from 'react'
 import { setReportingUser } from '../utils/errorReporting'
 import api, { setAccessToken, clearAccessToken, refreshAccessToken } from '../services/api'
+import type { ApiSuccess, User } from '../types'
 
-export const AuthContext = createContext(null)
+/** The user as `POST /auth/login` returns it (the full profile comes from `GET /auth/me`) */
+export type LoginUser = Pick<User, 'id' | 'username' | 'email' | 'full_name' | 'role'>
 
-const initialState = {
+export interface AuthState {
+  user: User | null
+  isAuthenticated: boolean
+  isLoading: boolean
+}
+
+export interface AuthContextValue extends AuthState {
+  login: (username: string, password: string) => Promise<LoginUser>
+  logout: () => Promise<void>
+  refreshUser: () => Promise<void>
+}
+
+type AuthAction =
+  | { type: 'LOGIN_SUCCESS'; payload: { user: User } }
+  | { type: 'LOGOUT' }
+  | { type: 'AUTH_CHECKED' }
+  | { type: 'SET_USER'; payload: User }
+
+export const AuthContext = createContext<AuthContextValue | null>(null)
+
+const initialState: AuthState = {
   user: null,
   isAuthenticated: false,
   isLoading: true,
 }
 
-function authReducer(state, action) {
+function authReducer(state: AuthState, action: AuthAction): AuthState {
   switch (action.type) {
     case 'LOGIN_SUCCESS':
       return {
@@ -39,7 +61,7 @@ function authReducer(state, action) {
   }
 }
 
-export function AuthProvider({ children }) {
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(authReducer, initialState)
 
   // Error reports carry only the signed-in user's ID and role
@@ -54,7 +76,7 @@ export function AuthProvider({ children }) {
     async function checkAuth() {
       try {
         await refreshAccessToken()
-        const meRes = await api.get('/auth/me')
+        const meRes = await api.get<ApiSuccess<User>>('/auth/me')
         dispatch({ type: 'LOGIN_SUCCESS', payload: { user: meRes.data.data } })
       } catch {
         // No valid session — user must log in
@@ -64,18 +86,18 @@ export function AuthProvider({ children }) {
     checkAuth()
   }, [])
 
-  async function login(username, password) {
-    const { data } = await api.post('/auth/login', { username, password })
+  async function login(username: string, password: string): Promise<LoginUser> {
+    const { data } = await api.post<ApiSuccess<{ accessToken: string; user: LoginUser }>>('/auth/login', { username, password })
     const { accessToken, user } = data.data
     setAccessToken(accessToken)
     // Fetch full profile so created_at and all fields are available
-    const meRes = await api.get('/auth/me')
+    const meRes = await api.get<ApiSuccess<User>>('/auth/me')
     const fullUser = meRes.data.data
     dispatch({ type: 'LOGIN_SUCCESS', payload: { user: fullUser } })
     return user
   }
 
-  async function logout() {
+  async function logout(): Promise<void> {
     try {
       await api.post('/auth/logout')
     } finally {
@@ -90,8 +112,8 @@ export function AuthProvider({ children }) {
     }
   }
 
-  async function refreshUser() {
-    const meRes = await api.get('/auth/me')
+  async function refreshUser(): Promise<void> {
+    const meRes = await api.get<ApiSuccess<User>>('/auth/me')
     dispatch({ type: 'SET_USER', payload: meRes.data.data })
   }
 

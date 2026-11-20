@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import toast from 'react-hot-toast'
-import { useCart } from '../context/CartContext'
+import { useCart, type PricedCartItem } from '../context/CartContext'
 import { productsService } from '../services/products'
 import { salesService } from '../services/sales'
 import { customersService } from '../services/customers'
@@ -10,7 +10,8 @@ import { OpenShiftModal, CloseShiftModal } from '../components/ShiftModals'
 import { formatCurrency } from '../utils/formatCurrency'
 import { lineTotal, round2, calculateTotals, maxRedeemablePoints, applyPromotions, bestPromotion } from '../utils/saleTotals'
 import { splitCash } from '../utils/payments'
-import { isNetworkError, newClientRef, queueSale, queuedSales, removeQueued, syncQueuedSales } from '../utils/offlineQueue'
+import { isNetworkError, newClientRef, queueSale, queuedSales, removeQueued, syncQueuedSales, type QueuedSale, type QueuedSalePayload } from '../utils/offlineQueue'
+import { apiErrorBody } from '../utils/apiErrors'
 import { Button } from '../components/Button'
 import { Input } from '../components/Input'
 import { Modal } from '../components/Modal'
@@ -21,10 +22,66 @@ import { useBranch } from '../hooks/useBranch'
 import { BranchSwitcher } from '../components/BranchSwitcher'
 import { useSettings } from '../context/SettingsContext'
 import { DashboardLayout } from '../layouts/DashboardLayout'
+import type {
+  Category,
+  Customer,
+  MoneyLike,
+  PaymentMethod,
+  Product,
+  QueryParams,
+  Sale,
+  ShiftWithSummary,
+  SinglePaymentMethod,
+  SplitPaymentInput,
+} from '../types'
+
+// Paystack's inline script (loaded by index.html) as this page uses it
+interface PaystackSetupOptions {
+  key: string
+  email: string
+  /** In pesewas */
+  amount: number
+  currency: string
+  ref: string
+  channels: string[]
+  metadata: { custom_fields: { display_name: string; variable_name: string; value: string }[] }
+  onClose: () => void
+  callback: (response: { reference: string }) => void
+}
+
+interface PaystackPopup {
+  setup: (options: PaystackSetupOptions) => { openIframe: () => void }
+}
+
+declare global {
+  interface Window {
+    PaystackPop?: PaystackPopup
+  }
+}
+
+type Formatter = (value: MoneyLike | null | undefined) => string
+
+/** The methods Paystack charges: a whole sale, or the non-cash part of a split */
+type PaystackMethod = Exclude<SinglePaymentMethod, 'CASH'>
+
+/** A charge Paystack has taken */
+interface PaystackCharge {
+  method: PaystackMethod
+  total: number
+  reference: string
+  /** A split sale: the cash handed over for the rest */
+  split: { cash: number } | null
+}
+
+/** How the customer paid, as the payment modal hands it to the page */
+export type PaymentConfirmation =
+  | { payment_method: 'CASH'; amount_paid: number; reference?: undefined; payments?: undefined }
+  | { payment_method: PaystackMethod; amount_paid: number; reference: string; payments?: undefined }
+  | { payment_method: 'SPLIT'; payments: SplitPaymentInput[]; reference: string; amount_paid?: undefined }
 
 // ─── Payment Modal ─────────────────────────────────────────────────────────────
 // Suggested cash amounts: exact, then the next round notes above the total
-function quickCashAmounts(total) {
+function quickCashAmounts(total: number): number[] {
   const options = [total]
   for (const step of [5, 10, 20, 50, 100]) {
     const rounded = Math.ceil(total / step) * step
@@ -33,27 +90,44 @@ function quickCashAmounts(total) {
   return options.slice(0, 4)
 }
 
-function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCustomer, onBeforeCharge }) {
+export interface PaymentModalProps {
+  isOpen: boolean
+  onClose: () => void
+  total: number
+  onConfirm: (payment: PaymentConfirmation) => void
+  isLoading: boolean
+  selectedCustomer: Customer | null
+  /** Resolves to true when the total shown is still what the server will charge */
+  onBeforeCharge: () => Promise<boolean>
+}
+
+interface PaymentErrors {
+  amountPaid?: string
+  split?: string
+}
+
+function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCustomer, onBeforeCharge }: PaymentModalProps) {
   const { currency_symbol, store_name } = useSettings()
   const sym = currency_symbol || 'GH₵'
-  const fmt = (v) => formatCurrency(v, sym)
+  const fmt: Formatter = (v) => formatCurrency(v, sym)
 
-  const [method, setMethod] = useState('CASH')
+  const [method, setMethod] = useState<PaymentMethod>('CASH')
   const [amountPaid, setAmountPaid] = useState('')
   // Split payments: the part charged by card or Mobile Money; cash (amountPaid) covers the rest
-  const [splitMethod, setSplitMethod] = useState('MOBILE_MONEY')
+  const [splitMethod, setSplitMethod] = useState<PaystackMethod>('MOBILE_MONEY')
   const [splitAmount, setSplitAmount] = useState('')
-  const [errors, setErrors] = useState({})
+  const [errors, setErrors] = useState<PaymentErrors>({})
   const [isChecking, setIsChecking] = useState(false)
   // A Paystack charge that succeeded; kept so a failed sale is retried without charging again
-  const [paidCharge, setPaidCharge] = useState(null)
+  const [paidCharge, setPaidCharge] = useState<PaystackCharge | null>(null)
 
   const paid = parseFloat(amountPaid)
   const change = method === 'CASH' && paid >= total ? paid - total : 0
   const split = method === 'SPLIT' ? splitCash(total, splitAmount, amountPaid) : null
+  const splitDue = split?.due ?? 0
 
   function validate() {
-    const errs = {}
+    const errs: PaymentErrors = {}
     if (method === 'CASH' && (isNaN(paid) || paid < total)) {
       errs.amountPaid = `Amount must be at least ${fmt(total)}`
     }
@@ -62,7 +136,7 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
   }
 
   // What to send for a charge Paystack has taken (and, for a split, the cash handed over)
-  function chargePayload(charge) {
+  function chargePayload(charge: PaystackCharge): PaymentConfirmation {
     return charge.split
       ? {
           payment_method: 'SPLIT',
@@ -88,11 +162,11 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
       return
     }
 
-    let chargeMethod = method
+    let chargeMethod: PaystackMethod = method === 'SPLIT' ? splitMethod : method
     let amount = total
-    let splitInfo = null
+    let splitInfo: PaystackCharge['split'] = null
     if (method === 'SPLIT') {
-      if (split.error) {
+      if (split?.error) {
         setErrors({ split: split.error })
         return
       }
@@ -126,7 +200,7 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
         toast.error('Payment was cancelled')
       },
       callback: (response) => {
-        const charge = { method: chargeMethod, total: amount, reference: response.reference, split: splitInfo }
+        const charge: PaystackCharge = { method: chargeMethod, total: amount, reference: response.reference, split: splitInfo }
         setPaidCharge(charge)
         onConfirm(chargePayload(charge))
       },
@@ -144,7 +218,7 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
     onClose()
   }
 
-  const methods = [
+  const methods: { value: PaymentMethod; label: string }[] = [
     { value: 'CASH', label: 'Cash' },
     { value: 'MOBILE_MONEY', label: 'Mobile Money' },
     { value: 'CARD', label: 'Card' },
@@ -157,7 +231,7 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
       <div
         className="space-y-4"
         onKeyDown={(e) => {
-          if (e.key !== 'Enter' || method === 'CASH' || e.target.closest('[data-cancel]')) return
+          if (e.key !== 'Enter' || method === 'CASH' || (e.target instanceof Element && e.target.closest('[data-cancel]'))) return
           e.preventDefault()
           handleConfirm()
         }}
@@ -235,7 +309,8 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
                 <select
                   id="split-method"
                   value={splitMethod}
-                  onChange={(e) => setSplitMethod(e.target.value)}
+                  // The options are the two Paystack methods
+                  onChange={(e) => setSplitMethod(e.target.value as PaystackMethod)}
                   disabled={Boolean(paidCharge)}
                   className="block w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
                 >
@@ -262,12 +337,12 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
               value={amountPaid}
               onChange={(e) => { setAmountPaid(e.target.value); setErrors({}) }}
               disabled={Boolean(paidCharge)}
-              placeholder={split?.due > 0 ? split.due.toFixed(2) : ''}
+              placeholder={splitDue > 0 ? splitDue.toFixed(2) : ''}
             />
-            {split?.due > 0 && (
+            {splitDue > 0 && (
               <div className="flex justify-between items-center rounded-lg border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 px-3 py-2 text-sm">
-                <span className="text-gray-600 dark:text-gray-300">Cash due {fmt(split.due)}</span>
-                {split.change !== undefined && <span className="font-bold text-success-700">Change {fmt(split.change)}</span>}
+                <span className="text-gray-600 dark:text-gray-300">Cash due {fmt(splitDue)}</span>
+                {split?.change !== undefined && <span className="font-bold text-success-700">Change {fmt(split.change)}</span>}
               </div>
             )}
             {errors.split && <p className="text-xs text-danger-600 dark:text-danger-400">{errors.split}</p>}
@@ -301,7 +376,15 @@ function PaymentModal({ isOpen, onClose, total, onConfirm, isLoading, selectedCu
 
 // ─── Variant Picker ────────────────────────────────────────────────────────────
 // A product with sizes or flavours: the main product and each active variant are separate options
-function VariantPicker({ product, onClose, onPick, fmt }) {
+export interface VariantPickerProps {
+  /** The product being chosen from, or null when the picker is closed */
+  product: Product | null
+  onClose: () => void
+  onPick: (option: Product) => void
+  fmt: Formatter
+}
+
+function VariantPicker({ product, onClose, onPick, fmt }: VariantPickerProps) {
   const options = product ? [product, ...(product.variants || [])] : []
   return (
     <Modal isOpen={Boolean(product)} onClose={onClose} title={product ? `Choose ${product.name}` : ''} size="sm">
@@ -331,9 +414,16 @@ function VariantPicker({ product, onClose, onPick, fmt }) {
 }
 
 // ─── Customer Search Modal ─────────────────────────────────────────────────────
-function CustomerModal({ isOpen, onClose, onSelect }) {
+export interface CustomerModalProps {
+  isOpen: boolean
+  onClose: () => void
+  /** The chosen customer, or null for a walk-in */
+  onSelect: (customer: Customer | null) => void
+}
+
+function CustomerModal({ isOpen, onClose, onSelect }: CustomerModalProps) {
   const [query, setQuery] = useState('')
-  const [results, setResults] = useState([])
+  const [results, setResults] = useState<Customer[]>([])
   const [isLoading, setIsLoading] = useState(false)
 
   useEffect(() => {
@@ -395,12 +485,20 @@ function CustomerModal({ isOpen, onClose, onSelect }) {
 }
 
 // ─── Cart Item Row ─────────────────────────────────────────────────────────────
-function CartItem({ item, fmt, onUpdate, onRemove, onDiscountChange }) {
+export interface CartItemProps {
+  item: PricedCartItem
+  fmt: Formatter
+  onUpdate: (productId: string, quantity: number) => void
+  onRemove: (productId: string) => void
+  onDiscountChange: (productId: string, discount: number) => void
+}
+
+function CartItem({ item, fmt, onUpdate, onRemove, onDiscountChange }: CartItemProps) {
   // The cashier's discount comes off what is left after any promotion
   const lineGross = round2(round2(parseFloat(item.price) * item.quantity) - (item.promotion_discount || 0))
-  const clampQty = (q) => Math.min(Math.max(q, 1), item.quantity_available)
+  const clampQty = (q: number) => Math.min(Math.max(q, 1), item.quantity_available)
   // What the cashier is typing; lets the box be cleared and retyped without snapping back to 1
-  const [qtyDraft, setQtyDraft] = useState(null)
+  const [qtyDraft, setQtyDraft] = useState<string | null>(null)
   return (
     <div className="py-2.5 border-b border-gray-100 dark:border-gray-800 last:border-0">
       <div className="flex items-start justify-between gap-2">
@@ -486,41 +584,41 @@ function CartItem({ item, fmt, onUpdate, onRemove, onDiscountChange }) {
 }
 
 // ─── Main POSPage ──────────────────────────────────────────────────────────────
-function isTypingTarget(el) {
-  return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)
+function isTypingTarget(el: EventTarget | null): boolean {
+  return el instanceof HTMLElement && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)
 }
 
 export default function POSPage() {
   const { user } = useAuth()
   const { branchId, isAllBranches, branchesLoaded } = useBranch()
   const { loyalty_points_rate, currency_symbol, refreshSettings, require_open_shift } = useSettings()
-  const fmt = (v) => formatCurrency(v, currency_symbol || 'GH₵')
+  const fmt: Formatter = (v) => formatCurrency(v, currency_symbol || 'GH₵')
   const { items, cartDiscount, customer, redeemPoints, maxPoints, pointValue, pointsDiscount, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, setRedeemPoints, clearCart, syncItems, promotions, setPromotions } = useCart()
 
   const [searchQuery, setSearchQuery] = useState('')
-  const [products, setProducts] = useState([])
+  const [products, setProducts] = useState<Product[]>([])
   const [isSearching, setIsSearching] = useState(false)
-  const [categories, setCategories] = useState([])
+  const [categories, setCategories] = useState<Category[]>([])
   const [activeCategory, setActiveCategory] = useState('')
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   // Cash sales saved on this device while the server couldn't be reached
-  const [offlineSales, setOfflineSales] = useState([])
+  const [offlineSales, setOfflineSales] = useState<QueuedSale[]>([])
   const isSyncing = useRef(false)
   // The product whose sizes or flavours are being offered, or null
-  const [choosingVariant, setChoosingVariant] = useState(null)
+  const [choosingVariant, setChoosingVariant] = useState<Product | null>(null)
   const [showReceiptModal, setShowReceiptModal] = useState(false)
   const [showCustomerModal, setShowCustomerModal] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
-  const [completedSale, setCompletedSale] = useState(null)
+  const [completedSale, setCompletedSale] = useState<Sale | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   // undefined while loading, null when no shift is open
-  const [currentShift, setCurrentShift] = useState(undefined)
+  const [currentShift, setCurrentShift] = useState<ShiftWithSummary | null | undefined>(undefined)
   const [showOpenShift, setShowOpenShift] = useState(false)
-  const [closingShift, setClosingShift] = useState(null)
+  const [closingShift, setClosingShift] = useState<ShiftWithSummary | null>(null)
 
-  const searchRef = useRef(null)
+  const searchRef = useRef<HTMLInputElement>(null)
   const barcodeBufferRef = useRef('')
-  const barcodeTimerRef = useRef(null)
+  const barcodeTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   // Latest cart items, readable from long-lived event listeners without stale closures
   const itemsRef = useRef(items)
   itemsRef.current = items
@@ -573,7 +671,7 @@ export default function POSPage() {
   }, [])
 
   // Adds a product unless that would exceed the stock on hand. Returns true when added.
-  const tryAddProduct = useCallback((product) => {
+  const tryAddProduct = useCallback((product: Product) => {
     const inCart = itemsRef.current.find((i) => i.product_id === product.id)?.quantity || 0
     if (product.quantity === 0) {
       toast.error(`${product.name} is out of stock`)
@@ -588,14 +686,14 @@ export default function POSPage() {
   }, [addItem])
 
   // Resolves a typed or scanned code (barcode, SKU, or a unique name match) and adds it to the cart
-  const addByCode = useCallback(async (code) => {
+  const addByCode = useCallback(async (code: string) => {
     const q = code.trim()
     if (!q) return false
     try {
       if (/^\d{6,}$/.test(q)) {
         let notStocked = false
         const res = await productsService.byBarcode(q).catch((err) => {
-          notStocked = err?.response?.data?.error?.message === 'Not stocked at this branch'
+          notStocked = apiErrorBody(err)?.message === 'Not stocked at this branch'
           return null
         })
         if (notStocked) {
@@ -627,7 +725,7 @@ export default function POSPage() {
 
   // Keyboard shortcuts
   useEffect(() => {
-    function onKey(e) {
+    function onKey(e: KeyboardEvent) {
       if (!['F1', 'F2', 'F4'].includes(e.key)) return
       e.preventDefault()
       // Includes dialogs this page doesn't own, such as the sign-out confirmation
@@ -653,7 +751,7 @@ export default function POSPage() {
   receiptOpenRef.current = showReceiptModal
 
   useEffect(() => {
-    function onKeyDown(e) {
+    function onKeyDown(e: KeyboardEvent) {
       if (isTypingTarget(e.target) || scanBlockedRef.current) return
       if (e.key === 'Enter' && barcodeBufferRef.current.length >= 6) {
         // The Enter belongs to the scan, so it must not also activate the focused button
@@ -683,7 +781,7 @@ export default function POSPage() {
     setIsSearching(true)
     const id = setTimeout(async () => {
       try {
-        const params = { per_page: query ? 20 : 40 }
+        const params: QueryParams = { per_page: query ? 20 : 40 }
         // Browsing shows one card per product with its variants; a search finds each variant directly
         if (query) params.search = query
         else params.group_variants = true
@@ -699,8 +797,8 @@ export default function POSPage() {
     return () => { cancelled = true; clearTimeout(id) }
   }, [searchQuery, activeCategory])
 
-  function handleAddProduct(product) {
-    if (product.variants?.length > 0) {
+  function handleAddProduct(product: Product) {
+    if (product.variants?.length) {
       setChoosingVariant(product)
       return
     }
@@ -709,13 +807,13 @@ export default function POSPage() {
     searchRef.current?.focus()
   }
 
-  function handlePickVariant(option) {
+  function handlePickVariant(option: Product) {
     setChoosingVariant(null)
     tryAddProduct(option)
     searchRef.current?.focus()
   }
 
-  async function handleSearchKeyDown(e) {
+  async function handleSearchKeyDown(e: ReactKeyboardEvent<HTMLInputElement>) {
     if (e.key !== 'Enter') return
     e.preventDefault()
     const code = searchQuery
@@ -792,11 +890,11 @@ export default function POSPage() {
     return () => { window.removeEventListener('online', syncOffline); clearInterval(timer) }
   }, [syncOffline, user?.id])
 
-  async function handlePaymentConfirm({ payment_method, amount_paid, reference, payments }) {
+  async function handlePaymentConfirm({ payment_method, amount_paid, reference, payments }: PaymentConfirmation) {
     // One id per sale, so a resend (e.g. from the offline queue) is never recorded twice
     const client_ref = newClientRef()
     setIsSubmitting(true)
-    let payload
+    let payload: QueuedSalePayload | undefined
     try {
       payload = {
         client_ref,
@@ -820,7 +918,7 @@ export default function POSPage() {
       setShowReceiptModal(true)
       clearCart()
       // Reflect the sold quantities in the visible grid
-      const afterSale = (p) => {
+      const afterSale = (p: Product): Product => {
         const sold = sale.items?.find((i) => i.product_id === p.id)
         return sold ? { ...p, quantity: p.quantity - sold.quantity } : p
       }
@@ -828,7 +926,7 @@ export default function POSPage() {
 
       // Track in sessionStorage so the cashier dashboard shows this session's sales only
       try {
-        const prev = JSON.parse(sessionStorage.getItem('pos_session_sales') || '[]')
+        const prev: unknown[] = JSON.parse(sessionStorage.getItem('pos_session_sales') || '[]')
         prev.unshift({
           id: sale.id,
           transaction_id: sale.transaction_id,
@@ -846,7 +944,7 @@ export default function POSPage() {
       // No connection: keep a cash sale on this device and send it later. Card and Mobile Money
       // need Paystack, so they can't be taken offline
       // Points can't be checked offline, so a sale spending them must wait for the connection
-      if (isNetworkError(err) && payment_method === 'CASH' && payload && !payload.redeem_points) {
+      if (isNetworkError(err) && payment_method === 'CASH' && payload && !payload.redeem_points && user) {
         queueSale(user.id, payload, total, branchId)
         setOfflineSales(queuedSales(user.id))
         setShowPaymentModal(false)
@@ -854,7 +952,7 @@ export default function POSPage() {
         toast.success(`No connection. Sale saved on this device; give change of ${formatCurrency(Math.max(0, amount_paid - total), currency_symbol)}. It is sent when the connection is back.`, { duration: 8000 })
         return
       }
-      const apiError = err.response?.data?.error
+      const apiError = apiErrorBody(err)
       toast.error(apiError?.details?.[0]?.message || apiError?.message || 'Failed to process sale')
       // The shift may have been closed elsewhere (e.g. by a manager); show the real state
       if (apiError?.details?.[0]?.field === 'shift') {
@@ -924,7 +1022,7 @@ export default function POSPage() {
                 {offlineSales.filter((e) => e.error).map((e) => (
                   <p key={e.id} className="text-danger-600">
                     Offline sale of {formatCurrency(e.total, currency_symbol)} ({new Date(e.queued_at).toLocaleTimeString('en-GH')}) was refused: {e.error}. Ring it up again or refund the customer.{' '}
-                    <button type="button" onClick={() => { removeQueued(e.id); setOfflineSales(queuedSales(user.id)) }} className="font-semibold underline">Dismiss</button>
+                    <button type="button" onClick={() => { removeQueued(e.id); if (user) setOfflineSales(queuedSales(user.id)) }} className="font-semibold underline">Dismiss</button>
                   </p>
                 ))}
               </div>
@@ -959,7 +1057,7 @@ export default function POSPage() {
         {needsShift && shiftElsewhere && (
           <div className="flex items-center justify-between gap-3 rounded-lg border border-warning-100 bg-warning-50 dark:bg-warning-900/20 px-4 py-3">
             <p className="text-sm text-warning-700 dark:text-warning-400">
-              Your open shift is at {currentShift.branch?.name ?? 'another branch'}. Close it before selling at this branch.
+              Your open shift is at {currentShift?.branch?.name ?? 'another branch'}. Close it before selling at this branch.
             </p>
             <Button size="sm" onClick={startCloseShift}>Close shift</Button>
           </div>
@@ -1042,7 +1140,7 @@ export default function POSPage() {
                 <button
                   key={product.id}
                   onClick={() => handleAddProduct(product)}
-                  disabled={product.variants?.length > 0 ? [product, ...product.variants].every((o) => o.quantity === 0) : product.quantity === 0}
+                  disabled={product.variants?.length ? [product, ...product.variants].every((o) => o.quantity === 0) : product.quantity === 0}
                   className="bg-white dark:bg-gray-900 rounded-xl p-3 text-left shadow-sm border border-gray-100 dark:border-gray-800 transition hover:shadow-md hover:border-primary-300 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {product.image_url ? (
@@ -1066,7 +1164,7 @@ export default function POSPage() {
                       )
                     })()}
                   </p>
-                  {product.variants?.length > 0 ? (
+                  {product.variants?.length ? (
                     <div className="flex items-center justify-between mt-1">
                       <span className="text-sm font-bold text-primary-600">
                         from {fmt(Math.min(...[product, ...product.variants].map((o) => Number(o.price))))}
@@ -1312,7 +1410,7 @@ export default function POSPage() {
         title="Sale Complete — Receipt"
         size="md"
       >
-        <Receipt sale={completedSale} onClose={closeReceipt} />
+        {completedSale && <Receipt sale={completedSale} onClose={closeReceipt} />}
       </Modal>
 
       <CustomerModal

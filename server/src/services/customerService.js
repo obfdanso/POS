@@ -147,6 +147,7 @@ async function getCustomerPurchases(id, { page = 1, per_page = 20, userId } = {}
       include: {
         _count: { select: { sale_items: true } },
         user: { select: { full_name: true } },
+        branch: { select: { name: true, code: true } },
       },
     }),
     prisma.sale.count({ where: { customer_id: id, ...(userId && { user_id: userId }) } }),

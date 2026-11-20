@@ -1,5 +1,5 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
-const { app, prisma, request, createUserWithToken, deleteTestUsers, stockAt } = require('./helpers')
+const { app, prisma, request, createUserWithToken, deleteTestUsers, stockAt, inTestBranch, testBranch } = require('./helpers')
 
 const PREFIX = 'potest'
 let manager, cashier, supplier, otherSupplier, category, rice, oil, soap
@@ -22,7 +22,7 @@ beforeAll(async () => {
   category = await prisma.category.create({ data: { name: 'POTest Category' } })
   const make = (name, sku, quantity, threshold, cost) =>
     prisma.product.create({
-      data: { name, sku, category_id: category.id, supplier_id: supplier.id, price: 50, cost_price: cost, quantity, low_stock_threshold: threshold },
+      data: { name, sku, category_id: category.id, supplier_id: supplier.id, price: 50, cost_price: cost, stocks: inTestBranch(quantity, threshold) },
     })
   rice = await make('POTest Rice 5kg', 'POTEST-RICE', 2, 10, 30)
   oil = await make('POTest Oil 1L', 'POTEST-OIL', 4, 5, 20)
@@ -39,6 +39,8 @@ afterAll(async () => {
   await prisma.category.deleteMany({ where: { id: category.id } })
   await prisma.supplier.deleteMany({ where: { id: { in: [supplier.id, otherSupplier.id] } } })
   await deleteTestUsers(PREFIX)
+  await deleteTestUsers(`${PREFIX}b`)
+  await prisma.branch.deleteMany({ where: { code: 'POB' } })
   await prisma.$disconnect()
 })
 
@@ -158,5 +160,47 @@ describe('Purchase orders', () => {
     const res = await request(app).delete(`/api/suppliers/${supplier.id}`).set(auth(admin))
     expect(res.status).toBe(409)
     await prisma.product.updateMany({ where: { id: { in: [rice.id, oil.id, soap.id] } }, data: { supplier_id: supplier.id } })
+  })
+
+  describe('at another branch', () => {
+    let branchB, managerB, orderB
+
+    beforeAll(async () => {
+      branchB = await prisma.branch.upsert({ where: { code: 'POB' }, update: {}, create: { name: 'POTest Branch', code: 'POB' } })
+      managerB = await createUserWithToken('MANAGER', `${PREFIX}b`, { branchId: branchB.id })
+    })
+
+    it("receives into the order's branch, starting to stock a product the branch didn't carry", async () => {
+      const homeBefore = await stockAt(oil.id)
+      const created = await api.create({ supplier_id: supplier.id, items: [{ product_id: oil.id, quantity: 5, unit_cost: 20 }] }, managerB)
+      expect(created.status).toBe(201)
+      orderB = created.body.data
+      expect(orderB.branch).toMatchObject({ code: 'POB' })
+
+      const received = await request(app).post(`/api/purchase-orders/${orderB.id}/receive`).set(auth(managerB)).send({})
+      expect(received.status).toBe(200)
+      expect(await stockAt(oil.id, branchB.id)).toBe(5)
+      expect(await stockAt(oil.id)).toBe(homeBefore)
+      const log = await prisma.inventoryLog.findFirst({ where: { product_id: oil.id, branch_id: branchB.id } })
+      expect(log).toMatchObject({ change_type: 'RESTOCK', quantity_change: 5 })
+    })
+
+    it("suggests from the branch's own low stock", async () => {
+      const res = await request(app).get(`/api/purchase-orders/suggestions?supplier_id=${supplier.id}`).set(auth(managerB))
+      expect(res.status).toBe(200)
+      const ids = res.body.data.map((r) => r.product_id)
+      // Branch B holds 5 oil (threshold 10) and doesn't stock rice
+      expect(ids).toContain(oil.id)
+      expect(ids).not.toContain(rice.id)
+    })
+
+    it("keeps each branch's managers to their own orders", async () => {
+      const home = await testBranch()
+      const mine = await request(app).get('/api/purchase-orders?per_page=100').set(auth(managerB))
+      expect(mine.body.data.every((o) => o.branch_id === branchB.id)).toBe(true)
+      const theirs = await prisma.purchaseOrder.findFirst({ where: { branch_id: home.id, supplier_id: supplier.id } })
+      expect((await request(app).get(`/api/purchase-orders/${theirs.id}`).set(auth(managerB))).status).toBe(404)
+      expect((await request(app).post(`/api/purchase-orders/${theirs.id}/cancel`).set(auth(managerB)).send({})).status).toBe(404)
+    })
   })
 })

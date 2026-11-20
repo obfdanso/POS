@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken')
 const prisma = require('../utils/prismaClient')
 const { UnauthorizedError, ForbiddenError } = require('../utils/errors')
 const { issuedBeforeCutoff } = require('../services/authService')
+const { resolveBranch } = require('./branch')
 
 async function authenticate(req, res, next) {
   try {
@@ -23,6 +24,8 @@ async function authenticate(req, res, next) {
         role: true,
         is_active: true,
         tokens_valid_after: true,
+        branch_id: true,
+        branch: { select: { is_active: true } },
       },
     })
 
@@ -32,9 +35,15 @@ async function authenticate(req, res, next) {
     if (issuedBeforeCutoff(payload, user)) {
       throw new UnauthorizedError('Session ended. Please sign in again.')
     }
+    // Staff of a closed branch are signed out
+    if (user.role !== 'ADMIN' && user.branch && !user.branch.is_active) {
+      throw new UnauthorizedError('Your branch is closed')
+    }
     delete user.tokens_valid_after
+    delete user.branch
 
     req.user = user
+    await resolveBranch(req)
     next()
   } catch (err) {
     next(err)

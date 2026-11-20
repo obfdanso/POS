@@ -87,13 +87,10 @@ export default function PurchaseOrdersPage() {
               Order stock from suppliers and receive deliveries straight into inventory
             </p>
           </div>
-          <Button
-            onClick={() => setIsCreating(true)}
-            disabled={isAllBranches}
-            title={isAllBranches ? 'Choose the branch the goods are for first' : undefined}
-          >
-            New purchase order
-          </Button>
+          <div className="flex flex-col items-end gap-1">
+            <Button onClick={() => setIsCreating(true)} disabled={isAllBranches}>New purchase order</Button>
+            {isAllBranches && <p className="text-xs text-gray-500 dark:text-gray-400">Choose the branch the goods are for first</p>}
+          </div>
         </div>
 
         <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4">

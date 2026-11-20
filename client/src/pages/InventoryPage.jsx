@@ -218,7 +218,6 @@ export default function InventoryPage() {
             variant="secondary"
             onClick={() => openAdjustModal(row)}
             disabled={isAllBranches}
-            title={isAllBranches ? 'Choose a branch first' : undefined}
           >
             Adjust Stock
           </Button>
@@ -236,7 +235,11 @@ export default function InventoryPage() {
         {/* Page header */}
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Inventory</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Monitor and manage stock levels across all products</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+            {isAllBranches
+              ? 'Stock at every branch. Choose a branch in the header to adjust or restock.'
+              : 'Monitor and manage stock levels across all products'}
+          </p>
         </div>
 
         {/* Stats bar */}

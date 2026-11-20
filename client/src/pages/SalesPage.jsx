@@ -324,14 +324,12 @@ export default function SalesPage() {
               : `${meta.total} sale${meta.total !== 1 ? 's' : ''} in this period · click a sale to reprint its receipt or return items`}
           </p>
         </div>
-        <Button
-          variant="secondary"
-          onClick={() => setIsFinding(true)}
-          disabled={isAllBranches}
-          title={isAllBranches ? 'Choose the branch taking the return first' : undefined}
-        >
-          Return from another branch
-        </Button>
+        <div className="flex flex-col items-end gap-1">
+          <Button variant="secondary" onClick={() => setIsFinding(true)} disabled={isAllBranches}>
+            Return from another branch
+          </Button>
+          {isAllBranches && <p className="text-xs text-gray-500 dark:text-gray-400">Choose the branch taking the return first</p>}
+        </div>
         </div>
 
         {/* Filters */}

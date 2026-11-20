@@ -228,11 +228,57 @@ describe('Selling and returning across branches', () => {
       const reopened = await request(app).get(`/api/sales/${sale.id}`).set(manager.headers)
       expect(reopened.body.data.customer).toEqual({ id: customer.id, name: 'BranchTest Buyer' })
       expect(res.body.data.payments.every((p) => !('reference' in p))).toBe(true)
+      // Nor do the reprinted receipt, an emailed receipt's reply, or the customer's purchase list
+      const receipt = await request(app).get(`/api/sales/${sale.id}/receipt`).set(manager.headers)
+      expect(receipt.body.data.sale.customer).toEqual({ id: customer.id, name: 'BranchTest Buyer' })
+      const purchases = await request(app).get(`/api/customers/${customer.id}/purchases`).set(manager.headers)
+      expect(purchases.body.data[0]).toMatchObject({ id: null, transaction_id: null, other_branch: true })
+      const own = await request(app).get(`/api/customers/${customer.id}/purchases`).set(managerB.headers)
+      expect(own.body.data[0]).toMatchObject({ id: sale.id, transaction_id: sale.transaction_id })
       const audit = await prisma.auditLog.findFirst({ where: { action: 'SALE_LOOKUP', entity_id: sale.id, user_id: manager.user.id } })
       expect(audit).not.toBeNull()
     } finally {
       await prisma.sale.updateMany({ where: { customer_id: customer.id }, data: { customer_id: null } })
       await prisma.customer.delete({ where: { id: customer.id } })
+    }
+  })
+
+  it("counts refunds against the branch that paid them out", async () => {
+    const today = new Date().toISOString().slice(0, 10)
+    const res = await request(app).get(`/api/reports/branch-performance?start_date=${today}&end_date=${today}`).set(admin.headers)
+    const rowA = res.body.data.find((r) => r.code === 'BTA')
+    const paidOutA = await prisma.refund.aggregate({ where: { branch_id: branchA.id }, _sum: { amount: true } })
+    expect(rowA.refunds).toBeCloseTo(parseFloat(paidOutA._sum.amount), 2)
+    expect(rowA.refunds).toBeGreaterThan(0)
+  })
+
+  it("lists unstocked products for managers on request, and variants stocked only here on the till", async () => {
+    // Stocked only at branch B
+    const toaster = await prisma.product.create({
+      data: { name: 'BranchTest Toaster', sku: 'BRANCHTEST-4', category_id: unstocked.category_id, price: 80, stocks: { create: { branch_id: branchB.id, quantity: 1 } } },
+    })
+    const find = (headers, query) => request(app).get(`/api/products?search=BranchTest Toaster&${query}`).set(headers)
+    expect((await find(manager.headers, '')).body.data).toHaveLength(0)
+    const all = (await find(manager.headers, 'include_unstocked=true')).body.data
+    expect(all.map((p) => p.id)).toEqual([toaster.id])
+    expect(all[0].quantity).toBe(0)
+    // Cashiers can't ask for it
+    expect((await find(cashier.headers, 'include_unstocked=true')).body.data).toHaveLength(0)
+
+    const variant = await prisma.product.create({
+      data: {
+        name: 'BranchTest Toaster Big', sku: 'BRANCHTEST-3', category_id: unstocked.category_id, price: 60,
+        parent_id: toaster.id, variant_name: 'Big', stocks: { create: { branch_id: branchA.id, quantity: 1 } },
+      },
+    })
+    try {
+      const till = (await find(cashier.headers, 'group_variants=true')).body.data
+      expect(till.map((p) => p.id)).toEqual([toaster.id])
+      expect(till[0].variants.map((v) => v.id)).toEqual([variant.id])
+    } finally {
+      await prisma.branchStock.deleteMany({ where: { product_id: { in: [variant.id, toaster.id] } } })
+      await prisma.product.delete({ where: { id: variant.id } })
+      await prisma.product.delete({ where: { id: toaster.id } })
     }
   })
 

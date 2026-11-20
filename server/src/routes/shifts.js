@@ -3,9 +3,9 @@ const { body, param, query } = require('express-validator')
 const shiftController = require('../controllers/shiftController')
 const { authenticate } = require('../middleware/auth')
 const { requireBranch } = require('../middleware/branch')
-const validate = require('../middleware/validate')
-const exactBody = require('../middleware/exactBody')
-const paginationRules = require('../middleware/pagination')
+const validate = require('../middleware/validate').default
+const exactBody = require('../middleware/exactBody').default
+const paginationRules = require('../middleware/pagination').default
 const { sortRules } = require('../middleware/sorting')
 const { SHIFT_SORTS } = require('../services/shiftService')
 

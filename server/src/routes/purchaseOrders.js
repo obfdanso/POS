@@ -3,9 +3,9 @@ const { body, param, query } = require('express-validator')
 const controller = require('../controllers/purchaseOrderController')
 const { authenticate, authorize } = require('../middleware/auth')
 const { requireBranch } = require('../middleware/branch')
-const validate = require('../middleware/validate')
-const exactBody = require('../middleware/exactBody')
-const paginationRules = require('../middleware/pagination')
+const validate = require('../middleware/validate').default
+const exactBody = require('../middleware/exactBody').default
+const paginationRules = require('../middleware/pagination').default
 const { sortRules } = require('../middleware/sorting')
 const { PO_SORTS } = require('../services/purchaseOrderService')
 

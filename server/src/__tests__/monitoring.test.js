@@ -1,6 +1,6 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
 const { app, prisma, request } = require('./helpers')
-const errorHandler = require('../middleware/errorHandler')
+const errorHandler = require('../middleware/errorHandler').default
 
 afterAll(() => prisma.$disconnect())
 

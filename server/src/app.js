@@ -9,8 +9,8 @@ const morgan = require('morgan')
 const path = require('path')
 
 const { logger, morganStream } = require('./middleware/logger')
-const errorHandler = require('./middleware/errorHandler')
-const requestId = require('./middleware/requestId')
+const errorHandler = require('./middleware/errorHandler').default
+const requestId = require('./middleware/requestId').default
 const prisma = require('./utils/prismaClient').default
 const authRoutes = require('./routes/auth')
 const productRoutes = require('./routes/products')

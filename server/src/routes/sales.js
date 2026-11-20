@@ -4,8 +4,8 @@ const rateLimit = require('express-rate-limit')
 const salesController = require('../controllers/salesController')
 const { authenticate, authorize } = require('../middleware/auth')
 const { requireBranch } = require('../middleware/branch')
-const validate = require('../middleware/validate')
-const exactBody = require('../middleware/exactBody')
+const validate = require('../middleware/validate').default
+const exactBody = require('../middleware/exactBody').default
 const { sortRules } = require('../middleware/sorting')
 const { SALE_SORTS } = require('../services/salesService')
 

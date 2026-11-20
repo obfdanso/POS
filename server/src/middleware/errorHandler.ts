@@ -1,10 +1,38 @@
-const fs = require('fs')
-const multer = require('multer')
-const { logger } = require('./logger')
-const { reportError } = require('../utils/errorReporting')
+import fs from 'fs'
+import multer from 'multer'
+import type { NextFunction, Request, Response } from 'express'
+import { logger } from './logger'
+import { reportError } from '../utils/errorReporting'
+import type { ErrorDetail } from '../utils/errors'
+
+/**
+ * The fields read here from whatever was thrown: our AppErrors, body-parser, multer, Prisma and
+ * jsonwebtoken errors all reach this handler.
+ */
+interface HandledError {
+  message: string
+  stack?: string
+  name?: string
+  // body-parser
+  type?: string
+  expose?: boolean
+  status?: number
+  // AppError
+  isOperational?: boolean
+  statusCode?: number
+  details?: ErrorDetail[]
+  // AppError, Prisma and PostgreSQL error codes
+  code?: string
+  meta?: { field_name?: unknown }
+}
+
+interface ErrorBody {
+  success: false
+  error: { code?: string; message: string; details?: ErrorDetail[] }
+}
 
 // Express recognises error handlers by their four parameters, so `_next` must stay
-function errorHandler(err, req, res, _next) {
+function errorHandler(err: HandledError, req: Request, res: Response, _next: NextFunction) {
   // Log the error with its request ID
   const tag = req.id ? `[${req.id}] ` : ''
   if (process.env.NODE_ENV === 'development') {
@@ -27,7 +55,7 @@ function errorHandler(err, req, res, _next) {
   }
 
   // Other body-parser client errors (e.g. body too large, unsupported charset)
-  if (err.expose && err.status >= 400 && err.status < 500 && !err.isOperational) {
+  if (err.expose && err.status !== undefined && err.status >= 400 && err.status < 500 && !err.isOperational) {
     return res.status(err.status).json({
       success: false,
       error: { code: err.status === 413 ? 'PAYLOAD_TOO_LARGE' : 'BAD_REQUEST', message: err.message },
@@ -106,9 +134,9 @@ function errorHandler(err, req, res, _next) {
     })
   }
 
-  // Handle operational errors (our custom AppErrors)
-  if (err.isOperational) {
-    const response = {
+  // Handle operational errors (our custom AppErrors, which always have a statusCode)
+  if (err.isOperational && err.statusCode !== undefined) {
+    const response: ErrorBody = {
       success: false,
       error: {
         code: err.code,
@@ -138,4 +166,4 @@ function errorHandler(err, req, res, _next) {
   })
 }
 
-module.exports = errorHandler
+export default errorHandler

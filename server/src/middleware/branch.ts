@@ -1,7 +1,8 @@
-const prisma = require('../utils/prismaClient').default
-const { ValidationError } = require('../utils/errors')
+import type { NextFunction, Request, Response } from 'express'
+import prisma from '../utils/prismaClient'
+import { UnauthorizedError, ValidationError } from '../utils/errors'
 
-const branchError = (message) => new ValidationError(message, [{ field: 'branch', message }])
+const branchError = (message: string) => new ValidationError(message, [{ field: 'branch', message }])
 
 /**
  * Work out which branch a request acts on and put it on `req.branchId` (null = all branches).
@@ -9,7 +10,8 @@ const branchError = (message) => new ValidationError(message, [{ field: 'branch'
  * with the `X-Branch-Id` header (a closed branch only for reading); without it they see all branches.
  * Runs inside `authenticate`, after `req.user` is set.
  */
-async function resolveBranch(req) {
+export async function resolveBranch(req: Request): Promise<void> {
+  if (!req.user) throw new UnauthorizedError('Not authenticated')
   if (req.user.role !== 'ADMIN') {
     req.branchId = req.user.branch_id
     return
@@ -30,9 +32,7 @@ async function resolveBranch(req) {
 }
 
 /** For actions that change stock or money: an admin viewing all branches must pick one first. */
-function requireBranch(req, res, next) {
+export function requireBranch(req: Request, res: Response, next: NextFunction) {
   if (!req.branchId) return next(branchError('Choose a branch first'))
   next()
 }
-
-module.exports = { resolveBranch, requireBranch }

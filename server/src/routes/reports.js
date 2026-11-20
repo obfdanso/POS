@@ -2,7 +2,7 @@ const express = require('express')
 const { query } = require('express-validator')
 const reportController = require('../controllers/reportController')
 const { authenticate, authorize } = require('../middleware/auth')
-const validate = require('../middleware/validate')
+const validate = require('../middleware/validate').default
 
 const router = express.Router()
 

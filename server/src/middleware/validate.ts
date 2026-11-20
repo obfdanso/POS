@@ -1,18 +1,20 @@
-const { validationResult } = require('express-validator')
-const { ValidationError } = require('../utils/errors')
+import { validationResult } from 'express-validator'
+import type { NextFunction, Request, Response } from 'express'
+import { ValidationError } from '../utils/errors'
 
-function validate(req, res, next) {
+function validate(req: Request, res: Response, next: NextFunction) {
   const errors = validationResult(req)
   if (!errors.isEmpty()) {
     const details = errors.array().flatMap((err) =>
       // checkExact reports every unexpected field in one error
       err.type === 'unknown_fields'
         ? err.fields.map((f) => ({ field: f.path, message: `Unexpected field "${f.path}"` }))
-        : [{ field: err.path || err.param, message: err.msg }]
+        : // Only field errors have a path (no route uses oneOf, which reports alternatives)
+          [{ field: err.type === 'field' ? err.path : '', message: err.msg }]
     )
     return next(new ValidationError('Validation failed', details))
   }
   next()
 }
 
-module.exports = validate
+export default validate

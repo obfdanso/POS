@@ -1,8 +1,8 @@
 const express = require('express')
 const { body } = require('express-validator')
 const { authenticate, authorize } = require('../middleware/auth')
-const validate = require('../middleware/validate')
-const exactBody = require('../middleware/exactBody')
+const validate = require('../middleware/validate').default
+const exactBody = require('../middleware/exactBody').default
 const prisma = require('../utils/prismaClient').default
 const { recordAudit } = require('../utils/audit')
 

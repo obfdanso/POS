@@ -3,8 +3,8 @@ const { body } = require('express-validator')
 const rateLimit = require('express-rate-limit')
 const authController = require('../controllers/authController')
 const { authenticate } = require('../middleware/auth')
-const validate = require('../middleware/validate')
-const exactBody = require('../middleware/exactBody')
+const validate = require('../middleware/validate').default
+const exactBody = require('../middleware/exactBody').default
 
 const router = express.Router()
 

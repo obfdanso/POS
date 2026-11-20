@@ -2,8 +2,8 @@ const express = require('express')
 const { body, param, query } = require('express-validator')
 const controller = require('../controllers/promotionController')
 const { authenticate, authorize } = require('../middleware/auth')
-const validate = require('../middleware/validate')
-const exactBody = require('../middleware/exactBody')
+const validate = require('../middleware/validate').default
+const exactBody = require('../middleware/exactBody').default
 
 const router = express.Router()
 

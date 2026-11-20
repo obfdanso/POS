@@ -79,7 +79,7 @@ describe('error handler', () => {
     let errorHandler, ValidationError
     jest.isolateModules(() => {
       require('../utils/errorReporting').initErrorReporting()
-      errorHandler = require('../middleware/errorHandler')
+      errorHandler = require('../middleware/errorHandler').default
       ValidationError = require('../utils/errors').ValidationError
     })
     const res = () => ({ status: jest.fn().mockReturnThis(), json: jest.fn() })

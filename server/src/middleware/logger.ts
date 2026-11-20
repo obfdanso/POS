@@ -1,5 +1,5 @@
-const winston = require('winston')
-const path = require('path')
+import winston from 'winston'
+import path from 'path'
 
 const { combine, timestamp, printf, colorize, errors } = winston.format
 
@@ -7,7 +7,7 @@ const logFormat = printf(({ level, message, timestamp, stack }) => {
   return `${timestamp} [${level}]: ${stack || message}`
 })
 
-const logger = winston.createLogger({
+export const logger = winston.createLogger({
   level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
   format: combine(
     timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
@@ -28,8 +28,6 @@ const logger = winston.createLogger({
   ],
 })
 
-const morganStream = {
-  write: (message) => logger.info(message.trim()),
+export const morganStream = {
+  write: (message: string) => logger.info(message.trim()),
 }
-
-module.exports = { logger, morganStream }

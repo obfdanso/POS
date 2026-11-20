@@ -1,6 +1,6 @@
 const express = require('express')
 const { body } = require('express-validator')
-const validate = require('../middleware/validate')
+const validate = require('../middleware/validate').default
 const { isValidPaystackSignature } = require('../utils/paystack')
 const { applyRefundWebhook } = require('../services/gatewayRefundService')
 const { logger } = require('../middleware/logger')

@@ -9,4 +9,6 @@ export const reportsService = {
   cashierPerformance: (params) => api.get('/reports/cashier-performance', { params }),
   inventoryStatus: () => api.get('/reports/inventory-status'),
   profit: (params) => api.get('/reports/profit', { params }),
+  // Every branch side by side (admins viewing all branches)
+  branchPerformance: (params) => api.get('/reports/branch-performance', { params }),
 }

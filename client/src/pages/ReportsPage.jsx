@@ -21,6 +21,7 @@ import { reportsService } from '../services/reports'
 import { formatCurrency } from '../utils/formatCurrency'
 import { useSettings } from '../context/SettingsContext'
 import { daysFromToday } from '../utils/date'
+import { useBranch } from '../hooks/useBranch'
 
 const PIE_COLORS = ['#2563EB', '#16A34A', '#D97706', '#DC2626', '#7C3AED', '#0891B2']
 
@@ -47,6 +48,13 @@ const categoryColumns = [
   { key: 'label', label: 'Category', sortable: true },
   { key: 'quantity', label: 'Units Sold', sortable: true },
   { key: 'value', label: 'Revenue', sortable: true, render: money },
+]
+
+const branchColumns = [
+  { key: 'label', label: 'Branch', sortable: true },
+  { key: 'transactions', label: 'Transactions', sortable: true },
+  { key: 'refunds', label: 'Returned', sortable: true, render: money },
+  { key: 'value', label: 'Revenue (after returns)', sortable: true, render: money },
 ]
 
 const cashierColumns = [
@@ -112,6 +120,10 @@ function exportCsv(filename, headers, rows) {
 
 export default function ReportsPage() {
   const { currency_symbol } = useSettings()
+  // Comparing branches only makes sense when an admin is looking at all of them
+  const { isAllBranches } = useBranch()
+  const tabs = isAllBranches ? [...TABS, { id: 'branches', label: 'Branches' }] : TABS
+  const [branchData, setBranchData] = useState([])
   const [activeTab, setActiveTab] = useState('summary')
   // Defaults to the last 30 days on every visit
   const [startDate, setStartDate] = useState(() => daysFromToday(-29))
@@ -155,6 +167,10 @@ export default function ReportsPage() {
           const res = await reportsService.cashierPerformance(params)
           if (isStale()) return
           setCashierData(res.data?.data ?? res.data ?? [])
+        } else if (tab === 'branches') {
+          const res = await reportsService.branchPerformance(params)
+          if (isStale()) return
+          setBranchData(res.data?.data ?? [])
         } else if (tab === 'profit') {
           const res = await reportsService.profit(params)
           if (isStale()) return
@@ -208,6 +224,9 @@ export default function ReportsPage() {
   }
   function exportCategory() {
     exportCsv('category-performance.csv', ['Category', 'Revenue'], catData.map((c) => [c.label, c.value ?? 0]))
+  }
+  function exportBranches() {
+    exportCsv('branch-performance.csv', ['Branch', 'Transactions', 'Returned', 'Revenue'], branchData.map((b) => [b.label, b.transactions, b.refunds, b.value]))
   }
   function exportCashier() {
     exportCsv(
@@ -269,7 +288,7 @@ export default function ReportsPage() {
         {/* Tabs */}
         <div className="border-b border-gray-200 dark:border-gray-800">
           <nav className="-mb-px flex gap-1 overflow-x-auto">
-            {TABS.map((tab) => (
+            {tabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => handleTabChange(tab.id)}
@@ -396,6 +415,39 @@ export default function ReportsPage() {
           )}
 
           {/* Cashier Performance */}
+          {activeTab === 'branches' && isAllBranches && (
+            <div className="space-y-4">
+              <div className="flex justify-end">
+                <Button variant="secondary" size="sm" onClick={exportBranches}>
+                  Export CSV
+                </Button>
+              </div>
+              {loading ? (
+                <Spinner />
+              ) : branchData.length === 0 ? (
+                <p className="text-center text-gray-400 py-10">No data available</p>
+              ) : (
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                  <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-xl shadow-sm overflow-hidden">
+                    <Table columns={branchColumns} data={branchData} />
+                  </div>
+                  <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-xl shadow-sm p-6">
+                    <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-4">Revenue by branch</h2>
+                    <ResponsiveContainer width="100%" height={280}>
+                      <BarChart data={branchData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                        <XAxis dataKey="label" tick={{ fontSize: 12 }} tickLine={false} />
+                        <YAxis tickFormatter={(v) => `${currency_symbol || 'GH₵'}${v}`} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={72} />
+                        <Tooltip formatter={(v) => [formatCurrency(v), 'Revenue']} />
+                        <Bar dataKey="value" fill="#0d9488" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {activeTab === 'cashier' && (
             <div className="space-y-4">
               <div className="flex justify-end">

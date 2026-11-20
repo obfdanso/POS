@@ -49,6 +49,16 @@ Every endpoint except `POST /auth/login` and `POST /auth/refresh` needs an acces
 - **Money** is returned as decimal strings, e.g. `"12.5"`. Format it for display on the client.
 - **Audit trail**: refunds (full and partial), shift closes, product (de)activation, supplier deletion, settings changes, and user creation, changes, and password resets are recorded in the `AuditLog` table with the user who did them. Stock changes are recorded in `InventoryLog`, and logins in `AuthLog`.
 
+### Branches: which shop a request acts on
+
+QuickMart runs as a chain. Products and prices are shared; stock, sales, shifts, returns, purchase orders and reports belong to a branch.
+
+- **Cashiers and managers** always act on their own branch (`User.branch_id`). A branch header they send is ignored. Someone with no branch gets `403`.
+- **Admins** choose one with the `X-Branch-Id` header. Without it they see **all branches** combined: lists show every branch's rows and reports add them up.
+- Anything that changes stock or money (sell, return, adjust, restock, open a shift, create a purchase order) needs a branch. An admin sending none gets `422` with `details: [{ "field": "branch", "message": "Choose a branch first" }]`.
+- A closed branch (`is_active: false`) can still be read by an admin, but writes return `422` "That branch is closed". Its staff are signed out and can't log in (`401`).
+- Product and inventory responses keep the fields `quantity` and `low_stock_threshold`, filled from the acting branch's stock (or summed across branches).
+
 ### Rate limits (per IP)
 
 | Endpoint | Limit |
@@ -93,6 +103,21 @@ Signs out every **other** session of this user. The response carries a new `acce
 
 ---
 
+## Branches
+
+### GET /branches
+Open branches (`?active=true`, and always for non-admins) as `[{ id, name, code }]`. Admins without `active` get every branch with all fields.
+
+### GET /branches/:id — ADMIN
+
+### POST /branches — ADMIN
+Body: `name` (2–80 chars, unique), `code` (2–6 capital letters, unique), optional `address`, `phone` (printed on that branch's receipts; blank uses the store's). `409` on a duplicate name or code. Audited as `BRANCH_CREATED`.
+
+### PUT /branches/:id — ADMIN
+Any of the create fields plus `is_active` (closing or reopening). There is no delete: a branch with history is closed instead. Closing a branch with an open shift is refused (`422`, field `is_active`). Audited as `BRANCH_UPDATED`.
+
+---
+
 ## Products
 
 ### GET /products — *sortable*
@@ -106,6 +131,9 @@ Includes `parent` for a variant, and `variants` (all of them, by option name) fo
 ### GET /products/barcode/:code
 Exact barcode lookup, used by the POS scanner. Inactive products return `404`.
 
+### Branch stock on products
+Product responses include `quantity`, `low_stock_threshold` and `stocked` for the acting branch. `GET /products/:id` also returns `stocks: [{ branch_id, branch, quantity, low_stock_threshold }]`: every branch's row for admins, only their own branch's for staff. A branch only lists, sells and scans the products it stocks; `GET /products/barcode/:code` answers `404` "Not stocked at this branch" for one it doesn't.
+
 ### POST /products — ADMIN, MANAGER
 JSON, or `multipart/form-data` when uploading an `image` (JPG/PNG/WebP, max 5 MB).
 
@@ -113,7 +141,11 @@ JSON, or `multipart/form-data` when uploading an `image` (JPG/PNG/WebP, max 5 MB
 
 **Variants** (sizes, flavours) are products of their own, with their own SKU, barcode, price and stock, so sales, inventory, purchase orders and reports treat them like any product. Send `parent_id` (a main product, which can't itself be a variant) and `variant_name` (e.g. `"1.5L"`, max 50 characters) to create one. A variant must be in its main product's category. Option names are unique within a group, ignoring case (`409`); the main product can have one too. `422` for a missing name, a variant of a variant, another category, or a missing main product.
 
+`stocks` (optional): `[{ branch_id, quantity?, low_stock_threshold? }]`, the branches that stock the new product with a starting quantity (logged as `RESTOCK` "Starting stock"). Sent as JSON text in a multipart form. Left out, an admin's product goes to every open branch and a manager's to their own; a top-level `quantity`/`low_stock_threshold` then applies to the acting branch (an admin viewing all branches gets `422` asking which branch). Managers may only list their own branch (`403` otherwise).
+
 ### PUT /products/:id — ADMIN, MANAGER
+`stocks` (optional) is the full list of branches that should stock it (a manager's list covers only their own branch). New branches are added with their starting quantity; listed ones get their low-stock level updated; branches left out stop stocking it, which is refused (`422`, field `stocks`) while they still hold stock. Closed branches' rows are left alone. A top-level `low_stock_threshold` sets the acting branch's level.
+
 Any of the create fields **except `quantity` and `parent_id`**, which are rejected with `422`: stock only changes through the inventory endpoints, so every change is logged, and a product's variant group is fixed when it is created. Send `image_url: null` to remove the image, or upload a new `image`. Changing `is_active` is **ADMIN only**. A variant's name can't be cleared and its category can't change; changing a main product's category moves its variants too.
 
 ### DELETE /products/:id — ADMIN
@@ -220,6 +252,9 @@ Each row includes `user`, `customer`, and `items_count`.
 
 ### GET /sales/:id
 The full sale with `items`, `payment`, cashier, and customer. Cashiers can only open their own.
+
+### GET /sales/lookup/:transactionId — ADMIN, MANAGER
+A sale from **any branch** by the transaction ID on its receipt, so items bought at one branch can be returned at another. Returns only what a return needs: the customer's name but no contact details, and no payment references. Every lookup is audited (`SALE_LOOKUP`) and limited to 20 a minute per user. Returned goods go into the stock of the branch processing the return, and cash comes out of its drawer (`Refund.branch_id`); the sale's figures stay with the branch that made it.
 
 ### GET /sales/:id/receipt
 Receipt data for reprinting: `{ "store": { "name", "address", "phone" }, "sale": { … } }`.
@@ -438,3 +473,6 @@ Checks the database too: `200` with `{ "status": "ready", "database": "ok", "dat
 | 429 | `RATE_LIMIT` / `RATE_LIMITED` | Too many requests |
 | 500 | `INTERNAL_ERROR` | Unexpected server error |
 | 503 | `INTERNAL_ERROR` | Paystack verification unavailable |
+
+### GET /reports/branch-performance — ADMIN
+Every branch side by side for the date range: `[{ id, label, code, value, transactions, refunds }]` where `value` is revenue after returns. Every other report covers the acting branch, or all branches for an admin without a branch header.

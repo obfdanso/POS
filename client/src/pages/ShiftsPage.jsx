@@ -13,6 +13,7 @@ import { usersService } from '../services/users'
 import { formatCurrency } from '../utils/formatCurrency'
 import { daysFromToday } from '../utils/date'
 import { getErrorMessage } from '../utils/apiErrors'
+import { useBranch } from '../hooks/useBranch'
 
 const selectClass =
   'block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
@@ -103,6 +104,7 @@ function ShiftDetailModal({ shiftId, onClose, onChanged }) {
 }
 
 export default function ShiftsPage() {
+  const { isAllBranches } = useBranch()
   const [shifts, setShifts] = useState([])
   const [meta, setMeta] = useState({ page: 1, total_pages: 1, total: 0 })
   const [isLoading, setIsLoading] = useState(true)
@@ -155,6 +157,7 @@ export default function ShiftsPage() {
 
   const columns = [
     { key: 'opened_at', label: 'Opened', sortable: true, render: (v) => formatDateTime(v) },
+    ...(isAllBranches ? [{ key: 'branch', label: 'Branch', render: (v) => v?.name ?? '—' }] : []),
     { key: 'user', label: 'Cashier', sortable: true, sortKey: 'cashier', render: (v) => v?.full_name ?? '—' },
     { key: 'closed_at', label: 'Closed', sortable: true, render: (v, row) => (row.status === 'OPEN' ? <Badge variant="success">Open</Badge> : formatDateTime(v)) },
     { key: 'sales_count', label: 'Sales' },

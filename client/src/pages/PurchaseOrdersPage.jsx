@@ -10,6 +10,7 @@ import { purchaseOrdersService } from '../services/purchaseOrders'
 import { formatCurrency } from '../utils/formatCurrency'
 import { getErrorMessage } from '../utils/apiErrors'
 import { PO_STATUS } from '../utils/purchaseOrders'
+import { useBranch } from '../hooks/useBranch'
 
 const selectClass =
   'block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
@@ -17,6 +18,7 @@ const selectClass =
 const formatDate = (value) => (value ? new Date(value).toLocaleDateString('en-GH', { day: '2-digit', month: 'short', year: 'numeric' }) : '—')
 
 export default function PurchaseOrdersPage() {
+  const { isAllBranches } = useBranch()
   const [orders, setOrders] = useState([])
   const [meta, setMeta] = useState({ page: 1, total_pages: 1, total: 0 })
   const [isLoading, setIsLoading] = useState(true)
@@ -66,6 +68,7 @@ export default function PurchaseOrdersPage() {
   const columns = [
     { key: 'po_number', label: 'Order', sortable: true },
     { key: 'created_at', label: 'Ordered', sortable: true, render: (v) => formatDate(v) },
+    ...(isAllBranches ? [{ key: 'branch', label: 'Deliver to', render: (v) => v?.name ?? '—' }] : []),
     { key: 'supplier', label: 'Supplier', sortable: true, render: (v) => v?.name ?? '—' },
     { key: 'item_count', label: 'Items' },
     { key: 'units_received', label: 'Received', render: (v, row) => `${v} of ${row.units_ordered}` },
@@ -84,7 +87,13 @@ export default function PurchaseOrdersPage() {
               Order stock from suppliers and receive deliveries straight into inventory
             </p>
           </div>
-          <Button onClick={() => setIsCreating(true)}>New purchase order</Button>
+          <Button
+            onClick={() => setIsCreating(true)}
+            disabled={isAllBranches}
+            title={isAllBranches ? 'Choose the branch the goods are for first' : undefined}
+          >
+            New purchase order
+          </Button>
         </div>
 
         <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4">

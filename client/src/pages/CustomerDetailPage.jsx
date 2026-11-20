@@ -86,6 +86,7 @@ export default function CustomerDetailPage() {
           ? new Date(v).toLocaleDateString('en-GH', { day: '2-digit', month: 'short', year: 'numeric' })
           : '—',
     },
+    { key: 'branch', label: 'Branch', render: (v) => v?.name ?? '—' },
     {
       key: 'items_count',
       label: 'Items',

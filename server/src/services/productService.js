@@ -2,6 +2,7 @@ const prisma = require('../utils/prismaClient')
 const { buildOrderBy } = require('../middleware/sorting')
 const { recordAudit } = require('../utils/audit')
 const { NotFoundError, ConflictError, ForbiddenError, ValidationError } = require('../utils/errors')
+const { changeStock, branchStockFor, withStock } = require('../utils/branchStock')
 
 const PARENT = { select: { id: true, name: true, variant_name: true } }
 const PRODUCT_INCLUDE = {
@@ -9,10 +10,24 @@ const PRODUCT_INCLUDE = {
   supplier: { select: { id: true, name: true } },
   parent: PARENT,
 }
-// What a product page or the till needs to know about each variant
+// What a product page or the till needs to know about each variant (stock is added per branch)
 const VARIANT_SELECT = {
   id: true, name: true, variant_name: true, sku: true, barcode: true, price: true, cost_price: true,
-  quantity: true, low_stock_threshold: true, is_active: true, image_url: true, category_id: true,
+  is_active: true, image_url: true, category_id: true,
+}
+const STOCKS_INCLUDE = {
+  stocks: {
+    select: { branch_id: true, quantity: true, low_stock_threshold: true, branch: { select: { name: true, code: true } } },
+    orderBy: { branch: { name: 'asc' } },
+  },
+}
+const stockedAt = (branchId) => (branchId ? { stocks: { some: { branch_id: branchId } } } : {})
+
+/** Attach the acting branch's (or all branches') stock to products and their variants. */
+async function attachStock(products, branchId) {
+  const ids = products.flatMap((p) => [p.id, ...(p.variants || []).map((v) => v.id)])
+  const stock = await branchStockFor(ids, branchId)
+  return products.map((p) => withStock(p, stock))
 }
 
 // status: 'active' (default), 'inactive', or 'all'
@@ -22,7 +37,8 @@ const PRODUCT_SORTS = {
   category: (dir) => [{ category: { name: dir } }, { name: 'asc' }],
   price: (dir) => ({ price: dir }),
   cost_price: (dir) => ({ cost_price: { sort: dir, nulls: 'last' } }),
-  quantity: (dir) => ({ quantity: dir }),
+  // Stock lives per branch, so listProducts sorts by it separately
+  quantity: null,
   is_active: (dir) => ({ is_active: dir }),
   created_at: (dir) => ({ created_at: dir }),
 }
@@ -30,8 +46,10 @@ const PRODUCT_SORTS = {
 /**
  * With `group_variants`, only main products are listed, each with its active `variants`, so the
  * till can show one card per product and offer its sizes or flavours.
+ * With a `branchId`, only products that branch stocks are listed, with its quantities; without one
+ * (an admin viewing all branches) every product is listed with quantities summed across branches.
  */
-async function listProducts({ page = 1, per_page = 20, search, category_id, status = 'active', group_variants = false, sort, order } = {}) {
+async function listProducts({ page = 1, per_page = 20, search, category_id, status = 'active', group_variants = false, sort, order, branchId = null } = {}) {
   const skip = (page - 1) * per_page
   const take = Math.min(per_page, 100)
 
@@ -49,41 +67,95 @@ async function listProducts({ page = 1, per_page = 20, search, category_id, stat
       { barcode: { contains: search, mode: 'insensitive' } },
     ]
   }
+  Object.assign(where, stockedAt(branchId))
 
-  const [products, total] = await Promise.all([
-    prisma.product.findMany({
+  const include = {
+    ...PRODUCT_INCLUDE,
+    _count: { select: { variants: true } },
+    ...(group_variants && {
+      variants: { where: { is_active: true, ...stockedAt(branchId) }, select: VARIANT_SELECT, orderBy: [{ variant_name: 'asc' }] },
+    }),
+  }
+
+  let products
+  const total = await prisma.product.count({ where })
+  if (sort === 'quantity') {
+    // Order by the branch's stock (or the chain's total), then load that page of products
+    const groups = await prisma.branchStock.groupBy({
+      by: ['product_id'],
+      where: { ...(branchId && { branch_id: branchId }), product: where },
+      _sum: { quantity: true },
+      orderBy: [{ _sum: { quantity: order === 'desc' ? 'desc' : 'asc' } }, { product_id: 'asc' }],
+      skip,
+      take,
+    })
+    const found = await prisma.product.findMany({ where: { id: { in: groups.map((g) => g.product_id) } }, include })
+    const byId = new Map(found.map((p) => [p.id, p]))
+    products = groups.map((g) => byId.get(g.product_id)).filter(Boolean)
+  } else {
+    products = await prisma.product.findMany({
       where,
       skip,
       take,
-      include: {
-        ...PRODUCT_INCLUDE,
-        _count: { select: { variants: true } },
-        ...(group_variants && {
-          variants: { where: { is_active: true }, select: VARIANT_SELECT, orderBy: [{ variant_name: 'asc' }] },
-        }),
-      },
+      include,
       orderBy: buildOrderBy({ sort, order }, PRODUCT_SORTS, { name: 'asc' }),
-    }),
-    prisma.product.count({ where }),
-  ])
+    })
+  }
 
-  return { products, total, page, per_page: take, total_pages: Math.ceil(total / take) }
+  return { products: await attachStock(products, branchId), total, page, per_page: take, total_pages: Math.ceil(total / take) }
 }
 
-async function getProductById(id) {
+/**
+ * A product with every branch's stock (`stocks`) and the acting branch's `quantity`. A branch that
+ * doesn't stock it still gets it (with `stocked: false`) so a manager can start stocking it.
+ */
+async function getProductById(id, branchId = null) {
   const product = await prisma.product.findUnique({
     where: { id },
-    include: { ...PRODUCT_INCLUDE, variants: { select: VARIANT_SELECT, orderBy: [{ variant_name: 'asc' }] } },
+    include: { ...PRODUCT_INCLUDE, ...STOCKS_INCLUDE, variants: { select: VARIANT_SELECT, orderBy: [{ variant_name: 'asc' }] } },
   })
   if (!product) throw new NotFoundError('Product not found')
-  return product
+  return (await attachStock([product], branchId))[0]
 }
 
-async function getProductByBarcode(barcode) {
+async function getProductByBarcode(barcode, branchId = null) {
   const product = await prisma.product.findUnique({ where: { barcode }, include: PRODUCT_INCLUDE })
   if (!product) throw new NotFoundError('Product not found')
   if (!product.is_active) throw new NotFoundError('Product is inactive')
-  return product
+  const [withQty] = await attachStock([product], branchId)
+  if (branchId && !withQty.stocked) throw new NotFoundError('Not stocked at this branch')
+  return withQty
+}
+
+const stocksError = (message) => new ValidationError('Invalid branch stock', [{ field: 'stocks', message }])
+
+/**
+ * Which branches a create or update may touch: an admin any open branch, a manager only their own.
+ * Returns the open branches by id (for names in messages).
+ */
+async function checkStockBranches(stocks, user) {
+  const open = await prisma.branch.findMany({ where: { is_active: true }, select: { id: true, name: true } })
+  const byId = new Map(open.map((b) => [b.id, b]))
+  const seen = new Set()
+  for (const s of stocks) {
+    if (user.role !== 'ADMIN' && s.branch_id !== user.branch_id) {
+      throw new ForbiddenError("You can only manage your own branch's stock")
+    }
+    if (!byId.has(s.branch_id)) throw stocksError('One of the branches does not exist or is closed')
+    if (seen.has(s.branch_id)) throw stocksError('Each branch can only be listed once')
+    seen.add(s.branch_id)
+  }
+  return byId
+}
+
+/** Start stocking a product at a branch, logging any starting quantity. */
+async function addStockRow(tx, productId, row, userId) {
+  await tx.branchStock.create({
+    data: { branch_id: row.branch_id, product_id: productId, low_stock_threshold: row.low_stock_threshold ?? 10 },
+  })
+  if (row.quantity > 0) {
+    await changeStock(tx, { branchId: row.branch_id, productId, change: row.quantity, type: 'RESTOCK', userId, notes: 'Starting stock' })
+  }
 }
 
 async function assertSupplierExists(supplierId) {
@@ -137,7 +209,14 @@ function optionalCost(value) {
   return value === '' || value === null || value === undefined ? null : value
 }
 
-async function createProduct(data, userId) {
+/**
+ * `stocks` lists the branches that will stock the product, each with an optional starting
+ * `quantity` and `low_stock_threshold`. Left out, an admin's product goes to every open branch and
+ * a manager's to their own; a top-level `quantity`/`low_stock_threshold` then applies to the
+ * acting branch.
+ */
+async function createProduct(data, user, branchId = null) {
+  const userId = user.id
   // Check uniqueness
   const [existingSku, existingBarcode] = await Promise.all([
     prisma.product.findUnique({ where: { sku: data.sku } }),
@@ -156,10 +235,20 @@ async function createProduct(data, userId) {
   if (!category) throw new NotFoundError('Category not found')
   await assertSupplierExists(data.supplier_id)
 
-  const quantity = data.quantity ?? 0
+  let stocks = data.stocks
+  if (!stocks) {
+    const targets = user.role === 'ADMIN'
+      ? (await prisma.branch.findMany({ where: { is_active: true }, select: { id: true } })).map((b) => b.id)
+      : [user.branch_id]
+    stocks = targets.map((id) => ({
+      branch_id: id,
+      ...(id === branchId && { quantity: data.quantity ?? 0, low_stock_threshold: data.low_stock_threshold }),
+    }))
+  }
+  await checkStockBranches(stocks, user)
 
-  // Create the product and log its opening stock together
-  return prisma.$transaction(async (tx) => {
+  // Create the product and its stock rows, logging starting stock, together
+  const created = await prisma.$transaction(async (tx) => {
     const product = await tx.product.create({
       data: {
         name: data.name,
@@ -169,8 +258,6 @@ async function createProduct(data, userId) {
         supplier_id: data.supplier_id || null,
         price: data.price,
         cost_price: optionalCost(data.cost_price),
-        quantity,
-        low_stock_threshold: data.low_stock_threshold ?? 10,
         image_url: data.image_url || null,
         is_active: data.is_active ?? true,
         parent_id: parent?.id ?? null,
@@ -178,27 +265,20 @@ async function createProduct(data, userId) {
       },
       include: PRODUCT_INCLUDE,
     })
-
-    if (quantity > 0) {
-      await tx.inventoryLog.create({
-        data: {
-          product_id: product.id,
-          change_type: 'RESTOCK',
-          quantity_change: quantity,
-          previous_quantity: 0,
-          new_quantity: quantity,
-          user_id: userId,
-          notes: 'Opening stock',
-        },
-      })
-    }
-
+    for (const row of stocks) await addStockRow(tx, product.id, row, userId)
     return product
   })
+  return getProductById(created.id, branchId)
 }
 
-async function updateProduct(id, data, user) {
-  const existing = await prisma.product.findUnique({ where: { id } })
+/**
+ * `stocks`, when sent, is the full list of branches that should stock the product (a manager's list
+ * only covers their own branch): new branches are added with their starting quantity, listed ones get
+ * their low-stock level updated, and branches left out stop stocking it if they hold none.
+ * A top-level `low_stock_threshold` sets the acting branch's level.
+ */
+async function updateProduct(id, data, user, branchId = null) {
+  const existing = await prisma.product.findUnique({ where: { id }, include: { stocks: true } })
   if (!existing) throw new NotFoundError('Product not found')
 
   // Activating/deactivating mirrors DELETE /products/:id, which is ADMIN-only
@@ -232,8 +312,19 @@ async function updateProduct(id, data, user) {
     await assertVariantNameFree(existing.parent_id ?? existing.id, variantName, existing.id)
   }
 
-  const [product] = await prisma.$transaction([
-    prisma.product.update({
+  const branches = data.stocks ? await checkStockBranches(data.stocks, user) : null
+  const inScope = existing.stocks.filter((s) => user.role === 'ADMIN' || s.branch_id === user.branch_id)
+  if (data.stocks) {
+    const keep = new Set(data.stocks.map((s) => s.branch_id))
+    for (const row of inScope.filter((s) => !keep.has(s.branch_id) && s.quantity > 0)) {
+      const name = branches.get(row.branch_id)?.name
+        ?? (await prisma.branch.findUnique({ where: { id: row.branch_id }, select: { name: true } })).name
+      throw stocksError(`"${name}" still has ${row.quantity} in stock`)
+    }
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.product.update({
       where: { id },
       data: {
         ...(data.name !== undefined && { name: data.name }),
@@ -244,17 +335,34 @@ async function updateProduct(id, data, user) {
         ...(data.price !== undefined && { price: data.price }),
         ...(data.cost_price !== undefined && { cost_price: optionalCost(data.cost_price) }),
         // quantity is intentionally not editable here — stock changes go through inventory so they are logged
-        ...(data.low_stock_threshold !== undefined && { low_stock_threshold: data.low_stock_threshold }),
         ...(data.image_url !== undefined && { image_url: data.image_url || null }),
         ...(data.is_active !== undefined && { is_active: data.is_active }),
         ...(variantName !== undefined && { variant_name: variantName }),
       },
-      include: PRODUCT_INCLUDE,
-    }),
-    ...(categoryChanged && !existing.parent_id
-      ? [prisma.product.updateMany({ where: { parent_id: id }, data: { category_id: data.category_id } })]
-      : []),
-  ])
+    })
+    if (categoryChanged && !existing.parent_id) {
+      await tx.product.updateMany({ where: { parent_id: id }, data: { category_id: data.category_id } })
+    }
+    if (data.low_stock_threshold !== undefined && branchId) {
+      await tx.branchStock.updateMany({ where: { product_id: id, branch_id: branchId }, data: { low_stock_threshold: data.low_stock_threshold } })
+    }
+    if (data.stocks) {
+      const current = new Map(existing.stocks.map((s) => [s.branch_id, s]))
+      for (const row of data.stocks) {
+        if (!current.has(row.branch_id)) await addStockRow(tx, id, row, user.id)
+        else if (row.low_stock_threshold !== undefined) {
+          await tx.branchStock.update({
+            where: { branch_id_product_id: { branch_id: row.branch_id, product_id: id } },
+            data: { low_stock_threshold: row.low_stock_threshold },
+          })
+        }
+      }
+      const keep = new Set(data.stocks.map((s) => s.branch_id))
+      const drop = inScope.filter((s) => !keep.has(s.branch_id)).map((s) => s.id)
+      // Only empty rows reach here; the guard keeps a sale racing this from losing stock
+      if (drop.length) await tx.branchStock.deleteMany({ where: { id: { in: drop }, quantity: 0 } })
+    }
+  })
 
   if (data.is_active !== undefined && data.is_active !== existing.is_active) {
     await recordAudit({
@@ -266,7 +374,7 @@ async function updateProduct(id, data, user) {
     })
   }
 
-  return product
+  return getProductById(id, branchId)
 }
 
 async function softDeleteProduct(id, userId) {

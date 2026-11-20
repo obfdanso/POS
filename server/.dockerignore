@@ -8,3 +8,4 @@ uploads
 backups
 *.dump
 src/__tests__
+dist

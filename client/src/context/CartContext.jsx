@@ -1,5 +1,6 @@
-import { createContext, useReducer, useContext, useCallback, useMemo } from 'react'
+import { createContext, useReducer, useContext, useCallback, useMemo, useEffect, useRef } from 'react'
 import { useSettings } from './SettingsContext'
+import { useBranch } from '../hooks/useBranch'
 import { applyPromotions, calculateTotals, maxRedeemablePoints, round2 } from '../utils/saleTotals'
 
 export const CartContext = createContext(null)
@@ -122,6 +123,16 @@ export function CartProvider({ children }) {
   const clearCart = useCallback(() => dispatch({ type: 'CLEAR_CART' }), [])
   const syncItems = useCallback((updates) => dispatch({ type: 'SYNC_ITEMS', payload: updates }), [])
   const setPromotions = useCallback((promotions) => dispatch({ type: 'SET_PROMOTIONS', payload: promotions }), [])
+
+  // A cart belongs to one branch's stock, so switching branch starts a new one
+  const { branchId } = useBranch()
+  const cartBranch = useRef(branchId)
+  useEffect(() => {
+    if (cartBranch.current !== branchId) {
+      cartBranch.current = branchId
+      dispatch({ type: 'CLEAR_CART' })
+    }
+  }, [branchId])
 
   const value = useMemo(
     () => ({ ...state, items: pricedItems, redeemPoints, maxPoints, pointValue, pointsDiscount, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, setRedeemPoints, clearCart, syncItems, setPromotions }),

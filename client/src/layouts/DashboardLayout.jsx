@@ -1,12 +1,19 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../context/SettingsContext'
 import { useCart } from '../context/CartContext'
+import { useBranch } from '../hooks/useBranch'
+import { BranchSwitcher } from '../components/BranchSwitcher'
 import { Modal } from '../components/Modal'
 import toast from 'react-hot-toast'
 
 const icons = {
+  branches: (
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6M9 10h.01M15 10h.01" />
+    </svg>
+  ),
   promotions: (
     <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5a1.99 1.99 0 011.41.59l7 7a2 2 0 010 2.82l-7 7a2 2 0 01-2.82 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z" />
@@ -159,6 +166,7 @@ function ThemeToggle() {
 
 export function DashboardLayout({ children, noPad = false }) {
   const { user, logout } = useAuth()
+  const { branchId } = useBranch()
   const { clearCart } = useCart()
   const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -231,6 +239,7 @@ export function DashboardLayout({ children, noPad = false }) {
             {isAdmin && (
               <>
                 <div className="w-px bg-gray-200 dark:bg-gray-700 mx-1 xl:mx-2 my-3 flex-shrink-0" />
+                <NavItem to="/branches" icon={icons.branches} label="Branches" />
                 <NavItem to="/users" icon={icons.users} label="Users" />
                 <NavItem to="/settings" icon={icons.settings} label="Settings" />
               </>
@@ -239,6 +248,7 @@ export function DashboardLayout({ children, noPad = false }) {
 
           {/* Right-side controls */}
           <div className="flex items-center gap-1 ml-auto">
+            <BranchSwitcher className="hidden md:inline-flex mr-1" />
             <ThemeToggle />
 
             {/* User info */}
@@ -299,6 +309,10 @@ export function DashboardLayout({ children, noPad = false }) {
               </div>
             </div>
 
+            <div className="px-3 pb-2 md:hidden">
+              <BranchSwitcher />
+            </div>
+
             {/* Cashier mobile nav */}
             {isCashier && (
               <>
@@ -334,6 +348,7 @@ export function DashboardLayout({ children, noPad = false }) {
             {isAdmin && (
               <>
                 <div className="h-px bg-gray-100 dark:bg-gray-800 my-1" />
+                <MobileNavItem to="/branches" icon={icons.branches} label="Branches" onClick={closeMobile} />
                 <MobileNavItem to="/users" icon={icons.users} label="Users" onClick={closeMobile} />
                 <MobileNavItem to="/settings" icon={icons.settings} label="Settings" onClick={closeMobile} />
               </>
@@ -344,11 +359,14 @@ export function DashboardLayout({ children, noPad = false }) {
 
       {/* Page content */}
       <main className="flex-1 min-h-0 flex flex-col">
-        {noPad ? children : (
-          <div className="max-w-7xl mx-auto px-6 py-6 w-full">
-            {children}
-          </div>
-        )}
+        {/* Keyed by branch: switching branch reloads the page's data for the new branch */}
+        <Fragment key={branchId ?? 'all'}>
+          {noPad ? children : (
+            <div className="max-w-7xl mx-auto px-6 py-6 w-full">
+              {children}
+            </div>
+          )}
+        </Fragment>
       </main>
 
       {/* Logout confirmation modal */}

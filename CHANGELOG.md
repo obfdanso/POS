@@ -4,6 +4,9 @@ Notable changes to QuickMart POS, newest first.
 
 ## 2026-11-20
 
+### Changed
+- **TypeScript.** The React client is now strict TypeScript (`.ts`/`.tsx`, tests included); `npm run typecheck` checks it and `npm run build` runs the check first. Shared API and model types live in `client/src/types/`.
+
 ### Added
 - **Multiple branches.** QuickMart now runs as a chain. An admin creates branches (name, short code, address, phone) on the new **Branches** page and can close or reopen them. Products and prices are shared; each branch stocks its own selection, with its own counts and low-stock levels (new `BranchStock` table; the old `Product.quantity` moved into a "Main Branch" on upgrade).
   - Cashiers and managers belong to one branch and only see and change its stock, sales, shifts and purchase orders. Admins pick a branch in the header, or **All branches** for combined figures and a new branch comparison report (`GET /api/reports/branch-performance`).

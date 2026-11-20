@@ -143,7 +143,8 @@ The Vite dev server proxies `/api`, `/uploads`, and `/product-images` to the bac
 | Command | What it does |
 |---|---|
 | `npm run dev` | Vite dev server on :5173 |
-| `npm run build` | Production build into `dist/` |
+| `npm run build` | Type-check, then production build into `dist/` |
+| `npm run typecheck` | TypeScript check (`tsc --noEmit`) |
 | `npm run preview` | Serve the production build locally |
 | `npm test` | Vitest component tests |
 | `npm run lint` | ESLint |
@@ -222,7 +223,7 @@ server {
 
 ```
 pos-system/
-├── client/                     React 19 + Vite + Tailwind
+├── client/                     React 19 + TypeScript (strict) + Vite + Tailwind
 │   └── src/
 │       ├── components/         Button, Input, Modal, Table (sortable), Badge, Pagination,
 │       │                       Receipt (80mm print), InventoryHistoryModal, ErrorBoundary
@@ -232,7 +233,9 @@ pos-system/
 │       ├── context/            AuthContext, CartContext, SettingsContext
 │       ├── hooks/              useAuth
 │       ├── services/           Axios client (token refresh) + one file per API module
-│       └── utils/              formatCurrency, date, apiErrors
+│       ├── types/              API response envelopes, models and request payloads
+│       ├── utils/              formatCurrency, date, apiErrors
+│       └── test/               Vitest tests
 ├── server/                     Node.js + Express
 │   ├── src/
 │   │   ├── routes/             auth, products, categories, suppliers, inventory, sales,

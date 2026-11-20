@@ -2,6 +2,8 @@ const salesService = require('../services/salesService')
 const gatewayRefundService = require('../services/gatewayRefundService')
 const { recordAudit } = require('../utils/audit')
 
+const without = (obj, keys) => Object.fromEntries(Object.entries(obj).filter(([key]) => !keys.includes(key)))
+
 function normalizeSale(sale) {
   return {
     ...sale,
@@ -68,8 +70,8 @@ async function lookupSale(req, res, next) {
     const trimmed = {
       ...sale,
       customer: sale.customer && { id: sale.customer.id, name: sale.customer.name },
-      payments: sale.payments.map(({ reference, ...payment }) => payment),
-      refunds: sale.refunds.map(({ gateway_reference, gateway_refund_id, gateway_error, ...refund }) => refund),
+      payments: sale.payments.map((payment) => without(payment, ['reference'])),
+      refunds: sale.refunds.map((refund) => without(refund, ['gateway_reference', 'gateway_refund_id', 'gateway_error'])),
     }
     res.json({ success: true, data: normalizeSale(trimmed) })
   } catch (err) {

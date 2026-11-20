@@ -1,4 +1,4 @@
-import type { ActivePromotion, ApiSuccess, Promotion, PromotionPayload, QueryParams } from '../types'
+import type { ActivePromotion, ApiMessage, ApiSuccess, Promotion, PromotionPayload, QueryParams } from '../types'
 import api from './api'
 
 export const promotionsService = {
@@ -7,6 +7,6 @@ export const promotionsService = {
   list: (params?: QueryParams) => api.get<ApiSuccess<Promotion[]>>('/promotions', { params }),
   get: (id: string) => api.get<ApiSuccess<Promotion>>(`/promotions/${id}`),
   // data: { name, percent_off, product_id?, category_id?, starts_at?, ends_at?, is_active? }
-  create: (data: PromotionPayload) => api.post<ApiSuccess<Promotion>>('/promotions', data),
-  update: (id: string, data: Partial<PromotionPayload>) => api.put<ApiSuccess<Promotion>>(`/promotions/${id}`, data),
+  create: (data: PromotionPayload) => api.post<ApiMessage<Promotion>>('/promotions', data),
+  update: (id: string, data: Partial<PromotionPayload>) => api.put<ApiMessage<Promotion>>(`/promotions/${id}`, data),
 }

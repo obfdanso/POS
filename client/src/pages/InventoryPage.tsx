@@ -11,6 +11,12 @@ import { inventoryService } from '../services/inventory'
 import { InventoryHistoryModal } from '../components/InventoryHistoryModal'
 import { formatCurrency } from '../utils/formatCurrency'
 import { useBranch } from '../hooks/useBranch'
+import { apiErrorBody } from '../utils/apiErrors'
+import { defineColumns, type TableSort } from '../utils/tableColumns'
+import type { BranchRef, PaginationMeta, Product, QueryParams } from '../types'
+
+/** A product's stock at one branch; with all branches shown, `id` is made unique per branch and `product_id` keeps the product's */
+type StockRow = Product & { branch_id?: string; branch?: BranchRef; product_id?: string }
 
 const TABS = [
   { key: 'all', label: 'All Products' },
@@ -18,7 +24,12 @@ const TABS = [
   { key: 'out', label: 'Out of Stock' },
 ]
 
-function StockStatusBadge({ quantity, threshold }) {
+export interface StockStatusBadgeProps {
+  quantity: number
+  threshold: number
+}
+
+function StockStatusBadge({ quantity, threshold }: StockStatusBadgeProps) {
   if (quantity === 0) return <Badge variant="danger">Out of Stock</Badge>
   if (quantity <= threshold) return <Badge variant="warning">Low Stock</Badge>
   return <Badge variant="success">OK</Badge>
@@ -26,21 +37,21 @@ function StockStatusBadge({ quantity, threshold }) {
 
 export default function InventoryPage() {
   const { isAllBranches } = useBranch()
-  const [products, setProducts] = useState([])
+  const [products, setProducts] = useState<StockRow[]>([])
   // With all branches shown, a product appears once per branch, so rows need their own key
-  const rows = isAllBranches ? products.map((p) => ({ ...p, product_id: p.id, id: `${p.id}:${p.branch_id}` })) : products
+  const rows: StockRow[] = isAllBranches ? products.map((p) => ({ ...p, product_id: p.id, id: `${p.id}:${p.branch_id}` })) : products
   const [isLoading, setIsLoading] = useState(true)
-  const [meta, setMeta] = useState({ page: 1, total_pages: 1, total: 0 })
+  const [meta, setMeta] = useState<Pick<PaginationMeta, 'page' | 'total_pages' | 'total'>>({ page: 1, total_pages: 1, total: 0 })
   const [page, setPage] = useState(1)
-  const [sort, setSort] = useState({ key: 'name', order: 'asc' })
+  const [sort, setSort] = useState<TableSort>({ key: 'name', order: 'asc' })
   const [activeTab, setActiveTab] = useState('all')
   const [stats, setStats] = useState({ total: 0, low: 0, out: 0 })
 
   // Adjust/Restock modal state
-  const [adjustTarget, setAdjustTarget] = useState(null)
-  const [historyTarget, setHistoryTarget] = useState(null)
+  const [adjustTarget, setAdjustTarget] = useState<StockRow | null>(null)
+  const [historyTarget, setHistoryTarget] = useState<StockRow | null>(null)
   const [adjustForm, setAdjustForm] = useState({ type: 'RESTOCK', quantity: '', notes: '' })
-  const [adjustErrors, setAdjustErrors] = useState({})
+  const [adjustErrors, setAdjustErrors] = useState<{ quantity?: string }>({})
   const [isAdjusting, setIsAdjusting] = useState(false)
 
   const latestRequest = useRef(0)
@@ -50,7 +61,7 @@ export default function InventoryPage() {
     setIsLoading(true)
     try {
       let res
-      const params = { page, per_page: 20, sort: sort.key, order: sort.order }
+      const params: QueryParams = { page, per_page: 20, sort: sort.key, order: sort.order }
 
       if (activeTab === 'low') {
         res = await inventoryService.lowStock()
@@ -78,7 +89,7 @@ export default function InventoryPage() {
   }, [page, activeTab, sort])
 
   // Sorting happens on the server so it covers every page, not just the visible one
-  function handleSortChange(next) {
+  function handleSortChange(next: TableSort) {
     setSort(next)
     setPage(1)
   }
@@ -109,14 +120,14 @@ export default function InventoryPage() {
     setPage(1)
   }, [activeTab])
 
-  function openAdjustModal(product) {
+  function openAdjustModal(product: StockRow) {
     setAdjustTarget(product)
     setAdjustForm({ type: 'RESTOCK', quantity: '', notes: '' })
     setAdjustErrors({})
   }
 
   function validateAdjustForm() {
-    const errs = {}
+    const errs: { quantity?: string } = {}
     const qty = Number(adjustForm.quantity)
     if (adjustForm.quantity === '' || isNaN(qty)) {
       errs.quantity = 'Quantity is required'
@@ -132,7 +143,7 @@ export default function InventoryPage() {
   }
 
   async function handleAdjustSubmit() {
-    if (!validateAdjustForm()) return
+    if (!validateAdjustForm() || !adjustTarget) return
     setIsAdjusting(true)
     try {
       const qty = parseInt(adjustForm.quantity)
@@ -149,14 +160,14 @@ export default function InventoryPage() {
       fetchProducts()
       fetchStats()
     } catch (err) {
-      const msg = err.response?.data?.error?.message || 'Failed to adjust stock'
+      const msg = apiErrorBody(err)?.message || 'Failed to adjust stock'
       toast.error(msg)
     } finally {
       setIsAdjusting(false)
     }
   }
 
-  const columns = [
+  const columns = defineColumns<StockRow>()([
     {
       key: 'name',
       sortable: true,
@@ -168,9 +179,7 @@ export default function InventoryPage() {
         </div>
       ),
     },
-    ...(isAllBranches
-      ? [{ key: 'branch', sortable: true, sortValue: (row) => row.branch?.name, label: 'Branch', render: (val) => val?.name ?? '—' }]
-      : []),
+    { key: 'branch', sortable: true, sortValue: (row) => row.branch?.name, label: 'Branch', render: (val) => val?.name ?? '—' },
     {
       key: 'category',
       sortable: true,
@@ -227,7 +236,7 @@ export default function InventoryPage() {
         </div>
       ),
     },
-  ]
+  ]).filter((col) => isAllBranches || col.key !== 'branch') // the branch column only shows with all branches
 
   return (
     <DashboardLayout>

@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useState, type ChangeEvent, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { useAuth } from '../hooks/useAuth'
 import { AuthLayout } from '../layouts/AuthLayout'
 import { useTheme } from '../context/SettingsContext'
+import { apiErrorBody } from '../utils/apiErrors'
 
 function ThemeToggle() {
   const { theme, setTheme } = useTheme()
@@ -34,23 +35,30 @@ function ThemeToggle() {
   )
 }
 
+interface LoginForm {
+  username: string
+  password: string
+}
+
+type LoginErrors = Partial<Record<keyof LoginForm, string>>
+
 export default function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
   const [form, setForm] = useState({ username: '', password: '' })
-  const [errors, setErrors] = useState({})
+  const [errors, setErrors] = useState<LoginErrors>({})
   const [apiError, setApiError] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
 
-  function validate() {
-    const errs = {}
+  function validate(): LoginErrors {
+    const errs: LoginErrors = {}
     if (!form.username.trim()) errs.username = 'Username is required'
     if (!form.password) errs.password = 'Password is required'
     return errs
   }
 
-  async function handleSubmit(e) {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const errs = validate()
     if (Object.keys(errs).length > 0) {
@@ -73,15 +81,16 @@ export default function LoginPage() {
         navigate('/cashier/dashboard', { replace: true })
       }
     } catch (err) {
-      const msg = err.response?.data?.error?.message || 'Login failed. Please try again.'
+      const msg = apiErrorBody(err)?.message || 'Login failed. Please try again.'
       setApiError(msg)
     } finally {
       setIsLoading(false)
     }
   }
 
-  function handleChange(e) {
-    const { name, value } = e.target
+  function handleChange(e: ChangeEvent<HTMLInputElement>) {
+    const { value } = e.target
+    const name = e.target.name as keyof LoginForm
     setForm((prev) => ({ ...prev, [name]: value }))
     if (errors[name]) setErrors((prev) => ({ ...prev, [name]: '' }))
   }

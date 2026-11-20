@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, type FormEvent } from 'react'
 import toast from 'react-hot-toast'
 import { DashboardLayout } from '../layouts/DashboardLayout'
 import { Button } from '../components/Button'
@@ -9,24 +9,42 @@ import { Badge } from '../components/Badge'
 import { branchesService } from '../services/branches'
 import { useBranch } from '../hooks/useBranch'
 import { getErrorMessage, getFieldErrors } from '../utils/apiErrors'
+import { defineColumns } from '../utils/tableColumns'
+import type { BranchRef } from '../types'
 
-const EMPTY = { name: '', code: '', address: '', phone: '' }
+interface BranchForm {
+  name: string
+  code: string
+  address: string
+  phone: string
+}
 
-function BranchModal({ branch, onClose, onSaved }) {
+const EMPTY: BranchForm = { name: '', code: '', address: '', phone: '' }
+
+/** The branch being edited, or {} for a new one */
+type EditingBranch = BranchRef | { id?: undefined }
+
+export interface BranchModalProps {
+  branch: BranchRef | null
+  onClose: () => void
+  onSaved: () => void
+}
+
+function BranchModal({ branch, onClose, onSaved }: BranchModalProps) {
   const editing = Boolean(branch)
-  const [form, setForm] = useState(editing ? { name: branch.name, code: branch.code, address: branch.address ?? '', phone: branch.phone ?? '' } : EMPTY)
-  const [errors, setErrors] = useState({})
+  const [form, setForm] = useState<BranchForm>(branch ? { name: branch.name, code: branch.code, address: branch.address ?? '', phone: branch.phone ?? '' } : EMPTY)
+  const [errors, setErrors] = useState<Record<string, string>>({})
   const [isSaving, setIsSaving] = useState(false)
-  const set = (key, value) => setForm((f) => ({ ...f, [key]: value }))
+  const set = (key: keyof BranchForm, value: string) => setForm((f) => ({ ...f, [key]: value }))
 
   function validate() {
-    const errs = {}
+    const errs: Record<string, string> = {}
     if (form.name.trim().length < 2) errs.name = 'Give the branch a name (at least 2 characters)'
     if (!/^[A-Z]{2,6}$/.test(form.code.trim())) errs.code = 'Use 2–6 capital letters, e.g. KSI'
     return errs
   }
 
-  async function handleSubmit(e) {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const errs = validate()
     setErrors(errs)
@@ -34,8 +52,8 @@ function BranchModal({ branch, onClose, onSaved }) {
     const payload = { name: form.name.trim(), code: form.code.trim(), address: form.address.trim() || null, phone: form.phone.trim() || null }
     setIsSaving(true)
     try {
-      const res = editing ? await branchesService.update(branch.id, payload) : await branchesService.create(payload)
-      toast.success(res.data.message)
+      const res = branch ? await branchesService.update(branch.id, payload) : await branchesService.create(payload)
+      toast.success(res.data.message ?? 'Branch saved')
       onSaved()
     } catch (err) {
       const fieldErrors = getFieldErrors(err)
@@ -47,7 +65,7 @@ function BranchModal({ branch, onClose, onSaved }) {
   }
 
   return (
-    <Modal isOpen onClose={onClose} title={editing ? `Edit ${branch.name}` : 'New branch'} size="md">
+    <Modal isOpen onClose={onClose} title={branch ? `Edit ${branch.name}` : 'New branch'} size="md">
       <form onSubmit={handleSubmit} className="space-y-4" noValidate>
         <Input label="Name" value={form.name} maxLength={80} onChange={(e) => set('name', e.target.value)} error={errors.name} placeholder="e.g. Accra Mall" />
         <Input
@@ -72,10 +90,10 @@ function BranchModal({ branch, onClose, onSaved }) {
 
 export default function BranchesPage() {
   const { reloadBranches } = useBranch()
-  const [branches, setBranches] = useState([])
+  const [branches, setBranches] = useState<BranchRef[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [editing, setEditing] = useState(null)
-  const [closing, setClosing] = useState(null)
+  const [editing, setEditing] = useState<EditingBranch | null>(null)
+  const [closing, setClosing] = useState<BranchRef | null>(null)
   const [isClosing, setIsClosing] = useState(false)
 
   const fetchBranches = useCallback(async () => {
@@ -99,7 +117,7 @@ export default function BranchesPage() {
     reloadBranches()
   }
 
-  async function setOpen(branch, is_active) {
+  async function setOpen(branch: BranchRef, is_active: boolean) {
     setIsClosing(true)
     try {
       await branchesService.update(branch.id, { is_active })
@@ -113,7 +131,7 @@ export default function BranchesPage() {
     }
   }
 
-  const columns = [
+  const columns = defineColumns<BranchRef>()([
     { key: 'name', label: 'Branch', sortable: true },
     { key: 'code', label: 'Code', sortable: true, render: (v) => <span className="font-mono text-xs">{v}</span> },
     { key: 'address', label: 'Address', render: (v) => v || <span className="text-gray-400">Store address</span> },
@@ -138,7 +156,7 @@ export default function BranchesPage() {
         </div>
       ),
     },
-  ]
+  ])
 
   return (
     <DashboardLayout>
@@ -181,7 +199,7 @@ export default function BranchesPage() {
           </p>
           <div className="flex gap-3">
             <Button variant="secondary" className="flex-1" onClick={() => setClosing(null)} disabled={isClosing}>Cancel</Button>
-            <Button variant="danger" className="flex-1" isLoading={isClosing} onClick={() => setOpen(closing, false)}>Close branch</Button>
+            <Button variant="danger" className="flex-1" isLoading={isClosing} onClick={() => closing && setOpen(closing, false)}>Close branch</Button>
           </div>
         </div>
       </Modal>

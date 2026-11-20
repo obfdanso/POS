@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, type ChangeEvent, type FormEvent } from 'react'
 import toast from 'react-hot-toast'
 import { DashboardLayout } from '../layouts/DashboardLayout'
 import { Button } from '../components/Button'
@@ -6,37 +6,58 @@ import { Input } from '../components/Input'
 import { Modal } from '../components/Modal'
 import { Table } from '../components/Table'
 import { Pagination } from '../components/Pagination'
-import { Badge } from '../components/Badge'
+import { Badge, type BadgeVariant } from '../components/Badge'
 import { usersService } from '../services/users'
 import { useAuth } from '../hooks/useAuth'
 import { useBranch } from '../hooks/useBranch'
 import { getFieldErrors, getErrorMessage } from '../utils/apiErrors'
+import { defineColumns } from '../utils/tableColumns'
+import type { ApiSuccess, BranchRef, PaginationMeta, Role, User } from '../types'
 
-const ROLE_BADGE = {
+const ROLE_BADGE: Record<Role, BadgeVariant> = {
   ADMIN: 'danger',
   MANAGER: 'warning',
   CASHIER: 'success',
 }
 
-const ROLE_DISPLAY = {
+const ROLE_DISPLAY: Record<Role, string> = {
   ADMIN: 'Admin',
   MANAGER: 'Manager',
   CASHIER: 'Cashier',
 }
 
-const ROLES = ['ADMIN', 'MANAGER', 'CASHIER']
+const ROLES: Role[] = ['ADMIN', 'MANAGER', 'CASHIER']
 
-const EMPTY_CREATE = { username: '', email: '', password: '', full_name: '', role: 'CASHIER', branch_id: '' }
-const EMPTY_EDIT = { full_name: '', email: '', role: 'CASHIER', is_active: true, branch_id: '' }
+interface CreateUserForm {
+  username: string
+  email: string
+  password: string
+  full_name: string
+  role: Role
+  branch_id: string
+}
 
-function validate(form, mode) {
-  const errors = {}
+interface EditUserForm {
+  full_name: string
+  email: string
+  role: Role
+  is_active: boolean
+  branch_id: string
+}
+
+type UserFormChange = ChangeEvent<HTMLInputElement | HTMLSelectElement>
+
+const EMPTY_CREATE: CreateUserForm = { username: '', email: '', password: '', full_name: '', role: 'CASHIER', branch_id: '' }
+const EMPTY_EDIT: EditUserForm = { full_name: '', email: '', role: 'CASHIER', is_active: true, branch_id: '' }
+
+function validate(form: CreateUserForm | EditUserForm, mode: 'create' | 'edit') {
+  const errors: Record<string, string> = {}
   if (!form.full_name?.trim()) errors.full_name = 'Full name is required'
   if (!form.email?.trim()) errors.email = 'Email is required'
   else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = 'Invalid email address'
   // Cashiers and managers work at one branch; admins work across all of them
   if (form.role !== 'ADMIN' && !form.branch_id) errors.branch_id = 'Choose the branch they work at'
-  if (mode === 'create') {
+  if (mode === 'create' && 'username' in form) {
     if (!form.username?.trim()) errors.username = 'Username is required'
     if (!form.password?.trim()) errors.password = 'Password is required'
     else if (form.password.length < 6) errors.password = 'Password must be at least 6 characters'
@@ -48,7 +69,17 @@ const selectClass =
   'block w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 disabled:opacity-60'
 
 /** The branch a cashier or manager works at; hidden for admins. */
-function BranchField({ form, onChange, error, branches, disabled = false, id, current = null }) {
+export interface BranchFieldProps {
+  form: Pick<EditUserForm, 'role' | 'branch_id'>
+  onChange: (e: UserFormChange) => void
+  error?: string
+  branches: BranchRef[]
+  disabled?: boolean
+  id: string
+  current?: BranchRef | null
+}
+
+function BranchField({ form, onChange, error, branches, disabled = false, id, current = null }: BranchFieldProps) {
   if (form.role === 'ADMIN') {
     return <p className="text-xs text-gray-500 dark:text-gray-400">Admins work across all branches.</p>
   }
@@ -68,7 +99,11 @@ function BranchField({ form, onChange, error, branches, disabled = false, id, cu
   )
 }
 
-function LockIcon({ className = '' }) {
+export interface LockIconProps {
+  className?: string
+}
+
+function LockIcon({ className = '' }: LockIconProps) {
   return (
     <svg className={`w-4 h-4 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
@@ -79,8 +114,8 @@ function LockIcon({ className = '' }) {
 export default function UsersPage() {
   const { user: currentUser } = useAuth()
   const { branches } = useBranch()
-  const [users, setUsers] = useState([])
-  const [meta, setMeta] = useState({ page: 1, total_pages: 1 })
+  const [users, setUsers] = useState<User[]>([])
+  const [meta, setMeta] = useState<Pick<PaginationMeta, 'page' | 'total_pages'>>({ page: 1, total_pages: 1 })
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
 
@@ -88,24 +123,26 @@ export default function UsersPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
 
-  const [editTarget, setEditTarget] = useState(null)
-  const [createForm, setCreateForm] = useState(EMPTY_CREATE)
-  const [editForm, setEditForm] = useState(EMPTY_EDIT)
+  const [editTarget, setEditTarget] = useState<User | null>(null)
+  const [createForm, setCreateForm] = useState<CreateUserForm>(EMPTY_CREATE)
+  const [editForm, setEditForm] = useState<EditUserForm>(EMPTY_EDIT)
   const [newPassword, setNewPassword] = useState('')
   const [newPasswordError, setNewPasswordError] = useState('')
 
-  const [createErrors, setCreateErrors] = useState({})
-  const [editErrors, setEditErrors] = useState({})
+  const [createErrors, setCreateErrors] = useState<Record<string, string>>({})
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [savingReset, setSavingReset] = useState(false)
-  const [unlocking, setUnlocking] = useState(null)
+  const [unlocking, setUnlocking] = useState<string | null>(null)
 
   const fetchUsers = useCallback(async () => {
     setLoading(true)
     try {
       const res = await usersService.list({ page, per_page: 20 })
-      setUsers(res.data?.data ?? res.data ?? [])
-      setMeta(res.data?.meta ?? { page: 1, total_pages: 1 })
+      // The list isn't paginated today; use the page info if the server ever sends it
+      const body: ApiSuccess<User[]> & { meta?: PaginationMeta } = res.data
+      setUsers(body?.data ?? [])
+      setMeta(body?.meta ?? { page: 1, total_pages: 1 })
     } catch {
       toast.error('Failed to load users')
     } finally {
@@ -124,13 +161,13 @@ export default function UsersPage() {
     setCreateOpen(true)
   }
 
-  function handleCreateChange(e) {
+  function handleCreateChange(e: UserFormChange) {
     const { name, value } = e.target
     setCreateForm((f) => ({ ...f, [name]: value }))
     if (createErrors[name]) setCreateErrors((e) => { const n = { ...e }; delete n[name]; return n })
   }
 
-  async function handleCreate(e) {
+  async function handleCreate(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const errs = validate(createForm, 'create')
     if (Object.keys(errs).length) { setCreateErrors(errs); return }
@@ -158,7 +195,7 @@ export default function UsersPage() {
   const editingSelf = editTarget?.id === currentUser?.id
 
   // Edit
-  function openEdit(user) {
+  function openEdit(user: User) {
     setEditTarget(user)
     setEditForm({
       full_name: user.full_name ?? '',
@@ -173,15 +210,17 @@ export default function UsersPage() {
     setEditOpen(true)
   }
 
-  function handleEditChange(e) {
-    const { name, value, type, checked } = e.target
+  function handleEditChange(e: UserFormChange) {
+    const { name, value, type } = e.target
+    const checked = e.target instanceof HTMLInputElement && e.target.checked
     const val = type === 'checkbox' ? checked : value
     setEditForm((f) => ({ ...f, [name]: val }))
     if (editErrors[name]) setEditErrors((e) => { const n = { ...e }; delete n[name]; return n })
   }
 
-  async function handleEdit(e) {
+  async function handleEdit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    if (!editTarget) return
     const errs = validate(editForm, 'edit')
     if (Object.keys(errs).length) { setEditErrors(errs); return }
     setSaving(true)
@@ -205,8 +244,9 @@ export default function UsersPage() {
   }
 
   // Reset password (now lives inside the Edit modal)
-  async function handleReset(e) {
+  async function handleReset(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    if (!editTarget) return
     if (!newPassword.trim()) { setNewPasswordError('Password is required'); return }
     if (newPassword.length < 6) { setNewPasswordError('Password must be at least 6 characters'); return }
     setSavingReset(true)
@@ -224,7 +264,7 @@ export default function UsersPage() {
   }
 
   // Unlock
-  async function handleUnlock(user) {
+  async function handleUnlock(user: User) {
     setUnlocking(user.id)
     try {
       await usersService.unlock(user.id)
@@ -237,7 +277,7 @@ export default function UsersPage() {
     }
   }
 
-  const columns = [
+  const columns = defineColumns<User>()([
     {
       key: 'full_name',
       sortable: true,
@@ -312,7 +352,7 @@ export default function UsersPage() {
         </div>
       ),
     },
-  ]
+  ])
 
   return (
     <DashboardLayout>

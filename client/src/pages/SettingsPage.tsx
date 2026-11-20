@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type FormEvent, type ReactNode } from 'react'
 import toast from 'react-hot-toast'
 import { DashboardLayout } from '../layouts/DashboardLayout'
 import { Button } from '../components/Button'
@@ -6,10 +6,17 @@ import { Input } from '../components/Input'
 import { settingsService } from '../services/settings'
 import { useSettings } from '../context/SettingsContext'
 import { getFieldErrors, getErrorMessage } from '../utils/apiErrors'
+import type { Settings } from '../types'
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function ToggleSwitch({ checked, onChange, disabled }) {
+export interface ToggleSwitchProps {
+  checked: boolean
+  onChange: (checked: boolean) => void
+  disabled?: boolean
+}
+
+function ToggleSwitch({ checked, onChange, disabled }: ToggleSwitchProps) {
   return (
     <button
       type="button"
@@ -29,7 +36,14 @@ function ToggleSwitch({ checked, onChange, disabled }) {
   )
 }
 
-function SectionCard({ icon, title, description, children }) {
+export interface SectionCardProps {
+  icon?: ReactNode
+  title: ReactNode
+  description?: ReactNode
+  children?: ReactNode
+}
+
+function SectionCard({ icon, title, description, children }: SectionCardProps) {
   return (
     <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden">
       <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-start gap-3">
@@ -52,7 +66,15 @@ function SectionCard({ icon, title, description, children }) {
   )
 }
 
-function FieldRow({ label, hint, error, half, children }) {
+export interface FieldRowProps {
+  label: ReactNode
+  hint?: ReactNode
+  error?: string
+  half?: boolean
+  children?: ReactNode
+}
+
+function FieldRow({ label, hint, error, half, children }: FieldRowProps) {
   return (
     <div className="py-4 first:pt-0 last:pb-0">
       <div className={`flex flex-col ${half ? 'sm:flex-row sm:items-start sm:gap-6' : 'gap-2'}`}>
@@ -67,7 +89,13 @@ function FieldRow({ label, hint, error, half, children }) {
   )
 }
 
-function ToggleRow({ label, hint, checked, onChange, disabled, children }) {
+export interface ToggleRowProps extends ToggleSwitchProps {
+  label: ReactNode
+  hint?: ReactNode
+  children?: ReactNode
+}
+
+function ToggleRow({ label, hint, checked, onChange, disabled, children }: ToggleRowProps) {
   return (
     <div className="py-4 first:pt-0 last:pb-0">
       <div className="flex items-center justify-between gap-4">
@@ -138,7 +166,7 @@ const ReceiptIcon = (
 export default function SettingsPage() {
   const { refreshSettings } = useSettings()
 
-  const [settings, setSettings] = useState({
+  const [settings, setSettings] = useState<Settings>({
     store_name: '',
     store_address: '',
     store_phone: '',
@@ -154,29 +182,29 @@ export default function SettingsPage() {
   const [loyaltyEnabled, setLoyaltyEnabled] = useState(true)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
-  const [errors, setErrors] = useState({})
+  const [errors, setErrors] = useState<Record<string, string | undefined>>({})
 
   useEffect(() => {
     settingsService
       .get()
       .then((res) => {
-        const s = res.data?.data || {}
+        const s: Partial<Settings> = res.data?.data || {}
         setSettings((prev) => ({ ...prev, ...s }))
-        const taxRate = parseFloat(s.tax_rate)
+        const taxRate = parseFloat(s.tax_rate ?? '')
         setTaxEnabled(!isNaN(taxRate) && taxRate > 0)
-        const loyaltyRate = parseFloat(s.loyalty_points_rate)
+        const loyaltyRate = parseFloat(s.loyalty_points_rate ?? '')
         setLoyaltyEnabled(isNaN(loyaltyRate) ? true : loyaltyRate > 0)
       })
       .catch(() => toast.error('Failed to load settings'))
       .finally(() => setIsLoading(false))
   }, [])
 
-  function handleChange(key, value) {
+  function handleChange(key: keyof Settings, value: string) {
     setSettings((prev) => ({ ...prev, [key]: value }))
     if (errors[key]) setErrors((prev) => ({ ...prev, [key]: undefined }))
   }
 
-  function handleTaxToggle(enabled) {
+  function handleTaxToggle(enabled: boolean) {
     setTaxEnabled(enabled)
     if (!enabled) {
       setSettings((prev) => ({ ...prev, tax_rate: '0' }))
@@ -189,7 +217,7 @@ export default function SettingsPage() {
     }
   }
 
-  function handleLoyaltyToggle(enabled) {
+  function handleLoyaltyToggle(enabled: boolean) {
     setLoyaltyEnabled(enabled)
     if (!enabled) {
       setSettings((prev) => ({ ...prev, loyalty_points_rate: '0' }))
@@ -203,11 +231,11 @@ export default function SettingsPage() {
   }
 
   function validate() {
-    const errs = {}
+    const errs: Record<string, string> = {}
     if (!settings.store_name?.trim()) errs.store_name = 'Store name is required'
     if (!settings.currency_symbol?.trim()) errs.currency_symbol = 'Currency symbol is required'
     // Same limits the server enforces
-    const maxLengths = {
+    const maxLengths: Partial<Record<keyof Settings, [number, string]>> = {
       store_name: [100, 'Store name must be 100 characters or less'],
       store_address: [255, 'Address must be 255 characters or less'],
       store_phone: [20, 'Phone must be 20 characters or less'],
@@ -215,7 +243,8 @@ export default function SettingsPage() {
       receipt_footer: [200, 'Receipt footer must be 200 characters or less'],
     }
     for (const [key, [max, message]] of Object.entries(maxLengths)) {
-      if ((settings[key]?.trim().length ?? 0) > max) errs[key] = message
+      // The keys above are all Settings fields
+      if ((settings[key as keyof Settings]?.trim().length ?? 0) > max) errs[key] = message
     }
     if (taxEnabled) {
       const taxRate = parseFloat(settings.tax_rate)
@@ -236,7 +265,7 @@ export default function SettingsPage() {
     return errs
   }
 
-  async function handleSubmit(e) {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const errs = validate()
     if (Object.keys(errs).length > 0) {

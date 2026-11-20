@@ -1,23 +1,30 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, type ReactNode } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { DashboardLayout } from '../layouts/DashboardLayout'
 import { Button } from '../components/Button'
-import { Badge } from '../components/Badge'
+import { Badge, type BadgeVariant } from '../components/Badge'
 import { Table } from '../components/Table'
 import { Pagination } from '../components/Pagination'
 import { customersService } from '../services/customers'
 import { formatCurrency } from '../utils/formatCurrency'
 import { useAuth } from '../hooks/useAuth'
+import { defineColumns } from '../utils/tableColumns'
+import type { Customer, PaginationMeta, PaymentMethod, Sale } from '../types'
 
-const PAYMENT_BADGE = {
+const PAYMENT_BADGE: Record<PaymentMethod, BadgeVariant> = {
   CASH: 'default',
   MOBILE_MONEY: 'primary',
   CARD: 'success',
   SPLIT: 'warning',
 }
 
-function InfoRow({ label, value }) {
+export interface InfoRowProps {
+  label: ReactNode
+  value?: ReactNode
+}
+
+function InfoRow({ label, value }: InfoRowProps) {
   return (
     <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 py-3 border-b border-gray-100 dark:border-gray-800 last:border-0">
       <dt className="text-sm font-medium text-gray-500 dark:text-gray-400 sm:w-36 flex-shrink-0">{label}</dt>
@@ -27,25 +34,26 @@ function InfoRow({ label, value }) {
 }
 
 export default function CustomerDetailPage() {
-  const { id } = useParams()
+  // The route always supplies the id
+  const { id = '' } = useParams()
   const navigate = useNavigate()
   const { user } = useAuth()
   const backPath = user?.role === 'CASHIER' ? '/cashier/customers' : '/customers'
 
-  const [customer, setCustomer] = useState(null)
-  const [purchases, setPurchases] = useState([])
-  const [meta, setMeta] = useState({ page: 1, total_pages: 1 })
+  const [customer, setCustomer] = useState<Customer | null>(null)
+  const [purchases, setPurchases] = useState<Sale[]>([])
+  const [meta, setMeta] = useState<Pick<PaginationMeta, 'page' | 'total_pages'>>({ page: 1, total_pages: 1 })
   const [page, setPage] = useState(1)
   const [loadingCustomer, setLoadingCustomer] = useState(true)
   const [loadingPurchases, setLoadingPurchases] = useState(true)
-  const [error, setError] = useState(null)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     async function fetchCustomer() {
       setLoadingCustomer(true)
       try {
         const res = await customersService.get(id)
-        setCustomer(res.data?.data ?? res.data)
+        setCustomer(res.data?.data ?? null)
       } catch {
         setError('Customer not found or could not be loaded.')
       } finally {
@@ -59,7 +67,7 @@ export default function CustomerDetailPage() {
     setLoadingPurchases(true)
     try {
       const res = await customersService.purchases(id, { page, per_page: 20 })
-      setPurchases(res.data?.data ?? res.data ?? [])
+      setPurchases(res.data?.data ?? [])
       setMeta(res.data?.meta ?? { page: 1, total_pages: 1 })
     } catch {
       toast.error('Failed to load purchase history')
@@ -72,7 +80,7 @@ export default function CustomerDetailPage() {
     fetchPurchases()
   }, [fetchPurchases])
 
-  const purchaseColumns = [
+  const purchaseColumns = defineColumns<Sale>()([
     {
       key: 'transaction_id',
       label: 'Transaction ID',
@@ -113,7 +121,7 @@ export default function CustomerDetailPage() {
         </Badge>
       ),
     },
-  ]
+  ])
 
   return (
     <DashboardLayout>

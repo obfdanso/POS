@@ -1,16 +1,18 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, type FormEvent } from 'react'
 import toast from 'react-hot-toast'
 import { DashboardLayout } from '../layouts/DashboardLayout'
 import { Button } from '../components/Button'
 import { Input } from '../components/Input'
 import { Modal } from '../components/Modal'
 import { Table } from '../components/Table'
-import { Badge } from '../components/Badge'
+import { Badge, type BadgeVariant } from '../components/Badge'
 import { promotionsService } from '../services/promotions'
 import { productsService } from '../services/products'
 import { getErrorMessage, getFieldErrors } from '../utils/apiErrors'
+import { defineColumns } from '../utils/tableColumns'
+import type { Category, Product, Promotion, PromotionPayload, PromotionStatus } from '../types'
 
-const STATUS = {
+const STATUS: Record<PromotionStatus, { label: string; variant: BadgeVariant }> = {
   ACTIVE: { label: 'Running', variant: 'success' },
   SCHEDULED: { label: 'Scheduled', variant: 'primary' },
   ENDED: { label: 'Ended', variant: 'default' },
@@ -20,22 +22,31 @@ const STATUS = {
 const selectClass =
   'block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
 
-const formatDateTime = (value) =>
+const formatDateTime = (value: string | null | undefined) =>
   value ? new Date(value).toLocaleString('en-GH', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : null
 
 // <input type="datetime-local"> works in local time without a zone
-function toLocalInput(value) {
+function toLocalInput(value: string | null | undefined) {
   if (!value) return ''
   const d = new Date(value)
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
 }
 
-const appliesTo = (p) => (p.product ? p.product.name : p.category ? `All ${p.category.name}` : 'Whole store')
+const appliesTo = (p: Promotion) => (p.product ? p.product.name : p.category ? `All ${p.category.name}` : 'Whole store')
+
+/** The product a promotion is for: a search result, or the one an existing promotion already names */
+type PromotionProduct = Pick<Product, 'id' | 'name'> & Partial<Pick<Product, 'sku'>>
+
+export interface ProductSearchProps {
+  value: PromotionProduct | null
+  onChange: (product: PromotionProduct | null) => void
+  error?: string
+}
 
 // Product search for single-product promotions
-function ProductSearch({ value, onChange, error }) {
+function ProductSearch({ value, onChange, error }: ProductSearchProps) {
   const [query, setQuery] = useState('')
-  const [results, setResults] = useState([])
+  const [results, setResults] = useState<Product[]>([])
   const latest = useRef(0)
 
   useEffect(() => {
@@ -76,9 +87,27 @@ function ProductSearch({ value, onChange, error }) {
   )
 }
 
-function PromotionModal({ promotion, categories, onClose, onSaved }) {
+interface PromotionForm {
+  name: string
+  percent_off: string
+  /** 'store', 'category' or 'product' */
+  target: string
+  category_id: string
+  product: PromotionProduct | null
+  starts_at: string
+  ends_at: string
+}
+
+export interface PromotionModalProps {
+  promotion: Promotion | null
+  categories: Category[]
+  onClose: () => void
+  onSaved: () => void
+}
+
+function PromotionModal({ promotion, categories, onClose, onSaved }: PromotionModalProps) {
   const editing = Boolean(promotion)
-  const [form, setForm] = useState(() => ({
+  const [form, setForm] = useState<PromotionForm>(() => ({
     name: promotion?.name ?? '',
     percent_off: promotion ? String(Number(promotion.percent_off)) : '',
     target: promotion?.product ? 'product' : promotion?.category ? 'category' : 'store',
@@ -87,16 +116,16 @@ function PromotionModal({ promotion, categories, onClose, onSaved }) {
     starts_at: toLocalInput(promotion?.starts_at),
     ends_at: toLocalInput(promotion?.ends_at),
   }))
-  const [errors, setErrors] = useState({})
+  const [errors, setErrors] = useState<Record<string, string | undefined>>({})
   const [isSaving, setIsSaving] = useState(false)
 
-  const set = (key, value) => {
+  const set = <K extends keyof PromotionForm>(key: K, value: PromotionForm[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }))
     setErrors((prev) => ({ ...prev, [key]: undefined }))
   }
 
   function validate() {
-    const errs = {}
+    const errs: Record<string, string> = {}
     if (!form.name.trim()) errs.name = 'Give the promotion a name'
     const pct = Number(form.percent_off)
     if (!form.percent_off || Number.isNaN(pct) || pct <= 0 || pct > 100) errs.percent_off = 'Enter a percentage between 0.01 and 100'
@@ -106,22 +135,22 @@ function PromotionModal({ promotion, categories, onClose, onSaved }) {
     return errs
   }
 
-  async function handleSubmit(e) {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const errs = validate()
     setErrors(errs)
     if (Object.keys(errs).length) return
-    const payload = {
+    const payload: PromotionPayload = {
       name: form.name.trim(),
       percent_off: Number(form.percent_off),
-      product_id: form.target === 'product' ? form.product.id : null,
+      product_id: form.target === 'product' && form.product ? form.product.id : null,
       category_id: form.target === 'category' ? form.category_id : null,
       ends_at: form.ends_at ? new Date(form.ends_at).toISOString() : null,
       ...(form.starts_at && { starts_at: new Date(form.starts_at).toISOString() }),
     }
     setIsSaving(true)
     try {
-      const res = editing ? await promotionsService.update(promotion.id, payload) : await promotionsService.create(payload)
+      const res = promotion ? await promotionsService.update(promotion.id, payload) : await promotionsService.create(payload)
       toast.success(res.data.message)
       onSaved()
     } catch (err) {
@@ -174,11 +203,11 @@ function PromotionModal({ promotion, categories, onClose, onSaved }) {
 }
 
 export default function PromotionsPage() {
-  const [promotions, setPromotions] = useState([])
-  const [categories, setCategories] = useState([])
+  const [promotions, setPromotions] = useState<Promotion[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [status, setStatus] = useState('')
-  const [editing, setEditing] = useState(null) // null = closed, {} = new, promotion = edit
+  const [editing, setEditing] = useState<Promotion | { id?: undefined } | null>(null) // null = closed, {} = new, promotion = edit
   const latestRequest = useRef(0)
 
   useEffect(() => {
@@ -204,7 +233,7 @@ export default function PromotionsPage() {
     fetchPromotions()
   }, [fetchPromotions])
 
-  async function toggle(promo) {
+  async function toggle(promo: Promotion) {
     try {
       await promotionsService.update(promo.id, { is_active: !promo.is_active })
       toast.success(promo.is_active ? `${promo.name} switched off` : `${promo.name} switched on`)
@@ -214,7 +243,7 @@ export default function PromotionsPage() {
     }
   }
 
-  const columns = [
+  const columns = defineColumns<Promotion>()([
     { key: 'name', label: 'Promotion', sortable: true },
     { key: 'percent_off', label: 'Off', sortable: true, sortValue: (row) => Number(row.percent_off), render: (v) => `${Number(v)}%` },
     { key: 'applies_to', label: 'Applies to', sortable: true, sortValue: appliesTo, render: (_, row) => appliesTo(row) },
@@ -225,7 +254,7 @@ export default function PromotionsPage() {
       render: (_, row) => `${formatDateTime(row.starts_at)} → ${formatDateTime(row.ends_at) ?? 'no end'}`,
     },
     { key: 'times_used', label: 'Sale lines', sortable: true },
-    { key: 'status', label: 'Status', sortable: true, render: (v) => <Badge variant={STATUS[v]?.variant}>{STATUS[v]?.label ?? v}</Badge> },
+    { key: 'status', label: 'Status', sortable: true, render: (v) => <Badge variant={v ? STATUS[v]?.variant : undefined}>{(v ? STATUS[v]?.label : undefined) ?? v}</Badge> },
     {
       key: 'actions',
       label: '',
@@ -236,7 +265,7 @@ export default function PromotionsPage() {
         </div>
       ),
     },
-  ]
+  ])
 
   return (
     <DashboardLayout>

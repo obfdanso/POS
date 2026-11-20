@@ -2,8 +2,8 @@ import { useId, type InputHTMLAttributes, type ReactNode } from 'react'
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: ReactNode
-  /** Inline validation message shown under the input */
-  error?: string | null
+  /** Inline validation message shown under the input; `true` marks the input invalid without one */
+  error?: string | boolean | null
 }
 
 export function Input({ label, error, className = '', id, name, ...props }: InputProps) {

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { DashboardLayout } from '../layouts/DashboardLayout'
 import api from '../services/api'
+import type { ApiPaginated, Customer } from '../types'
 
 function StarIcon() {
   return (
@@ -15,9 +16,9 @@ export default function CashierCustomerLookupPage() {
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
   // Results belong to `searchedFor`; they're hidden as soon as the box is cleared
-  const [results, setResults] = useState({ searchedFor: '', customers: [] })
+  const [results, setResults] = useState<{ searchedFor: string; customers: Customer[] }>({ searchedFor: '', customers: [] })
   const [loading, setLoading] = useState(false)
-  const inputRef = useRef(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   // Debounced search
   useEffect(() => {
@@ -27,7 +28,7 @@ export default function CashierCustomerLookupPage() {
     let cancelled = false
     const timer = setTimeout(() => {
       setLoading(true)
-      api.get('/customers', { params: { search: q, per_page: 20 } })
+      api.get<ApiPaginated<Customer>>('/customers', { params: { search: q, per_page: 20 } })
         .then((res) => { if (!cancelled) setResults({ searchedFor: q, customers: res.data.data || [] }) })
         .catch(() => { if (!cancelled) setResults({ searchedFor: q, customers: [] }) })
         .finally(() => { if (!cancelled) setLoading(false) })

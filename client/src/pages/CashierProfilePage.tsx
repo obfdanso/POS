@@ -1,13 +1,21 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
 import { DashboardLayout } from '../layouts/DashboardLayout'
 import { useAuth } from '../hooks/useAuth'
 import toast from 'react-hot-toast'
 import api, { setAccessToken } from '../services/api'
 import { getFieldErrors, getErrorMessage } from '../utils/apiErrors'
+import type { ApiSuccess, Role } from '../types'
 
 // ─── Sub-components (mirrors SettingsPage style) ──────────────────────────────
 
-function SectionCard({ icon, title, description, children }) {
+export interface SectionCardProps {
+  icon?: ReactNode
+  title: ReactNode
+  description?: ReactNode
+  children?: ReactNode
+}
+
+function SectionCard({ icon, title, description, children }: SectionCardProps) {
   return (
     <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden">
       <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-start gap-3">
@@ -28,7 +36,14 @@ function SectionCard({ icon, title, description, children }) {
   )
 }
 
-function FieldRow({ label, hint, error, children }) {
+export interface FieldRowProps {
+  label: ReactNode
+  hint?: ReactNode
+  error?: string
+  children?: ReactNode
+}
+
+function FieldRow({ label, hint, error, children }: FieldRowProps) {
   return (
     <div className="py-4 first:pt-0 last:pb-0">
       <div className="flex flex-col sm:flex-row sm:items-start sm:gap-6">
@@ -43,7 +58,11 @@ function FieldRow({ label, hint, error, children }) {
   )
 }
 
-function ReadOnlyValue({ value }) {
+export interface ReadOnlyValueProps {
+  value?: string | null
+}
+
+function ReadOnlyValue({ value }: ReadOnlyValueProps) {
   return (
     <div className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm text-gray-600 dark:text-gray-400 select-none">
       {value || '—'}
@@ -65,7 +84,7 @@ const LockIcon = (
   </svg>
 )
 
-const roleBadgeStyle = {
+const roleBadgeStyle: Record<Role, string> = {
   ADMIN:   'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
   MANAGER: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
   CASHIER: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
@@ -73,17 +92,28 @@ const roleBadgeStyle = {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+interface ProfileForm {
+  full_name: string
+  email: string
+}
+
+interface PasswordForm {
+  current_password: string
+  new_password: string
+  confirm_password: string
+}
+
 export default function CashierProfilePage() {
   const { user, refreshUser } = useAuth()
 
   // Profile form — synced from user on load
-  const [profileForm, setProfileForm] = useState({ full_name: '', email: '' })
-  const [profileErrors, setProfileErrors] = useState({})
+  const [profileForm, setProfileForm] = useState<ProfileForm>({ full_name: '', email: '' })
+  const [profileErrors, setProfileErrors] = useState<Record<string, string>>({})
   const [savingProfile, setSavingProfile] = useState(false)
 
   // Password form
-  const [pwForm, setPwForm] = useState({ current_password: '', new_password: '', confirm_password: '' })
-  const [pwErrors, setPwErrors] = useState({})
+  const [pwForm, setPwForm] = useState<PasswordForm>({ current_password: '', new_password: '', confirm_password: '' })
+  const [pwErrors, setPwErrors] = useState<Record<string, string>>({})
   const [savingPw, setSavingPw] = useState(false)
 
   useEffect(() => {
@@ -94,21 +124,21 @@ export default function CashierProfilePage() {
 
   // ── Profile handlers ──────────────────────────────────────────────────────
 
-  function handleProfileChange(e) {
+  function handleProfileChange(e: ChangeEvent<HTMLInputElement>) {
     const { name, value } = e.target
     setProfileForm((prev) => ({ ...prev, [name]: value }))
     if (profileErrors[name]) setProfileErrors((prev) => ({ ...prev, [name]: '' }))
   }
 
   function validateProfile() {
-    const errs = {}
+    const errs: Record<string, string> = {}
     if (!profileForm.full_name.trim()) errs.full_name = 'Full name is required'
     if (!profileForm.email.trim()) errs.email = 'Email is required'
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(profileForm.email.trim())) errs.email = 'Invalid email address'
     return errs
   }
 
-  async function handleSaveProfile(e) {
+  async function handleSaveProfile(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const errs = validateProfile()
     if (Object.keys(errs).length) { setProfileErrors(errs); return }
@@ -131,28 +161,28 @@ export default function CashierProfilePage() {
 
   // ── Password handlers ─────────────────────────────────────────────────────
 
-  function handlePwChange(e) {
+  function handlePwChange(e: ChangeEvent<HTMLInputElement>) {
     const { name, value } = e.target
     setPwForm((prev) => ({ ...prev, [name]: value }))
     if (pwErrors[name]) setPwErrors((prev) => ({ ...prev, [name]: '' }))
   }
 
   function validatePw() {
-    const errs = {}
+    const errs: Record<string, string> = {}
     if (!pwForm.current_password) errs.current_password = 'Required'
     if (!pwForm.new_password || pwForm.new_password.length < 6) errs.new_password = 'At least 6 characters'
     if (pwForm.new_password !== pwForm.confirm_password) errs.confirm_password = 'Passwords do not match'
     return errs
   }
 
-  async function handleChangePassword(e) {
+  async function handleChangePassword(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const errs = validatePw()
     if (Object.keys(errs).length) { setPwErrors(errs); return }
     setPwErrors({})
     setSavingPw(true)
     try {
-      const res = await api.post('/auth/change-password', {
+      const res = await api.post<ApiSuccess<{ accessToken: string }>>('/auth/change-password', {
         current_password: pwForm.current_password,
         new_password: pwForm.new_password,
       })
@@ -201,7 +231,7 @@ export default function CashierProfilePage() {
               </div>
               <div>
                 <p className="font-semibold text-gray-900 dark:text-gray-100 text-sm">{roleLabel}</p>
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${roleBadgeStyle[user?.role] || ''}`}>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${(user && roleBadgeStyle[user.role]) || ''}`}>
                   {user?.role}
                 </span>
               </div>
@@ -280,11 +310,11 @@ export default function CashierProfilePage() {
           description="Choose a strong password of at least 6 characters."
         >
           <form onSubmit={handleChangePassword} className="divide-y divide-gray-100 dark:divide-gray-800">
-            {[
+            {([
               { name: 'current_password', label: 'Current Password', hint: 'Your existing password' },
               { name: 'new_password',     label: 'New Password',     hint: 'Minimum 6 characters' },
               { name: 'confirm_password', label: 'Confirm Password', hint: 'Must match new password' },
-            ].map(({ name, label, hint }) => (
+            ] as const).map(({ name, label, hint }) => (
               <FieldRow key={name} label={label} hint={hint} error={pwErrors[name]}>
                 <input
                   type="password"

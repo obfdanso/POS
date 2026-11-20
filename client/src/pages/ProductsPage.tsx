@@ -11,22 +11,25 @@ import { Modal } from '../components/Modal'
 import { productsService } from '../services/products'
 import { formatCurrency } from '../utils/formatCurrency'
 import { useAuth } from '../hooks/useAuth'
+import { apiErrorBody } from '../utils/apiErrors'
+import { defineColumns, type TableSort } from '../utils/tableColumns'
+import type { Category, PaginationMeta, Product, QueryParams } from '../types'
 
 export default function ProductsPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const isAdmin = user?.role === 'ADMIN'
 
-  const [products, setProducts] = useState([])
-  const [categories, setCategories] = useState([])
+  const [products, setProducts] = useState<Product[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [meta, setMeta] = useState({ page: 1, total_pages: 1, total: 0 })
+  const [meta, setMeta] = useState<Pick<PaginationMeta, 'page' | 'total_pages' | 'total'>>({ page: 1, total_pages: 1, total: 0 })
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('active')
   const [page, setPage] = useState(1)
-  const [sort, setSort] = useState({ key: 'name', order: 'asc' })
-  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [sort, setSort] = useState<TableSort>({ key: 'name', order: 'asc' })
+  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
 
   // Load categories once
@@ -42,7 +45,7 @@ export default function ProductsPage() {
     const requestId = ++latestRequest.current
     setIsLoading(true)
     try {
-      const params = { page, per_page: 20, include_unstocked: true }
+      const params: QueryParams = { page, per_page: 20, include_unstocked: true }
       if (search.trim()) params.search = search.trim()
       if (categoryFilter) params.category_id = categoryFilter
       params.status = statusFilter
@@ -65,7 +68,7 @@ export default function ProductsPage() {
   }, [fetchProducts])
 
   // Sorting happens on the server so it covers every page, not just the visible one
-  function handleSortChange(next) {
+  function handleSortChange(next: TableSort) {
     setSort(next)
     setPage(1)
   }
@@ -75,17 +78,17 @@ export default function ProductsPage() {
     setPage(1)
   }, [search, categoryFilter, statusFilter])
 
-  async function handleReactivate(product) {
+  async function handleReactivate(product: Product) {
     try {
       await productsService.update(product.id, { is_active: true })
       toast.success(`"${product.name}" is active again`)
       fetchProducts()
     } catch (err) {
-      toast.error(err.response?.data?.error?.message || 'Failed to reactivate product')
+      toast.error(apiErrorBody(err)?.message || 'Failed to reactivate product')
     }
   }
 
-  async function handleDelete(product) {
+  async function handleDelete(product: Product) {
     setIsDeleting(true)
     try {
       await productsService.delete(product.id)
@@ -93,13 +96,13 @@ export default function ProductsPage() {
       setDeleteTarget(null)
       fetchProducts()
     } catch (err) {
-      toast.error(err.response?.data?.error?.message || 'Failed to delete product')
+      toast.error(apiErrorBody(err)?.message || 'Failed to delete product')
     } finally {
       setIsDeleting(false)
     }
   }
 
-  const columns = [
+  const columns = defineColumns<Product>()([
     {
       key: 'name',
       sortable: true,
@@ -110,7 +113,7 @@ export default function ProductsPage() {
           <p className="text-xs text-gray-400 dark:text-gray-500">
             {row.sku}
             {row.parent && <> · {row.variant_name} of {row.parent.name}</>}
-            {row._count?.variants > 0 && <> · {row._count.variants} variant{row._count.variants === 1 ? '' : 's'}</>}
+            {(row._count?.variants ?? 0) > 0 && <> · {row._count?.variants} variant{row._count?.variants === 1 ? '' : 's'}</>}
           </p>
         </div>
       ),
@@ -188,7 +191,7 @@ export default function ProductsPage() {
         </div>
       ),
     },
-  ]
+  ])
 
   return (
     <DashboardLayout>
@@ -289,7 +292,7 @@ export default function ProductsPage() {
               variant="danger"
               className="flex-1"
               isLoading={isDeleting}
-              onClick={() => handleDelete(deleteTarget)}
+              onClick={() => deleteTarget && handleDelete(deleteTarget)}
             >
               Deactivate
             </Button>

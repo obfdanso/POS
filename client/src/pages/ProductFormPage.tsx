@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, type ChangeEvent, type FormEvent } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { DashboardLayout } from '../layouts/DashboardLayout'
@@ -11,15 +11,39 @@ import api from '../services/api'
 import { useAuth } from '../hooks/useAuth'
 import { useBranch } from '../hooks/useBranch'
 import { getFieldErrors, getErrorMessage } from '../utils/apiErrors'
+import type { ApiPaginated, BranchStock, Category, Product, ProductBody, Supplier } from '../types'
 
-const isWholeAtLeastZero = (v) => v !== '' && Number.isInteger(Number(v)) && Number(v) >= 0
+const isWholeAtLeastZero = (v: string) => v !== '' && Number.isInteger(Number(v)) && Number(v) >= 0
 
 /**
  * Which branches stock the product. One row per branch this user manages (all open branches for an
  * admin, their own for a manager): a tick box, a starting quantity for branches that newly stock it,
  * and the branch's low-stock level. Stock that is already there changes through Inventory.
  */
-function StockedAt({ rows, onChange, errors, loaded, failed, onRetry }) {
+/** A branch's row in the Stocked at list (quantities as typed) */
+export interface StockRow {
+  branch_id: string
+  name: string
+  /** The branch already stocks the product */
+  existing: boolean
+  current: number
+  stocked: boolean
+  quantity: string
+  low_stock_threshold: string
+}
+
+type StockEdit = Partial<Pick<StockRow, 'stocked' | 'quantity' | 'low_stock_threshold'>>
+
+export interface StockedAtProps {
+  rows: StockRow[]
+  onChange: (branchId: string, change: StockEdit) => void
+  errors: Record<string, string>
+  loaded: boolean
+  failed: boolean
+  onRetry: () => void
+}
+
+function StockedAt({ rows, onChange, errors, loaded, failed, onRetry }: StockedAtProps) {
   if (failed) {
     return (
       <p className="text-sm text-danger-600">
@@ -87,30 +111,30 @@ export default function ProductFormPage() {
   const { id } = useParams()
   const { branches, branchesLoaded, branchesFailed, reloadBranches } = useBranch()
   // Stock rows as loaded (edit) and as being edited, by branch id
-  const [loadedStocks, setLoadedStocks] = useState(null)
-  const [stockEdits, setStockEdits] = useState({})
+  const [loadedStocks, setLoadedStocks] = useState<BranchStock[] | null>(null)
+  const [stockEdits, setStockEdits] = useState<Record<string, StockEdit>>({})
   const isEditing = Boolean(id)
   // /products/new?variantOf=<id> adds a size or flavour to that product
   const [searchParams] = useSearchParams()
   const variantOf = isEditing ? null : searchParams.get('variantOf')
   // The main product when this one is a variant ({ id, name, variant_name }), and this one's own variants
-  const [parent, setParent] = useState(null)
-  const [variants, setVariants] = useState([])
+  const [parent, setParent] = useState<Pick<Product, 'id' | 'name'> & Partial<Pick<Product, 'variant_name'>> | null>(null)
+  const [variants, setVariants] = useState<Product[]>([])
   const { currency_symbol } = useSettings()
   const { user } = useAuth()
   // Activating/deactivating is ADMIN-only, matching product deletion
   const canToggleActive = user?.role === 'ADMIN'
 
-  const [categories, setCategories] = useState([])
+  const [categories, setCategories] = useState<Category[]>([])
   // null when closed; { name, description } while the New category dialog is open
-  const [newCategory, setNewCategory] = useState(null)
+  const [newCategory, setNewCategory] = useState<{ name: string; description: string } | null>(null)
   const [newCategoryError, setNewCategoryError] = useState('')
   const [isCreatingCategory, setIsCreatingCategory] = useState(false)
-  const [suppliers, setSuppliers] = useState([])
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [isLoadingProduct, setIsLoadingProduct] = useState(isEditing || Boolean(variantOf))
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [errors, setErrors] = useState({})
-  const fileInputRef = useRef(null)
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [form, setForm] = useState({
     name: '',
@@ -125,8 +149,8 @@ export default function ProductFormPage() {
     is_active: true,
     variant_name: '',
   })
-  const [imageFile, setImageFile] = useState(null)
-  const [imagePreview, setImagePreview] = useState(null)
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [imageRemoved, setImageRemoved] = useState(false)
 
   // Load categories and suppliers in parallel
@@ -134,14 +158,14 @@ export default function ProductFormPage() {
     productsService.categories()
       .then((res) => setCategories(res.data?.data || []))
       .catch(() => toast.error('Failed to load categories'))
-    api.get('/suppliers', { params: { per_page: 100 } })
+    api.get<ApiPaginated<Supplier>>('/suppliers', { params: { per_page: 100 } })
       .then((res) => setSuppliers(res.data?.data || []))
       .catch(() => {}) // non-critical — supplier field will just be empty
   }, [])
 
   // One row per branch this user manages: every open branch for an admin, their own for a manager
   const manageable = user?.role === 'ADMIN' ? branches : branches.filter((b) => b.id === user?.branch?.id)
-  const stockRows = manageable.map((b) => {
+  const stockRows = manageable.map((b): StockRow => {
     const loaded = loadedStocks?.find((r) => r.branch_id === b.id)
     const edits = stockEdits[b.id] || {}
     return {
@@ -155,11 +179,11 @@ export default function ProductFormPage() {
       low_stock_threshold: edits.low_stock_threshold ?? String(loaded?.low_stock_threshold ?? form.low_stock_threshold ?? '10'),
     }
   })
-  const editStock = (branchId, change) => setStockEdits((prev) => ({ ...prev, [branchId]: { ...prev[branchId], ...change } }))
+  const editStock = (branchId: string, change: StockEdit) => setStockEdits((prev) => ({ ...prev, [branchId]: { ...prev[branchId], ...change } }))
 
   // Load product if editing
   useEffect(() => {
-    if (!isEditing) return
+    if (!isEditing || !id) return
     productsService.get(id)
       .then((res) => {
         const p = res.data?.data
@@ -208,8 +232,9 @@ export default function ProductFormPage() {
       .finally(() => setIsLoadingProduct(false))
   }, [variantOf, navigate])
 
-  async function handleCreateCategory(e) {
+  async function handleCreateCategory(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    if (!newCategory) return
     if (!newCategory.name.trim()) { setNewCategoryError('Category name is required'); return }
     setIsCreatingCategory(true)
     try {
@@ -229,12 +254,12 @@ export default function ProductFormPage() {
     }
   }
 
-  function setField(key, value) {
+  function setField<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))
     if (errors[key]) setErrors((prev) => { const e = { ...prev }; delete e[key]; return e })
   }
 
-  function handleImageChange(e) {
+  function handleImageChange(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
     if (!file.type.startsWith('image/')) {
@@ -252,7 +277,7 @@ export default function ProductFormPage() {
   }
 
   function validate() {
-    const errs = {}
+    const errs: Record<string, string> = {}
     if (!form.name.trim()) errs.name = 'Product name is required'
     if (!form.sku.trim()) errs.sku = 'SKU is required'
     if (!form.category_id) errs.category_id = 'Category is required'
@@ -280,13 +305,13 @@ export default function ProductFormPage() {
       }))
   }
 
-  async function handleSubmit(e) {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (!validate()) { toast.error('Please fix the errors below'); return }
 
     setIsSubmitting(true)
     try {
-      let payload
+      let payload: ProductBody
 
       if (imageFile) {
         // Use FormData for file upload
@@ -322,7 +347,7 @@ export default function ProductFormPage() {
         }
       }
 
-      if (isEditing) {
+      if (isEditing && id) {
         await productsService.update(id, payload)
         toast.success('Product updated successfully')
       } else {
@@ -637,7 +662,7 @@ export default function ProductFormPage() {
             <Input
               label="Name *"
               value={newCategory.name}
-              onChange={(e) => { setNewCategory((c) => ({ ...c, name: e.target.value })); setNewCategoryError('') }}
+              onChange={(e) => { setNewCategory((c) => (c && { ...c, name: e.target.value })); setNewCategoryError('') }}
               error={newCategoryError}
               placeholder="e.g. Frozen Foods"
               autoFocus
@@ -645,7 +670,7 @@ export default function ProductFormPage() {
             <Input
               label="Description"
               value={newCategory.description}
-              onChange={(e) => setNewCategory((c) => ({ ...c, description: e.target.value }))}
+              onChange={(e) => setNewCategory((c) => (c && { ...c, description: e.target.value }))}
               placeholder="Optional"
             />
             <div className="flex justify-end gap-3">

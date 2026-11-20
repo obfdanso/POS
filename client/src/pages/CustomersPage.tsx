@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, type ChangeEvent, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { DashboardLayout } from '../layouts/DashboardLayout'
@@ -10,11 +10,20 @@ import { Pagination } from '../components/Pagination'
 import { customersService } from '../services/customers'
 import { formatCurrency } from '../utils/formatCurrency'
 import { getFieldErrors, getErrorMessage } from '../utils/apiErrors'
+import { defineColumns, type TableSort } from '../utils/tableColumns'
+import type { Customer, PaginationMeta } from '../types'
 
-const EMPTY_FORM = { name: '', phone: '', email: '', address: '' }
+interface CustomerForm {
+  name: string
+  phone: string
+  email: string
+  address: string
+}
 
-function validate(form) {
-  const errors = {}
+const EMPTY_FORM: CustomerForm = { name: '', phone: '', email: '', address: '' }
+
+function validate(form: CustomerForm) {
+  const errors: Record<string, string> = {}
   if (!form.name.trim()) errors.name = 'Name is required'
   return errors
 }
@@ -22,17 +31,17 @@ function validate(form) {
 export default function CustomersPage() {
   const navigate = useNavigate()
 
-  const [customers, setCustomers] = useState([])
-  const [meta, setMeta] = useState({ page: 1, total_pages: 1 })
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [meta, setMeta] = useState<Pick<PaginationMeta, 'page' | 'total_pages'>>({ page: 1, total_pages: 1 })
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
-  const [sort, setSort] = useState({ key: 'name', sortable: true, order: 'asc' })
+  const [sort, setSort] = useState<TableSort>({ key: 'name', order: 'asc' })
   const [loading, setLoading] = useState(true)
 
   const [modalOpen, setModalOpen] = useState(false)
-  const [editTarget, setEditTarget] = useState(null)
-  const [form, setForm] = useState(EMPTY_FORM)
-  const [errors, setErrors] = useState({})
+  const [editTarget, setEditTarget] = useState<Customer | null>(null)
+  const [form, setForm] = useState<CustomerForm>(EMPTY_FORM)
+  const [errors, setErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
 
   const latestRequest = useRef(0)
@@ -43,7 +52,7 @@ export default function CustomersPage() {
     try {
       const res = await customersService.list({ page, search: search || undefined, per_page: 20, sort: sort.key, order: sort.order })
       if (requestId !== latestRequest.current) return
-      setCustomers(res.data?.data ?? res.data ?? [])
+      setCustomers(res.data?.data ?? [])
       setMeta(res.data?.meta ?? { page: 1, total_pages: 1 })
     } catch {
       if (requestId !== latestRequest.current) return
@@ -54,7 +63,7 @@ export default function CustomersPage() {
   }, [page, search, sort])
 
   // Sorting happens on the server so it covers every page, not just the visible one
-  function handleSortChange(next) {
+  function handleSortChange(next: TableSort) {
     setSort(next)
     setPage(1)
   }
@@ -75,7 +84,7 @@ export default function CustomersPage() {
     setModalOpen(true)
   }
 
-  function openEdit(customer) {
+  function openEdit(customer: Customer) {
     setEditTarget(customer)
     setForm({
       name: customer.name ?? '',
@@ -92,13 +101,13 @@ export default function CustomersPage() {
     setEditTarget(null)
   }
 
-  function handleChange(e) {
+  function handleChange(e: ChangeEvent<HTMLInputElement>) {
     const { name, value } = e.target
     setForm((f) => ({ ...f, [name]: value }))
     if (errors[name]) setErrors((e) => { const n = { ...e }; delete n[name]; return n })
   }
 
-  async function handleSubmit(e) {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const errs = validate(form)
     if (Object.keys(errs).length) { setErrors(errs); return }
@@ -128,7 +137,7 @@ export default function CustomersPage() {
     }
   }
 
-  const columns = [
+  const columns = defineColumns<Customer>()([
     { key: 'name', label: 'Name', render: (v) => <span className="font-medium text-gray-900 dark:text-gray-100">{v}</span> },
     { key: 'phone', sortable: true, label: 'Phone', render: (v) => v ?? <span className="text-gray-400">—</span> },
     { key: 'email', sortable: true, label: 'Email', render: (v) => v ?? <span className="text-gray-400">—</span> },
@@ -161,7 +170,7 @@ export default function CustomersPage() {
         </div>
       ),
     },
-  ]
+  ])
 
   return (
     <DashboardLayout>

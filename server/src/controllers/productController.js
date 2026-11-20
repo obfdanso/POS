@@ -31,7 +31,7 @@ async function listProducts(req, res, next) {
 
 async function getProduct(req, res, next) {
   try {
-    const product = await productService.getProductById(req.params.id, req.branchId)
+    const product = await productService.getProductById(req.params.id, req.branchId, { allBranches: req.user.role === 'ADMIN' })
     res.json({ success: true, data: product })
   } catch (err) {
     next(err)

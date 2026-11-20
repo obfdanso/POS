@@ -262,6 +262,19 @@ describe('Branch stock', () => {
     expect(counts).toEqual([...counts].sort((a, b) => b - a))
   })
 
+  it("doesn't show staff another branch's stock on a product", async () => {
+    await prisma.branchStock.upsert({
+      where: { branch_id_product_id: { branch_id: other.id, product_id: product.id } },
+      create: { branch_id: other.id, product_id: product.id, quantity: 7 },
+      update: {},
+    })
+    for (const who of [cashier, manager]) {
+      const res = await request(app).get(`/api/products/${product.id}`).set(auth(who))
+      expect(res.status).toBe(200)
+      expect(res.body.data.stocks.map((s) => s.branch_id)).toEqual([home.id])
+    }
+  })
+
   it('stocks a new product at the branches chosen, logging starting stock at each', async () => {
     const res = await request(app).post('/api/products').set(allBranches())
       .send({

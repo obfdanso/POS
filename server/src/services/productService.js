@@ -106,13 +106,17 @@ async function listProducts({ page = 1, per_page = 20, search, category_id, stat
 }
 
 /**
- * A product with every branch's stock (`stocks`) and the acting branch's `quantity`. A branch that
- * doesn't stock it still gets it (with `stocked: false`) so a manager can start stocking it.
+ * A product with its branch stock rows (`stocks`) and the acting branch's `quantity`. Admins
+ * (`allBranches`) see every branch's row; staff only their own branch's. A branch that doesn't
+ * stock it still gets it (with `stocked: false`) so a manager can start stocking it.
  */
-async function getProductById(id, branchId = null) {
+async function getProductById(id, branchId = null, { allBranches = false } = {}) {
+  const stocks = allBranches
+    ? STOCKS_INCLUDE.stocks
+    : { ...STOCKS_INCLUDE.stocks, where: { branch_id: branchId ?? '' } }
   const product = await prisma.product.findUnique({
     where: { id },
-    include: { ...PRODUCT_INCLUDE, ...STOCKS_INCLUDE, variants: { select: VARIANT_SELECT, orderBy: [{ variant_name: 'asc' }] } },
+    include: { ...PRODUCT_INCLUDE, stocks, variants: { select: VARIANT_SELECT, orderBy: [{ variant_name: 'asc' }] } },
   })
   if (!product) throw new NotFoundError('Product not found')
   return (await attachStock([product], branchId))[0]
@@ -268,7 +272,7 @@ async function createProduct(data, user, branchId = null) {
     for (const row of stocks) await addStockRow(tx, product.id, row, userId)
     return product
   })
-  return getProductById(created.id, branchId)
+  return getProductById(created.id, branchId, { allBranches: user.role === 'ADMIN' })
 }
 
 /**
@@ -374,7 +378,7 @@ async function updateProduct(id, data, user, branchId = null) {
     })
   }
 
-  return getProductById(id, branchId)
+  return getProductById(id, branchId, { allBranches: user.role === 'ADMIN' })
 }
 
 async function softDeleteProduct(id, userId) {

@@ -17,6 +17,8 @@ import { Modal } from '../components/Modal'
 import { Badge } from '../components/Badge'
 import { Receipt } from '../components/Receipt'
 import { useAuth } from '../hooks/useAuth'
+import { useBranch } from '../hooks/useBranch'
+import { BranchSwitcher } from '../components/BranchSwitcher'
 import { useSettings } from '../context/SettingsContext'
 import { DashboardLayout } from '../layouts/DashboardLayout'
 
@@ -490,6 +492,7 @@ function isTypingTarget(el) {
 
 export default function POSPage() {
   const { user } = useAuth()
+  const { branchId, isAllBranches } = useBranch()
   const { loyalty_points_rate, currency_symbol, refreshSettings, require_open_shift } = useSettings()
   const fmt = (v) => formatCurrency(v, currency_symbol || 'GH₵')
   const { items, cartDiscount, customer, redeemPoints, maxPoints, pointValue, pointsDiscount, subtotal, taxAmount, taxRate, total, addItem, removeItem, updateQuantity, updateDiscount, setCartDiscount, setCustomer, setRedeemPoints, clearCart, syncItems, promotions, setPromotions } = useCart()
@@ -523,8 +526,10 @@ export default function POSPage() {
   itemsRef.current = items
 
   const anyModalOpen = showPaymentModal || showReceiptModal || showCustomerModal || showClearConfirm || showOpenShift || Boolean(closingShift)
-  // When the store requires it, nothing can be charged until a shift is open
-  const needsShift = require_open_shift === 'true' && currentShift === null
+  // An admin's open shift may be at another branch; sales here can't go into that drawer
+  const shiftElsewhere = Boolean(currentShift && branchId && currentShift.branch_id !== branchId)
+  // When the store requires it, nothing can be charged until a shift is open here
+  const needsShift = require_open_shift === 'true' && (currentShift === null || shiftElsewhere)
   const canCharge = items.length > 0 && !needsShift && currentShift !== undefined
 
   const loadShift = useCallback(() => {
@@ -588,7 +593,15 @@ export default function POSPage() {
     if (!q) return false
     try {
       if (/^\d{6,}$/.test(q)) {
-        const res = await productsService.byBarcode(q).catch(() => null)
+        let notStocked = false
+        const res = await productsService.byBarcode(q).catch((err) => {
+          notStocked = err?.response?.data?.error?.message === 'Not stocked at this branch'
+          return null
+        })
+        if (notStocked) {
+          toast.error('This product is not stocked at this branch')
+          return false
+        }
         const product = res?.data?.data
         if (product) {
           if (tryAddProduct(product)) toast.success(`${product.name} added`)
@@ -759,7 +772,7 @@ export default function POSPage() {
     isSyncing.current = true
     try {
       if (queuedSales(user.id).some((e) => !e.error)) {
-        const { synced, refused } = await syncQueuedSales(user.id, (payload) => salesService.create(payload))
+        const { synced, refused } = await syncQueuedSales(user.id, (payload, saleBranch) => salesService.create(payload, saleBranch))
         if (synced) toast.success(`${synced} sale${synced === 1 ? '' : 's'} saved offline sent to the server`)
         if (refused) toast.error(`${refused} offline sale${refused === 1 ? ' was' : 's were'} refused; see the note above the products`, { duration: 8000 })
       }
@@ -834,7 +847,7 @@ export default function POSPage() {
       // need Paystack, so they can't be taken offline
       // Points can't be checked offline, so a sale spending them must wait for the connection
       if (isNetworkError(err) && payment_method === 'CASH' && payload && !payload.redeem_points) {
-        queueSale(user.id, payload, total)
+        queueSale(user.id, payload, total, branchId)
         setOfflineSales(queuedSales(user.id))
         setShowPaymentModal(false)
         clearCart()
@@ -861,6 +874,20 @@ export default function POSPage() {
   const itemCount = items.reduce((sum, i) => sum + i.quantity, 0)
   const loyaltyRate = parseFloat(loyalty_points_rate) || 0
   const pointsEarned = customer && loyaltyRate > 0 ? Math.floor(total / loyaltyRate) : 0
+
+  if (isAllBranches) {
+    return (
+      <DashboardLayout>
+        <div className="max-w-md mx-auto mt-16 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-8 text-center space-y-4">
+          <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">Choose a branch to sell</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Each branch sells from its own stock and its own cash drawer. Pick the branch you are working at.
+          </p>
+          <BranchSwitcher className="justify-center" />
+        </div>
+      </DashboardLayout>
+    )
+  }
 
   return (
     <DashboardLayout noPad>
@@ -899,7 +926,7 @@ export default function POSPage() {
             <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{user?.full_name || '—'}</p>
             {currentShift && (
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Shift since {new Date(currentShift.opened_at).toLocaleTimeString('en-GH', { hour: '2-digit', minute: '2-digit' })}
+                {shiftElsewhere ? `Shift at ${currentShift.branch?.name ?? 'another branch'} since` : 'Shift since'} {new Date(currentShift.opened_at).toLocaleTimeString('en-GH', { hour: '2-digit', minute: '2-digit' })}
                 {' · '}
                 <button type="button" onClick={startCloseShift} className="text-primary-600 dark:text-primary-400 hover:underline font-medium">
                   Close shift
@@ -914,10 +941,18 @@ export default function POSPage() {
           </div>
         </div>
 
-        {needsShift && (
+        {needsShift && !shiftElsewhere && (
           <div className="flex items-center justify-between gap-3 rounded-lg border border-warning-100 bg-warning-50 dark:bg-warning-900/20 px-4 py-3">
             <p className="text-sm text-warning-700 dark:text-warning-400">Open a shift and count your opening float before you start selling.</p>
             <Button size="sm" onClick={() => setShowOpenShift(true)}>Open shift</Button>
+          </div>
+        )}
+        {needsShift && shiftElsewhere && (
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-warning-100 bg-warning-50 dark:bg-warning-900/20 px-4 py-3">
+            <p className="text-sm text-warning-700 dark:text-warning-400">
+              Your open shift is at {currentShift.branch?.name ?? 'another branch'}. Close it before selling at this branch.
+            </p>
+            <Button size="sm" onClick={startCloseShift}>Close shift</Button>
           </div>
         )}
 

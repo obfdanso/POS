@@ -436,9 +436,9 @@ export default function ReportsPage() {
                     <ResponsiveContainer width="100%" height={280}>
                       <BarChart data={branchData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                        <XAxis dataKey="label" tick={{ fontSize: 12 }} tickLine={false} />
+                        <XAxis dataKey="code" interval={0} tick={{ fontSize: 12 }} tickLine={false} />
                         <YAxis tickFormatter={(v) => `${currency_symbol || 'GH₵'}${v}`} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={72} />
-                        <Tooltip formatter={(v) => [formatCurrency(v), 'Revenue']} />
+                        <Tooltip formatter={(v) => [formatCurrency(v), 'Revenue']} labelFormatter={(code) => branchData.find((b) => b.code === code)?.label ?? code} />
                         <Bar dataKey="value" fill="#0d9488" radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>

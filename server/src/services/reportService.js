@@ -303,7 +303,11 @@ async function getBranchPerformance({ start_date, end_date }) {
     SELECT b.id, b.name AS label, b.code,
       COUNT(s.id)::int AS transactions,
       COALESCE(SUM(s.total_amount - s.refunded_amount), 0)::float AS value,
-      COALESCE(SUM(s.refunded_amount), 0)::float AS refunds
+      -- Money each branch paid out in returns in the period, whichever branch made the sale
+      COALESCE((
+        SELECT SUM(r.amount) FROM "Refund" r
+        WHERE r.branch_id = b.id AND r.created_at >= ${range.gte} AND r.created_at <= ${range.lte}
+      ), 0)::float AS refunds
     FROM "Branch" b
     LEFT JOIN "Sale" s
       ON s.branch_id = b.id

@@ -5,9 +5,6 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
-// React rules shared by the JavaScript and TypeScript sources
-const reactConfigs = [js.configs.recommended, reactHooks.configs.flat.recommended, reactRefresh.configs.vite]
-
 const languageOptions = {
   ecmaVersion: 2020,
   globals: globals.browser,
@@ -26,18 +23,15 @@ const onlyExportComponents = [
 
 export default defineConfig([
   globalIgnores(['dist']),
+  // The build tool config files that stay JavaScript
   {
-    files: ['**/*.{js,jsx}'],
-    extends: reactConfigs,
-    languageOptions,
-    rules: {
-      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
-      'react-refresh/only-export-components': onlyExportComponents,
-    },
+    files: ['*.js'],
+    extends: [js.configs.recommended],
+    languageOptions: { ecmaVersion: 'latest', sourceType: 'module', globals: globals.node },
   },
   {
     files: ['**/*.{ts,tsx}'],
-    extends: [...reactConfigs, tseslint.configs.recommended],
+    extends: [js.configs.recommended, reactHooks.configs.flat.recommended, reactRefresh.configs.vite, tseslint.configs.recommended],
     languageOptions,
     rules: {
       '@typescript-eslint/no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],

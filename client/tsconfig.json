@@ -7,7 +7,7 @@
     "jsx": "react-jsx",
     "strict": true,
     "noEmit": true,
-    "allowJs": true,
+    "allowJs": false,
     "checkJs": false,
     "isolatedModules": true,
     "resolveJsonModule": true,
@@ -15,5 +15,5 @@
     "noFallthroughCasesInSwitch": true,
     "types": ["vite/client", "vitest/globals"]
   },
-  "include": ["src"]
+  "include": ["src", "tailwind.config.ts"]
 }

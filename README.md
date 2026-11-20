@@ -56,6 +56,8 @@ A web-based point of sale system for a retail shop, built as a final-year capsto
 | ![Dashboard](docs/screenshots/dashboard.png) **Dashboard**: today's figures and trends | ![Receipt](docs/screenshots/receipt.png) **Receipt**: reprint or refund from the Sales page |
 | ![Sales](docs/screenshots/sales.png) **Sales**: filterable, sortable history | ![Inventory](docs/screenshots/inventory.png) **Inventory**: stock levels and adjustments |
 | ![Reports](docs/screenshots/reports.png) **Reports**: charts and CSV export | ![Login](docs/screenshots/login.png) **Login** |
+| ![Loyalty points at the till](docs/screenshots/pos-points.png) **Loyalty points**: a customer spends points at checkout | ![Shifts](docs/screenshots/shifts.png) **Shifts**: cash drawer sessions with over/short |
+| ![Return dialog](docs/screenshots/return.png) **Returns**: give back part of a sale | ![Refund slip](docs/screenshots/refund-slip.png) **Refund slip**: printed for the customer to sign |
 
 ---
 

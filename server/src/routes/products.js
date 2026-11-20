@@ -48,7 +48,30 @@ const productValidation = [
   body('is_active').optional().isBoolean().withMessage('is_active must be true or false').toBoolean(),
   body('parent_id').optional({ values: 'falsy' }).isUUID().withMessage('Valid main product ID required'),
   variantNameRule(),
+  ...stocksRules(),
 ]
+
+// Which branches stock the product: [{ branch_id, quantity?, low_stock_threshold? }]. Sent as JSON
+// text when the form also uploads an image (multipart)
+function stocksRules() {
+  return [
+    body('stocks')
+      .optional()
+      .customSanitizer((value) => {
+        if (typeof value !== 'string') return value
+        try {
+          return JSON.parse(value)
+        } catch {
+          return value
+        }
+      })
+      .isArray({ max: 100 })
+      .withMessage('stocks must be a list of branches'),
+    body('stocks.*.branch_id').isUUID().withMessage('Each branch needs a valid branch_id'),
+    body('stocks.*.quantity').optional().isInt({ min: 0, max: 1000000 }).withMessage('Starting quantity must be between 0 and 1,000,000').toInt(),
+    body('stocks.*.low_stock_threshold').optional().isInt({ min: 0, max: 1000000 }).withMessage('Threshold must be between 0 and 1,000,000').toInt(),
+  ]
+}
 
 // A size or flavour label, e.g. "1.5L"
 function variantNameRule() {
@@ -98,6 +121,7 @@ function updateProductValidation() {
     variantNameRule(),
     body('low_stock_threshold').optional().isInt({ min: 0, max: 1000000 }).withMessage('Threshold must be between 0 and 1,000,000').toInt(),
     body('is_active').optional().isBoolean().withMessage('is_active must be true or false').toBoolean(),
+    ...stocksRules(),
   ]
 }
 

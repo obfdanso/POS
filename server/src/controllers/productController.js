@@ -11,7 +11,7 @@ async function listProducts(req, res, next) {
 
     const group_variants = req.query.group_variants === 'true'
     const result = await productService.listProducts({
-      page, per_page, search, category_id, status, group_variants, sort: req.query.sort, order: req.query.order,
+      page, per_page, search, category_id, status, group_variants, sort: req.query.sort, order: req.query.order, branchId: req.branchId,
     })
 
     res.json({
@@ -31,7 +31,7 @@ async function listProducts(req, res, next) {
 
 async function getProduct(req, res, next) {
   try {
-    const product = await productService.getProductById(req.params.id)
+    const product = await productService.getProductById(req.params.id, req.branchId)
     res.json({ success: true, data: product })
   } catch (err) {
     next(err)
@@ -40,7 +40,7 @@ async function getProduct(req, res, next) {
 
 async function getProductByBarcode(req, res, next) {
   try {
-    const product = await productService.getProductByBarcode(req.params.code)
+    const product = await productService.getProductByBarcode(req.params.code, req.branchId)
     res.json({ success: true, data: product })
   } catch (err) {
     next(err)
@@ -54,7 +54,7 @@ async function createProduct(req, res, next) {
     if (req.file) {
       data.image_url = `/uploads/products/${req.file.filename}`
     }
-    const product = await productService.createProduct(data, req.user.id)
+    const product = await productService.createProduct(data, req.user, req.branchId)
     res.status(201).json({ success: true, data: product, message: 'Product created successfully' })
   } catch (err) {
     next(err)
@@ -70,7 +70,7 @@ async function updateProduct(req, res, next) {
       // Clients may only clear the image (image_url: null); new images must be uploaded
       delete data.image_url
     }
-    const product = await productService.updateProduct(req.params.id, data, req.user)
+    const product = await productService.updateProduct(req.params.id, data, req.user, req.branchId)
     res.json({ success: true, data: product, message: 'Product updated successfully' })
   } catch (err) {
     next(err)

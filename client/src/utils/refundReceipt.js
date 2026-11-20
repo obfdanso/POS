@@ -21,6 +21,10 @@ export function buildRefundReceiptHtml(sale, refund, settings, fmt) {
     .join('')
   const method = METHOD_LABEL[refund.method] || refund.method
   const isLast = sale.refunds?.[sale.refunds.length - 1]?.id === refund.id
+  // The branch that took the goods back and paid out, with its own address where it has one
+  const branch = refund.branch ?? sale.branch
+  const address = branch?.address || settings.store_address
+  const phone = branch?.phone || settings.store_phone
 
   return `<!DOCTYPE html>
 <html>
@@ -33,8 +37,9 @@ export function buildRefundReceiptHtml(sale, refund, settings, fmt) {
 <body>
   <div class="center">
     <div class="bold" style="font-size:14px;">${esc(settings.store_name || 'QuickMart')}</div>
-    ${settings.store_address ? `<div>${esc(settings.store_address)}</div>` : ''}
-    ${settings.store_phone ? `<div>Tel: ${esc(settings.store_phone)}</div>` : ''}
+    ${branch?.name ? `<div>${esc(branch.name)}</div>` : ''}
+    ${address ? `<div>${esc(address)}</div>` : ''}
+    ${phone ? `<div>Tel: ${esc(phone)}</div>` : ''}
     <div class="bold" style="margin-top:4px;">*** REFUND ***</div>
   </div>
   <div class="dashed"></div>

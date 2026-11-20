@@ -15,7 +15,17 @@ function discountParts(item) {
 }
 
 // Builds a standalone 80mm thermal receipt document for the print window
+/** The branch a sale was made at, with its address and phone falling back to the store's. */
+function storeHeader(sale, settings) {
+  return {
+    branch: sale.branch?.name ?? null,
+    address: sale.branch?.address || settings.store_address,
+    phone: sale.branch?.phone || settings.store_phone,
+  }
+}
+
 function buildReceiptHtml(sale, settings, fmt) {
+  const header = storeHeader(sale, settings)
   const esc = escapeHtml
   const { transaction_id, created_at, user, customer, items, subtotal, discount_amount, tax_amount, total_amount, payment_method, payment_status } = sale
   // discount_amount includes the value of redeemed loyalty points; show the two separately
@@ -49,8 +59,9 @@ function buildReceiptHtml(sale, settings, fmt) {
 <body>
   <div class="center">
     <div class="bold" style="font-size:14px;">${esc(settings.store_name || 'QuickMart')}</div>
-    ${settings.store_address ? `<div>${esc(settings.store_address)}</div>` : ''}
-    ${settings.store_phone ? `<div>Tel: ${esc(settings.store_phone)}</div>` : ''}
+    ${header.branch ? `<div>${esc(header.branch)}</div>` : ''}
+    ${header.address ? `<div>${esc(header.address)}</div>` : ''}
+    ${header.phone ? `<div>Tel: ${esc(header.phone)}</div>` : ''}
   </div>
   ${payment_status === 'REFUNDED' ? '<div class="center bold" style="margin-top:4px;">*** REFUNDED ***</div>' : ''}
   ${payment_status === 'PARTIALLY_REFUNDED' ? `<div class="center bold" style="margin-top:4px;">*** PART REFUNDED: ${fmt(sale.refunded_amount)} ***</div>` : ''}
@@ -102,6 +113,7 @@ function Row({ label, value, className = '' }) {
  */
 export function Receipt({ sale, onClose, actions }) {
   const settings = useSettings()
+  const header = storeHeader(sale, settings)
   const fmt = (v) => formatCurrency(v, settings.currency_symbol || 'GH₵')
   // 'email' or 'sms' while that form is open
   const [sending, setSending] = useState(null)
@@ -123,8 +135,9 @@ export function Receipt({ sale, onClose, actions }) {
       <div className="font-mono text-sm bg-white text-gray-900 rounded-lg">
         <div className="text-center mb-3">
           <p className="font-bold text-base">{settings.store_name || 'QuickMart'}</p>
-          {settings.store_address && <p className="text-xs text-gray-500">{settings.store_address}</p>}
-          {settings.store_phone && <p className="text-xs text-gray-500">Tel: {settings.store_phone}</p>}
+          {header.branch && <p className="text-xs font-semibold text-gray-700">{header.branch}</p>}
+          {header.address && <p className="text-xs text-gray-500">{header.address}</p>}
+          {header.phone && <p className="text-xs text-gray-500">Tel: {header.phone}</p>}
           {payment_status === 'REFUNDED' && <p className="mt-1 text-xs font-bold text-danger-600">*** REFUNDED ***</p>}
           {payment_status === 'PARTIALLY_REFUNDED' && (
             <p className="mt-1 text-xs font-bold text-warning-600">*** PART REFUNDED: {fmt(sale.refunded_amount)} ***</p>

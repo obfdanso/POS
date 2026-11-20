@@ -49,4 +49,12 @@ describe('buildRefundReceiptHtml', () => {
     const older = buildRefundReceiptHtml({ ...sale, refunds: [refund, { ...refund, id: 'r2' }] }, refund, {}, fmt)
     expect(older).not.toContain('Sale total refunded')
   })
+
+  it('names the branch that took the return back, with its address', () => {
+    const atBranch = { ...refund, branch: { name: 'Accra Mall', address: 'Spintex Rd', phone: '030-1' } }
+    const slip = buildRefundReceiptHtml({ ...sale, refunds: [atBranch] }, atBranch, { store_name: 'QuickMart', store_address: 'Kumasi HQ' }, fmt)
+    expect(slip).toContain('Accra Mall')
+    expect(slip).toContain('Spintex Rd')
+    expect(slip).not.toContain('Kumasi HQ')
+  })
 })

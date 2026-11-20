@@ -401,7 +401,7 @@ async function getSaleById(id) {
       refunds: {
         include: {
           user: { select: { id: true, full_name: true } },
-          branch: { select: { id: true, name: true, code: true } },
+          branch: { select: { id: true, name: true, code: true, address: true, phone: true } },
           items: { select: { sale_item_id: true, quantity: true, amount: true, restocked: true } },
         },
         orderBy: { created_at: 'asc' },
@@ -464,6 +464,7 @@ async function listSales({ page = 1, per_page = 20, start_date, end_date, user_i
       include: {
         user: { select: { id: true, username: true, full_name: true } },
         customer: { select: { id: true, name: true } },
+        branch: { select: { id: true, name: true, code: true } },
         _count: { select: { sale_items: true } },
       },
       orderBy: buildOrderBy({ sort, order }, SALE_SORTS, { created_at: 'desc' }),

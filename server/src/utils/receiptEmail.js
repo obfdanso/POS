@@ -8,7 +8,7 @@ const METHOD_LABEL = { CASH: 'Cash', MOBILE_MONEY: 'Mobile Money', CARD: 'Card',
 
 /**
  * @param {object} sale - sale with sale_items (with product), payments, user, customer
- * @param {{ name: string, address?: string, phone?: string, currency: string, footer?: string }} store
+ * @param {{ name: string, branch?: string, address?: string, phone?: string, currency: string, footer?: string }} store
  * @returns {{ subject: string, html: string, text: string }}
  */
 function buildReceiptEmail(sale, store) {
@@ -43,6 +43,7 @@ function buildReceiptEmail(sale, store) {
 <html><body style="margin:0;background:#f3f4f6;font-family:Arial,sans-serif;color:#111827;">
 <div style="max-width:480px;margin:24px auto;background:#fff;border-radius:8px;padding:24px;">
   <h1 style="margin:0;font-size:20px;text-align:center;">${esc(store.name)}</h1>
+  ${store.branch ? `<p style="margin:2px 0 0;text-align:center;font-size:14px;">${esc(store.branch)}</p>` : ''}
   ${store.address ? `<p style="margin:4px 0 0;text-align:center;color:#6b7280;font-size:13px;">${esc(store.address)}</p>` : ''}
   ${store.phone ? `<p style="margin:2px 0 0;text-align:center;color:#6b7280;font-size:13px;">Tel: ${esc(store.phone)}</p>` : ''}
   <p style="margin:16px 0 4px;font-size:13px;color:#6b7280;">Receipt <strong style="color:#111827;">${esc(sale.transaction_id)}</strong> · ${esc(date)}</p>
@@ -66,7 +67,7 @@ function buildReceiptEmail(sale, store) {
 </body></html>`
 
   const text = [
-    store.name,
+    store.branch ? `${store.name} · ${store.branch}` : store.name,
     `Receipt ${sale.transaction_id} · ${date}`,
     '',
     ...(sale.sale_items || []).map((i) => `${i.quantity} × ${i.product?.name}  ${money(i.total)}`),

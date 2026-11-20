@@ -746,7 +746,15 @@ async function emailReceipt(sale, userId, email) {
     getSettingValue('currency_symbol', 'GH₵'),
     getSettingValue('receipt_footer', ''),
   ])
-  const message = buildReceiptEmail(sale, { name, address, phone, currency, footer })
+  // The branch's own address and phone, falling back to the store's
+  const message = buildReceiptEmail(sale, {
+    name,
+    branch: sale.branch?.name,
+    address: sale.branch?.address || address,
+    phone: sale.branch?.phone || phone,
+    currency,
+    footer,
+  })
   try {
     await sendMail({ to, ...message })
   } catch (err) {
@@ -792,7 +800,7 @@ async function smsReceipt(sale, userId, phone) {
   })
   const [name, currency] = await Promise.all([getSettingValue('store_name', 'My Store'), getSettingValue('currency_symbol', 'GH₵')])
   try {
-    await sendSms(to, buildReceiptSms(sale, { name, currency }))
+    await sendSms(to, buildReceiptSms(sale, { name, branch: sale.branch?.name, currency }))
   } catch (err) {
     // Not sent, so it doesn't count towards the limit
     await prisma.auditLog.delete({ where: { id: reservation.id } }).catch(() => {})

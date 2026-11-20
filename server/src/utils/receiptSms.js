@@ -4,7 +4,7 @@ const METHOD_LABEL = { CASH: 'Cash', MOBILE_MONEY: 'Mobile Money', CARD: 'Card',
 
 /**
  * @param {object} sale - sale with sale_items and payments
- * @param {{ name: string, currency: string }} store
+ * @param {{ name: string, branch?: string, currency: string }} store
  * @returns {string}
  */
 function buildReceiptSms(sale, store) {
@@ -23,7 +23,7 @@ function buildReceiptSms(sale, store) {
       : METHOD_LABEL[sale.payment_method] || sale.payment_method
 
   return [
-    store.name,
+    store.branch ? `${store.name}, ${store.branch}` : store.name,
     `Receipt ${sale.transaction_id}, ${date}`,
     `${units} item${units === 1 ? '' : 's'}. Total ${money(sale.total_amount)}`,
     Number(sale.discount_amount) > 0 && `You saved ${money(sale.discount_amount)}`,

@@ -1,17 +1,20 @@
 // Builds the text-message version of a sale receipt, kept short to fit one or two SMS.
 
-const METHOD_LABEL = { CASH: 'Cash', MOBILE_MONEY: 'Mobile Money', CARD: 'Card', SPLIT: 'Split' }
+import type { MoneyValue, ReceiptSale } from './receiptEmail'
 
-/**
- * @param {object} sale - sale with sale_items and payments
- * @param {{ name: string, branch?: string, currency: string }} store
- * @returns {string}
- */
-function buildReceiptSms(sale, store) {
+const METHOD_LABEL: Record<string, string | undefined> = { CASH: 'Cash', MOBILE_MONEY: 'Mobile Money', CARD: 'Card', SPLIT: 'Split' }
+
+export interface ReceiptSmsStore {
+  name: string
+  branch?: string | null
+  currency: string
+}
+
+export function buildReceiptSms(sale: ReceiptSale, store: ReceiptSmsStore): string {
   // "₵" isn't in the basic SMS alphabet; one such character makes every part of the message hold
   // 70 characters instead of 160, so cedis are written as GHS
   const currency = store.currency === 'GH₵' ? 'GHS' : store.currency
-  const money = (v) => `${currency} ${Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const money = (v: MoneyValue) => `${currency} ${Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   const units = (sale.sale_items || []).reduce((n, i) => n + i.quantity, 0)
   const date = new Date(sale.created_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
   const parts = sale.payments || []
@@ -34,5 +37,3 @@ function buildReceiptSms(sale, store) {
     .filter(Boolean)
     .join('\n')
 }
-
-module.exports = { buildReceiptSms }

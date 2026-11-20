@@ -1,10 +1,10 @@
-const prisma = require('../utils/prismaClient')
+const prisma = require('../utils/prismaClient').default
 const { buildOrderBy } = require('../middleware/sorting')
 const { NotFoundError, ValidationError, AppError, ConflictError, ForbiddenError } = require('../utils/errors')
 const { recordAudit } = require('../utils/audit')
 const { verifyPaystackPayment } = require('../utils/paystack')
 const { logger } = require('../middleware/logger')
-const generateTransactionId = require('../utils/generateTransactionId')
+const generateTransactionId = require('../utils/generateTransactionId').default
 const { buildDateRange } = require('../utils/dateRange')
 const { isEmailConfigured, sendMail } = require('../utils/mailer')
 const { buildReceiptEmail } = require('../utils/receiptEmail')

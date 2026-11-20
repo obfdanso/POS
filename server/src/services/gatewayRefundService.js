@@ -5,7 +5,7 @@
 // row is claimed (NOT_SENT/FAILED → PENDING) before calling Paystack, so it can't be sent twice
 // at once. Paystack refunds take time: it reports progress through its webhook or a status check.
 
-const prisma = require('../utils/prismaClient')
+const prisma = require('../utils/prismaClient').default
 const { refundPaystackPayment, fetchPaystackRefund } = require('../utils/paystack')
 const { recordAudit } = require('../utils/audit')
 const { logger } = require('../middleware/logger')

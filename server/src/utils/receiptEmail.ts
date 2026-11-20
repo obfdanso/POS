@@ -1,18 +1,50 @@
 // Builds the email version of a sale receipt. Every value that came from a user is escaped.
 
-function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+import type { PaymentMethod, Prisma } from '@prisma/client'
+
+/** A money value as Prisma returns it (Decimal), or as a number or numeric string. */
+export type MoneyValue = Prisma.Decimal | number | string
+
+/** The parts of a loaded sale (with sale_items and their product, payments, user, customer) a receipt shows. */
+export interface ReceiptSale {
+  transaction_id: string
+  created_at: Date | string
+  payment_method: PaymentMethod
+  subtotal: MoneyValue
+  discount_amount: MoneyValue
+  tax_amount: MoneyValue
+  total_amount: MoneyValue
+  points_discount?: MoneyValue | null
+  refunded_amount?: MoneyValue | null
+  loyalty_points_redeemed?: number
+  loyalty_points_earned: number
+  user?: { full_name: string } | null
+  customer?: { name: string } | null
+  payments?: { method: PaymentMethod; amount_paid: MoneyValue; change_given?: MoneyValue | null }[]
+  sale_items?: { quantity: number; unit_price: MoneyValue; discount: MoneyValue; total: MoneyValue; product?: { name: string } | null }[]
 }
 
-const METHOD_LABEL = { CASH: 'Cash', MOBILE_MONEY: 'Mobile Money', CARD: 'Card', SPLIT: 'Split' }
+export interface ReceiptEmailStore {
+  name: string
+  branch?: string | null
+  address?: string | null
+  phone?: string | null
+  currency: string
+  footer?: string | null
+}
 
-/**
- * @param {object} sale - sale with sale_items (with product), payments, user, customer
- * @param {{ name: string, branch?: string, address?: string, phone?: string, currency: string, footer?: string }} store
- * @returns {{ subject: string, html: string, text: string }}
- */
-function buildReceiptEmail(sale, store) {
-  const money = (v) => `${store.currency} ${Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
+
+export function escapeHtml(value: unknown): string {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => HTML_ESCAPES[c])
+}
+
+const METHOD_LABEL: Record<string, string | undefined> = { CASH: 'Cash', MOBILE_MONEY: 'Mobile Money', CARD: 'Card', SPLIT: 'Split' }
+
+type Row = [label: string, value: string]
+
+export function buildReceiptEmail(sale: ReceiptSale, store: ReceiptEmailStore): { subject: string; html: string; text: string } {
+  const money = (v: MoneyValue) => `${store.currency} ${Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   const esc = escapeHtml
   const payment = sale.payments?.[0]
   const pointsDiscount = Number(sale.points_discount || 0)
@@ -24,19 +56,19 @@ function buildReceiptEmail(sale, store) {
     cartDiscount > 0 && ['Discount', `-${money(cartDiscount)}`],
     pointsDiscount > 0 && [`Points (${sale.loyalty_points_redeemed} pts)`, `-${money(pointsDiscount)}`],
     Number(sale.tax_amount) > 0 && ['Tax', money(sale.tax_amount)],
-  ].filter(Boolean)
+  ].filter((r): r is Row => Boolean(r))
   const paymentRows = [
     ['Payment', METHOD_LABEL[sale.payment_method] || sale.payment_method],
     // A split payment lists each part; the cash part (listed first) is the one that gives change
     ...(sale.payment_method === 'SPLIT'
-      ? (sale.payments || []).map((p) => [`  ${METHOD_LABEL[p.method] || p.method}`, money(p.amount_paid)])
+      ? (sale.payments || []).map((p): Row => [`  ${METHOD_LABEL[p.method] || p.method}`, money(p.amount_paid)])
       : [payment && ['Amount paid', money(payment.amount_paid)]]),
-    payment && Number(payment.change_given) > 0 && ['Change', money(payment.change_given)],
-    Number(sale.refunded_amount) > 0 && ['Refunded', money(sale.refunded_amount)],
+    payment && Number(payment.change_given) > 0 && ['Change', money(payment.change_given ?? 0)],
+    Number(sale.refunded_amount) > 0 && ['Refunded', money(sale.refunded_amount ?? 0)],
     sale.loyalty_points_earned > 0 && ['Points earned', String(sale.loyalty_points_earned)],
-  ].filter(Boolean)
+  ].filter((r): r is Row => Boolean(r))
 
-  const row = ([label, value], bold) =>
+  const row = ([label, value]: Row, bold?: boolean) =>
     `<tr><td style="padding:2px 0;${bold ? 'font-weight:bold;' : ''}">${esc(label)}</td><td style="padding:2px 0;text-align:right;${bold ? 'font-weight:bold;' : ''}">${esc(value)}</td></tr>`
 
   const html = `<!DOCTYPE html>
@@ -81,5 +113,3 @@ function buildReceiptEmail(sale, store) {
 
   return { subject: `Your receipt from ${store.name} (${sale.transaction_id})`, html, text }
 }
-
-module.exports = { buildReceiptEmail, escapeHtml }

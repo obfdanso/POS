@@ -1,7 +1,7 @@
 const crypto = require('crypto')
 const bcrypt = require('bcrypt')
 const jwt = require('jsonwebtoken')
-const prisma = require('../utils/prismaClient')
+const prisma = require('../utils/prismaClient').default
 const { UnauthorizedError, NotFoundError, ValidationError } = require('../utils/errors')
 
 const MAX_FAILED_ATTEMPTS = 5

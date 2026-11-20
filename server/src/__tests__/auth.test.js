@@ -1,7 +1,7 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
 const request = require('supertest')
 const app = require('../app')
-const prisma = require('../utils/prismaClient')
+const prisma = require('../utils/prismaClient').default
 const bcrypt = require('bcrypt')
 const { testBranch } = require('./helpers')
 

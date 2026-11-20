@@ -1,4 +1,4 @@
-const prisma = require('../utils/prismaClient')
+const prisma = require('../utils/prismaClient').default
 const { buildOrderBy } = require('../middleware/sorting')
 const { NotFoundError, ConflictError } = require('../utils/errors')
 

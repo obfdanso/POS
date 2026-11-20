@@ -1,15 +1,25 @@
-const Sentry = require('@sentry/node')
+import * as Sentry from '@sentry/node'
+import type { ErrorEvent, EventHint } from '@sentry/node'
+import type { Request } from 'express'
 
 // Never send credentials, cookies, request bodies (which can hold passwords), query strings (customer
 // searches), or log breadcrumbs to Sentry. Database errors can quote the values of the failed query,
 // so their message is replaced with the error's name and code.
 const SENSITIVE_HEADERS = ['authorization', 'cookie', 'set-cookie', 'x-paystack-signature']
 
-function isDatabaseError(err) {
-  return Boolean(err && (/^Prisma/.test(err.constructor?.name ?? '') || /^P\d{4}$/.test(err.code ?? '') || /invocation/.test(err.message ?? '')))
+interface DatabaseError {
+  constructor?: { name?: string }
+  code?: unknown
 }
 
-function scrubEvent(event, hint = {}) {
+function isDatabaseError(err: unknown): err is DatabaseError {
+  if (!err || typeof err !== 'object') return false
+  const code = 'code' in err ? err.code : undefined
+  const message = 'message' in err ? err.message : undefined
+  return /^Prisma/.test(err.constructor?.name ?? '') || /^P\d{4}$/.test(String(code ?? '')) || /invocation/.test(String(message ?? ''))
+}
+
+export function scrubEvent(event: ErrorEvent, hint: EventHint = {}): ErrorEvent {
   delete event.breadcrumbs
   const original = hint.originalException
   if (isDatabaseError(original) && event.exception?.values) {
@@ -33,7 +43,7 @@ function scrubEvent(event, hint = {}) {
 let enabled = false
 
 /** Starts error reporting when SENTRY_DSN is set; otherwise every call here does nothing. */
-function initErrorReporting() {
+export function initErrorReporting(): boolean {
   if (!process.env.SENTRY_DSN || enabled) return enabled
   Sentry.init({
     dsn: process.env.SENTRY_DSN,
@@ -48,7 +58,7 @@ function initErrorReporting() {
 }
 
 /** Reports an unexpected (500) error, tagged with its request ID so it matches the logs. */
-function reportError(err, req) {
+export function reportError(err: unknown, req?: Request): void {
   if (!enabled) return
   Sentry.withScope((scope) => {
     if (req?.id) scope.setTag('request_id', req.id)
@@ -57,5 +67,3 @@ function reportError(err, req) {
     Sentry.captureException(err)
   })
 }
-
-module.exports = { initErrorReporting, reportError, scrubEvent }

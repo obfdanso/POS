@@ -1,4 +1,4 @@
-const prisma = require('../utils/prismaClient')
+const prisma = require('../utils/prismaClient').default
 const { branchStockFor, withStock } = require('../utils/branchStock')
 const { NotFoundError, ConflictError } = require('../utils/errors')
 

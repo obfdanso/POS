@@ -1,5 +1,5 @@
 const { Prisma } = require('@prisma/client')
-const prisma = require('../utils/prismaClient')
+const prisma = require('../utils/prismaClient').default
 // Product/category/profit revenue is net sales: each line's share of its sale after the cart
 // discount, excluding tax. Profit cost uses the cost price recorded at the time of sale.
 // Returns are netted out: sale totals subtract refunded_amount and lines count only the units kept,

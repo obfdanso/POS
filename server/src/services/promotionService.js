@@ -1,4 +1,4 @@
-const prisma = require('../utils/prismaClient')
+const prisma = require('../utils/prismaClient').default
 const { NotFoundError, ValidationError } = require('../utils/errors')
 const { recordAudit } = require('../utils/audit')
 

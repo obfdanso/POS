@@ -1,5 +1,5 @@
 const { Prisma } = require('@prisma/client')
-const prisma = require('../utils/prismaClient')
+const prisma = require('../utils/prismaClient').default
 const { changeStock } = require('../utils/branchStock')
 const { buildOrderBy } = require('../middleware/sorting')
 const { NotFoundError, ValidationError } = require('../utils/errors')

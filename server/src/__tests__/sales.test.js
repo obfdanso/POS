@@ -1,7 +1,7 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
 const request = require('supertest')
 const app = require('../app')
-const prisma = require('../utils/prismaClient')
+const prisma = require('../utils/prismaClient').default
 const { createUserWithToken, inTestBranch, stockAt } = require('./helpers')
 
 // Stock of a product at the test branch, shaped like the product rows these tests used to read

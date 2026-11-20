@@ -1,9 +1,10 @@
-const nodemailer = require('nodemailer')
+import nodemailer, { type SendMailOptions, type Transporter } from 'nodemailer'
+import type SMTPTransport from 'nodemailer/lib/smtp-transport'
 
-let transport
+let transport: Transporter<SMTPTransport.SentMessageInfo, SMTPTransport.Options> | undefined
 
 /** Email is optional: it is on only when an SMTP server is configured. */
-function isEmailConfigured() {
+export function isEmailConfigured(): boolean {
   return Boolean(process.env.SMTP_HOST && process.env.MAIL_FROM)
 }
 
@@ -25,8 +26,6 @@ function getTransport() {
 }
 
 /** Sends one message ({ to, subject, html, text }) from MAIL_FROM. */
-async function sendMail(message) {
+export async function sendMail(message: SendMailOptions) {
   return getTransport().sendMail({ from: process.env.MAIL_FROM, ...message })
 }
-
-module.exports = { isEmailConfigured, sendMail }

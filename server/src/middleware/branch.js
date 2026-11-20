@@ -1,4 +1,4 @@
-const prisma = require('../utils/prismaClient')
+const prisma = require('../utils/prismaClient').default
 const { ValidationError } = require('../utils/errors')
 
 const branchError = (message) => new ValidationError(message, [{ field: 'branch', message }])

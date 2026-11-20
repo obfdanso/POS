@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken')
-const prisma = require('../utils/prismaClient')
+const prisma = require('../utils/prismaClient').default
 const { UnauthorizedError, ForbiddenError } = require('../utils/errors')
 
 const NO_BRANCH = 'You are not assigned to a branch. Ask an admin.'

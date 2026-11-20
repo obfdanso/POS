@@ -1,4 +1,4 @@
-const generateTransactionId = require('../utils/generateTransactionId')
+const generateTransactionId = require('../utils/generateTransactionId').default
 
 describe('generateTransactionId', () => {
   it('formats as TXN-YYYYMMDD-NNNN', () => {

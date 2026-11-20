@@ -2,7 +2,7 @@
 const request = require('supertest')
 const bcrypt = require('bcrypt')
 const app = require('../app')
-const prisma = require('../utils/prismaClient')
+const prisma = require('../utils/prismaClient').default
 
 const PASSWORD = 'testpass123'
 let passwordHash

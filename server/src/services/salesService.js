@@ -562,14 +562,14 @@ async function processRefund(saleId, userId, { items, reason } = {}) {
       cashAmount = Math.max(0, Math.min(amount, cashLeft))
     }
 
-    const openShift = await tx.shift.findFirst({ where: { user_id: userId, status: 'OPEN' }, select: { id: true } })
+    const shiftId = await refundShiftId(tx, userId, sale, cashAmount)
     const refundReason = reason?.trim() || (completesSale && !items ? 'Full refund' : 'Return')
     const gateway = await planGatewayRefund(tx, sale, amount, cashAmount)
     const created = await tx.refund.create({
       data: {
         sale_id: saleId,
         user_id: userId,
-        shift_id: openShift?.id ?? null,
+        shift_id: shiftId,
         amount,
         method: sale.payment_method,
         cash_amount: cashAmount,
@@ -666,6 +666,25 @@ async function getReceiptData(saleId) {
     store: { name: storeName, address: storeAddress, phone: storePhone },
     sale,
   }
+}
+
+/**
+ * The drawer a refund is counted against: the refunder's open shift, or else the shift the sale was
+ * rung up on if it is still open. When shifts are required, cash can't leave without an open drawer.
+ */
+async function refundShiftId(tx, userId, sale, cashAmount) {
+  const own = await tx.shift.findFirst({ where: { user_id: userId, status: 'OPEN' }, select: { id: true } })
+  if (own) return own.id
+  if (sale.shift_id) {
+    const original = await tx.shift.findFirst({ where: { id: sale.shift_id, status: 'OPEN' }, select: { id: true } })
+    if (original) return original.id
+  }
+  if (cashAmount > 0 && (await getSettingValue('require_open_shift', 'false')) === 'true') {
+    throw new ValidationError('No open shift', [
+      { field: 'shift', message: 'Open a cash drawer shift before giving cash back' },
+    ])
+  }
+  return null
 }
 
 function noOpenShiftError() {

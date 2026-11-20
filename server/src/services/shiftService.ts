@@ -1,31 +1,41 @@
-const prisma = require('../utils/prismaClient').default
-const { ConflictError, ForbiddenError, NotFoundError, ValidationError } = require('../utils/errors')
-const { recordAudit } = require('../utils/audit')
-const { buildDateRange } = require('../utils/dateRange')
-const { buildOrderBy } = require('../middleware/sorting')
+import { Prisma, type PaymentMethod, type Shift, type ShiftStatus } from '@prisma/client'
+import prisma from '../utils/prismaClient'
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../utils/errors'
+import { recordAudit } from '../utils/audit'
+import { buildDateRange } from '../utils/dateRange'
+import { buildOrderBy, type SortDirection } from '../middleware/sorting'
+import type { AuthUser } from '../types/express'
 
 const PEOPLE = {
   user: { select: { id: true, username: true, full_name: true } },
   closed_by: { select: { id: true, username: true, full_name: true } },
   branch: { select: { id: true, name: true, code: true } },
-}
+} satisfies Prisma.ShiftInclude
 
 // Half-up to 2 decimals; EPSILON stops values like 1.005 (stored as 1.00499…) rounding down
-function round2(n) {
+function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100
 }
 
 /** The user's open shift, or null. Pass a transaction client as `db` to read inside a transaction. */
-function getOpenShift(userId, db = prisma) {
+export function getOpenShift(userId: string, db: Prisma.TransactionClient = prisma) {
   return db.shift.findFirst({ where: { user_id: userId, status: 'OPEN' }, include: PEOPLE })
 }
+
+interface MethodTotal {
+  count: number
+  total: number
+}
+
+/** Takings per payment method; a sale's Payment rows hold real methods, so SPLIT only appears if one ever does. */
+type MethodTotals = Record<Exclude<PaymentMethod, 'SPLIT'>, MethodTotal> & Partial<Record<'SPLIT', MethodTotal>>
 
 /**
  * Takings for a shift, aggregated in SQL: money taken by payment method (a split sale counts
  * towards each method it used), cash refunds paid out of the drawer, and the cash the drawer should
  * hold (opening float + cash taken − cash refunds).
  */
-async function getShiftTotals(shift, db = prisma) {
+async function getShiftTotals(shift: Pick<Shift, 'id' | 'opening_float'>, db: Prisma.TransactionClient = prisma) {
   const [paymentsByMethod, sales, split_count, cashRefunds] = await Promise.all([
     db.payment.groupBy({
       by: ['method'],
@@ -39,7 +49,7 @@ async function getShiftTotals(shift, db = prisma) {
     db.refund.aggregate({ where: { shift_id: shift.id }, _sum: { cash_amount: true } }),
   ])
 
-  const by_method = {
+  const by_method: MethodTotals = {
     CASH: { count: 0, total: 0 },
     MOBILE_MONEY: { count: 0, total: 0 },
     CARD: { count: 0, total: 0 },
@@ -47,36 +57,40 @@ async function getShiftTotals(shift, db = prisma) {
   for (const row of paymentsByMethod) {
     by_method[row.method] = {
       count: row._count.id,
-      total: round2(parseFloat(row._sum.amount_paid || 0) - parseFloat(row._sum.change_given || 0)),
+      total: round2(Number(row._sum.amount_paid ?? 0) - Number(row._sum.change_given ?? 0)),
     }
   }
 
   const sales_count = sales._count.id
-  const sales_total = round2(parseFloat(sales._sum.total_amount || 0))
+  const sales_total = round2(Number(sales._sum.total_amount ?? 0))
   const cash_sales = by_method.CASH.total
-  const cash_refunds = parseFloat(cashRefunds._sum.cash_amount || 0)
-  const expected_cash = round2(parseFloat(shift.opening_float) + cash_sales - cash_refunds)
+  const cash_refunds = Number(cashRefunds._sum.cash_amount ?? 0)
+  const expected_cash = round2(Number(shift.opening_float) + cash_sales - cash_refunds)
 
   return { sales_count, sales_total, by_method, split_count, cash_sales, cash_refunds, expected_cash }
 }
 
-async function withTotals(shift, db = prisma) {
+async function withTotals<T extends Pick<Shift, 'id' | 'opening_float'>>(shift: T | null, db: Prisma.TransactionClient = prisma) {
   return shift && { ...shift, summary: await getShiftTotals(shift, db) }
 }
 
-async function getCurrentShift(userId) {
+export async function getCurrentShift(userId: string) {
   return withTotals(await getOpenShift(userId))
 }
 
 /** Opens a drawer at `branchId`; a user has at most one open shift, wherever it is. */
-async function openShift(userId, { opening_float, notes }, branchId) {
+export async function openShift(
+  userId: string,
+  { opening_float, notes }: { opening_float: number; notes?: string | null },
+  branchId: string
+) {
   if (await getOpenShift(userId)) {
     throw new ConflictError('You already have an open shift. Close it before opening another.')
   }
   try {
     const shift = await prisma.$transaction(async (tx) => {
       // Waits for a branch being closed right now, then refuses if it was
-      const [branch] = await tx.$queryRaw`SELECT is_active FROM "Branch" WHERE id = ${branchId} FOR SHARE`
+      const [branch] = await tx.$queryRaw<{ is_active: boolean }[]>`SELECT is_active FROM "Branch" WHERE id = ${branchId} FOR SHARE`
       if (!branch?.is_active) throw new ConflictError('This branch is closed')
       return tx.shift.create({
         data: { user_id: userId, opening_float, notes: notes || null, branch_id: branchId },
@@ -86,13 +100,15 @@ async function openShift(userId, { opening_float, notes }, branchId) {
     return withTotals(shift)
   } catch (err) {
     // Two open requests at once: the partial unique index lets only one through
-    if (err.code === 'P2002') throw new ConflictError('You already have an open shift. Close it before opening another.')
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      throw new ConflictError('You already have an open shift. Close it before opening another.')
+    }
     throw err
   }
 }
 
 /** Cashiers may only see and close their own shifts; managers their branch's; admins any. */
-function assertCanAccess(shift, user) {
+function assertCanAccess(shift: Pick<Shift, 'user_id' | 'branch_id'>, user: AuthUser) {
   if (user.role === 'CASHIER' && shift.user_id !== user.id) {
     throw new ForbiddenError('You can only view your own shifts')
   }
@@ -101,7 +117,7 @@ function assertCanAccess(shift, user) {
   }
 }
 
-async function closeShift(id, user, { counted_cash, notes }) {
+export async function closeShift(id: string, user: AuthUser, { counted_cash, notes }: { counted_cash: number; notes?: string | null }) {
   const shift = await prisma.shift.findUnique({ where: { id } })
   if (!shift) throw new NotFoundError('Shift not found')
   assertCanAccess(shift, user)
@@ -146,23 +162,47 @@ async function closeShift(id, user, { counted_cash, notes }) {
   return getShift(id, user)
 }
 
-async function getShift(id, user) {
+export async function getShift(id: string, user: AuthUser) {
   const shift = await prisma.shift.findUnique({ where: { id }, include: PEOPLE })
   if (!shift) throw new NotFoundError('Shift not found')
   assertCanAccess(shift, user)
   return withTotals(shift)
 }
 
-const SHIFT_SORTS = {
+type ShiftOrderBy = Prisma.ShiftOrderByWithRelationInput
+
+export const SHIFT_SORTS: Record<string, (dir: SortDirection) => ShiftOrderBy | ShiftOrderBy[]> = {
   opened_at: (dir) => ({ opened_at: dir }),
   closed_at: (dir) => [{ closed_at: { sort: dir, nulls: 'last' } }, { opened_at: 'desc' }],
   difference: (dir) => [{ difference: { sort: dir, nulls: 'last' } }, { opened_at: 'desc' }],
   cashier: (dir) => [{ user: { full_name: dir } }, { opened_at: 'desc' }],
 }
 
-async function listShifts({ page = 1, per_page = 20, user_id, status, start_date, end_date, sort, order, branchId = null }) {
+export interface ListShiftsOptions {
+  page?: number
+  per_page?: number
+  user_id?: string
+  status?: ShiftStatus
+  start_date?: string
+  end_date?: string
+  sort?: string
+  order?: string
+  branchId?: string | null
+}
+
+export async function listShifts({
+  page = 1,
+  per_page = 20,
+  user_id,
+  status,
+  start_date,
+  end_date,
+  sort,
+  order,
+  branchId = null,
+}: ListShiftsOptions) {
   const take = Math.min(per_page, 100)
-  const where = {}
+  const where: Prisma.ShiftWhereInput = {}
   if (branchId) where.branch_id = branchId
   if (user_id) where.user_id = user_id
   if (status) where.status = status
@@ -172,7 +212,7 @@ async function listShifts({ page = 1, per_page = 20, user_id, status, start_date
     prisma.shift.findMany({
       where,
       include: { ...PEOPLE, _count: { select: { sales: true } } },
-      orderBy: buildOrderBy({ sort, order }, SHIFT_SORTS, { opened_at: 'desc' }),
+      orderBy: buildOrderBy<ShiftOrderBy>({ sort, order }, SHIFT_SORTS, { opened_at: 'desc' }),
       skip: (page - 1) * take,
       take,
     }),
@@ -180,5 +220,3 @@ async function listShifts({ page = 1, per_page = 20, user_id, status, start_date
   ])
   return { shifts, total, page, per_page: take, total_pages: Math.ceil(total / take) }
 }
-
-module.exports = { SHIFT_SORTS, getOpenShift, getCurrentShift, openShift, closeShift, getShift, listShifts }

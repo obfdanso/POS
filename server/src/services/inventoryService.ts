@@ -1,10 +1,12 @@
-const { Prisma } = require('@prisma/client')
-const prisma = require('../utils/prismaClient').default
-const { changeStock } = require('../utils/branchStock')
-const { buildOrderBy } = require('../middleware/sorting')
-const { NotFoundError, ValidationError } = require('../utils/errors')
+import { Prisma, type InventoryChangeType } from '@prisma/client'
+import prisma from '../utils/prismaClient'
+import { changeStock } from '../utils/branchStock'
+import { buildOrderBy, type SortDirection } from '../middleware/sorting'
+import { NotFoundError, ValidationError } from '../utils/errors'
 
-const INVENTORY_SORTS = {
+type StockOrderBy = Prisma.BranchStockOrderByWithRelationInput
+
+export const INVENTORY_SORTS: Record<string, (dir: SortDirection) => StockOrderBy | StockOrderBy[]> = {
   name: (dir) => ({ product: { name: dir } }),
   category: (dir) => [{ product: { category: { name: dir } } }, { product: { name: 'asc' } }],
   quantity: (dir) => ({ quantity: dir }),
@@ -18,13 +20,24 @@ const INVENTORY_SORTS = {
  * branch's when an admin views all branches. Each row reads like a product with its stock, plus
  * the branch it belongs to.
  */
-async function listInventory({ page = 1, per_page = 20, search, status, sort, order, branchId = null } = {}) {
+export interface ListInventoryOptions {
+  page?: number
+  per_page?: number
+  search?: string
+  status?: string
+  sort?: string
+  order?: string
+  branchId?: string | null
+}
+
+export async function listInventory({ page = 1, per_page = 20, search, status, sort, order, branchId = null }: ListInventoryOptions = {}) {
   const skip = (page - 1) * per_page
   const take = Math.min(per_page, 100)
 
-  const where = { product: { is_active: true }, ...(branchId && { branch_id: branchId }) }
+  const productWhere: Prisma.ProductWhereInput = { is_active: true }
+  const where: Prisma.BranchStockWhereInput = { product: productWhere, ...(branchId && { branch_id: branchId }) }
   if (search) {
-    where.product.OR = [
+    productWhere.OR = [
       { name: { contains: search, mode: 'insensitive' } },
       { sku: { contains: search, mode: 'insensitive' } },
     ]
@@ -46,7 +59,7 @@ async function listInventory({ page = 1, per_page = 20, search, status, sort, or
         branch: { select: { id: true, name: true, code: true } },
         product: { select: { id: true, name: true, sku: true, price: true, category: { select: { id: true, name: true } } } },
       },
-      orderBy: buildOrderBy({ sort, order }, INVENTORY_SORTS, { product: { name: 'asc' } }),
+      orderBy: buildOrderBy<StockOrderBy>({ sort, order }, INVENTORY_SORTS, { product: { name: 'asc' } }),
     }),
     prisma.branchStock.count({ where }),
   ])
@@ -55,10 +68,10 @@ async function listInventory({ page = 1, per_page = 20, search, status, sort, or
   return { products, total, page, per_page: take, total_pages: Math.ceil(total / take) }
 }
 
-const branchFilter = (branchId) => (branchId ? Prisma.sql`AND s.branch_id = ${branchId}` : Prisma.empty)
+const branchFilter = (branchId: string | null | undefined) => (branchId ? Prisma.sql`AND s.branch_id = ${branchId}` : Prisma.empty)
 
-async function getLowStockCount(branchId = null) {
-  const result = await prisma.$queryRaw`
+export async function getLowStockCount(branchId: string | null = null): Promise<number> {
+  const result = await prisma.$queryRaw<{ count: number }[]>`
     SELECT COUNT(*)::int as count
     FROM "BranchStock" s
     JOIN "Product" p ON p.id = s.product_id
@@ -68,8 +81,21 @@ async function getLowStockCount(branchId = null) {
 }
 
 /** Stock rows at or below their low-stock level, for the acting branch (or all branches). */
-async function getLowStock(branchId = null) {
-  const rows = await prisma.$queryRaw`
+/** A row of the low-stock query. */
+interface LowStockRow {
+  id: string
+  name: string
+  sku: string
+  quantity: number
+  low_stock_threshold: number
+  price: Prisma.Decimal
+  branch_id: string
+  category: { id: string; name: string }
+  branch: { id: string; name: string; code: string }
+}
+
+export async function getLowStock(branchId: string | null = null) {
+  const rows = await prisma.$queryRaw<LowStockRow[]>`
     SELECT p.id, p.name, p.sku, s.quantity, s.low_stock_threshold, p.price, s.branch_id,
            json_build_object('id', c.id, 'name', c.name) as category,
            json_build_object('id', b.id, 'name', b.name, 'code', b.code) as branch
@@ -88,7 +114,14 @@ async function getLowStock(branchId = null) {
 }
 
 /** Add or remove stock at a branch by hand. Refuses to go below zero. */
-async function adjustStock(productId, quantityChange, changeType, userId, notes, branchId) {
+export async function adjustStock(
+  productId: string,
+  quantityChange: number,
+  changeType: InventoryChangeType,
+  userId: string,
+  notes: string | null | undefined,
+  branchId: string
+) {
   const product = await prisma.product.findUnique({ where: { id: productId }, select: { id: true } })
   if (!product) throw new NotFoundError('Product not found')
 
@@ -105,7 +138,8 @@ async function adjustStock(productId, quantityChange, changeType, userId, notes,
       }
       throw err
     }
-    const stock = await tx.branchStock.findUnique({
+    // changeStock just updated this row, so it exists
+    const stock = await tx.branchStock.findUniqueOrThrow({
       where: { branch_id_product_id: { branch_id: branchId, product_id: productId } },
       include: { product: true },
     })
@@ -114,7 +148,7 @@ async function adjustStock(productId, quantityChange, changeType, userId, notes,
 }
 
 /** Goods arriving at a branch; a branch that didn't stock the product starts stocking it. */
-async function restockProduct(productId, quantity, userId, notes, branchId) {
+export async function restockProduct(productId: string, quantity: number, userId: string, notes: string | null | undefined, branchId: string) {
   if (quantity <= 0) {
     throw new ValidationError('Restock quantity must be positive', [
       { field: 'quantity', message: 'Must be greater than 0' },
@@ -126,13 +160,17 @@ async function restockProduct(productId, quantity, userId, notes, branchId) {
     const { log, quantity: newQty } = await changeStock(tx, {
       branchId, productId, change: quantity, type: 'RESTOCK', userId, notes, createIfMissing: true,
     })
-    const full = await tx.product.findUnique({ where: { id: productId } })
+    // Checked above, so it exists
+    const full = await tx.product.findUniqueOrThrow({ where: { id: productId } })
     return { product: { ...full, quantity: newQty }, log }
   })
 }
 
 /** A product's stock history at the acting branch (every branch's when none is chosen). */
-async function getInventoryLog(productId, { page = 1, per_page = 20, branchId = null } = {}) {
+export async function getInventoryLog(
+  productId: string,
+  { page = 1, per_page = 20, branchId = null }: { page?: number; per_page?: number; branchId?: string | null } = {}
+) {
   const product = await prisma.product.findUnique({ where: { id: productId } })
   if (!product) throw new NotFoundError('Product not found')
 
@@ -156,12 +194,3 @@ async function getInventoryLog(productId, { page = 1, per_page = 20, branchId = 
   return { logs, total, page, per_page: take, total_pages: Math.ceil(total / take) }
 }
 
-module.exports = {
-  INVENTORY_SORTS,
-  listInventory,
-  getLowStock,
-  getLowStockCount,
-  adjustStock,
-  restockProduct,
-  getInventoryLog,
-}

@@ -16,17 +16,18 @@ export function sortRules(fields: string[]) {
 /**
  * Build a Prisma orderBy from validated sort params.
  * @param fields - Maps each sortable field to its orderBy
- *   (an array adds secondary orderings, e.g. category then name)
+ *   (an array adds secondary orderings, e.g. category then name; null for a field the caller sorts itself)
  * @param fallback - orderBy to use when no sort is requested
  * @returns orderBy list, with `id` as a tie-breaker so pagination is stable
  */
 export function buildOrderBy<T extends object>(
   { sort, order }: { sort?: string; order?: string },
-  fields: Record<string, (dir: SortDirection) => T | T[]>,
+  fields: Record<string, ((dir: SortDirection) => T | T[]) | null>,
   fallback: T | T[]
 ): (T | { id: 'asc' })[] {
   const dir = order === 'desc' ? 'desc' : 'asc'
-  const primary = sort && fields[sort] ? fields[sort](dir) : fallback
+  const field = sort ? fields[sort] : null
+  const primary = field ? field(dir) : fallback
   const orderBy: (T | { id: 'asc' })[] = []
   return orderBy.concat(primary, { id: 'asc' })
 }

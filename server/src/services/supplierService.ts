@@ -1,12 +1,27 @@
-const prisma = require('../utils/prismaClient').default
-const { branchStockFor, withStock } = require('../utils/branchStock')
-const { NotFoundError, ConflictError } = require('../utils/errors')
+import type { Prisma } from '@prisma/client'
+import prisma from '../utils/prismaClient'
+import { branchStockFor, withStock } from '../utils/branchStock'
+import { NotFoundError, ConflictError } from '../utils/errors'
 
-async function listSuppliers({ page = 1, per_page = 50, search } = {}) {
+export interface ListSuppliersOptions {
+  page?: number
+  per_page?: number
+  search?: string
+}
+
+export interface SupplierInput {
+  name?: string
+  phone?: string | null
+  email?: string | null
+  address?: string | null
+  website?: string | null
+}
+
+export async function listSuppliers({ page = 1, per_page = 50, search }: ListSuppliersOptions = {}) {
   const skip = (page - 1) * per_page
   const take = Math.min(per_page, 100)
 
-  const where = {}
+  const where: Prisma.SupplierWhereInput = {}
   if (search) {
     where.OR = [
       { name: { contains: search, mode: 'insensitive' } },
@@ -38,7 +53,7 @@ async function listSuppliers({ page = 1, per_page = 50, search } = {}) {
 }
 
 /** A supplier with its active products and their stock at the acting branch (or all branches). */
-async function getSupplierById(id, branchId = null) {
+export async function getSupplierById(id: string, branchId: string | null = null) {
   const supplier = await prisma.supplier.findUnique({
     where: { id },
     include: {
@@ -54,14 +69,14 @@ async function getSupplierById(id, branchId = null) {
   return { ...supplier, products: supplier.products.map((p) => withStock(p, stock)) }
 }
 
-async function createSupplier({ name, phone, email, address, website }) {
+export async function createSupplier({ name, phone, email, address, website }: SupplierInput & { name: string }) {
   const existing = await prisma.supplier.findUnique({ where: { name } })
   if (existing) throw new ConflictError(`Supplier "${name}" already exists`, 'name')
 
   return prisma.supplier.create({ data: { name, phone, email, address, website } })
 }
 
-async function updateSupplier(id, { name, phone, email, address, website }) {
+export async function updateSupplier(id: string, { name, phone, email, address, website }: SupplierInput) {
   const supplier = await prisma.supplier.findUnique({ where: { id } })
   if (!supplier) throw new NotFoundError('Supplier not found')
 
@@ -76,7 +91,7 @@ async function updateSupplier(id, { name, phone, email, address, website }) {
   })
 }
 
-async function deleteSupplier(id, userId) {
+export async function deleteSupplier(id: string, userId: string) {
   const supplier = await prisma.supplier.findUnique({
     where: { id },
     include: { _count: { select: { products: { where: { is_active: true } }, purchase_orders: true } } },
@@ -99,5 +114,3 @@ async function deleteSupplier(id, userId) {
   ])
   return true
 }
-
-module.exports = { listSuppliers, getSupplierById, createSupplier, updateSupplier, deleteSupplier }

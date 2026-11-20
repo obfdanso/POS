@@ -1,15 +1,16 @@
-const prisma = require('../utils/prismaClient').default
-const { buildOrderBy } = require('../middleware/sorting')
-const { NotFoundError, ConflictError } = require('../utils/errors')
+import type { PaymentStatus, Prisma } from '@prisma/client'
+import prisma from '../utils/prismaClient'
+import { buildOrderBy, type SortDirection } from '../middleware/sorting'
+import { NotFoundError, ConflictError } from '../utils/errors'
 
 // Sales the customer kept at least part of
-const KEPT_STATUSES = ['COMPLETED', 'PARTIALLY_REFUNDED']
+const KEPT_STATUSES: PaymentStatus[] = ['COMPLETED', 'PARTIALLY_REFUNDED']
 
-function round2(n) {
+function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100
 }
 
-const CUSTOMER_SORTS = {
+export const CUSTOMER_SORTS: Record<string, (dir: SortDirection) => Prisma.CustomerOrderByWithRelationInput> = {
   name: (dir) => ({ name: dir }),
   phone: (dir) => ({ phone: { sort: dir, nulls: 'last' } }),
   email: (dir) => ({ email: { sort: dir, nulls: 'last' } }),
@@ -17,11 +18,19 @@ const CUSTOMER_SORTS = {
   created_at: (dir) => ({ created_at: dir }),
 }
 
-async function listCustomers({ page = 1, per_page = 20, search, sort, order } = {}) {
+export interface ListCustomersOptions {
+  page?: number
+  per_page?: number
+  search?: string
+  sort?: string
+  order?: string
+}
+
+export async function listCustomers({ page = 1, per_page = 20, search, sort, order }: ListCustomersOptions = {}) {
   const skip = (page - 1) * per_page
   const take = Math.min(per_page, 100)
 
-  const where = {}
+  const where: Prisma.CustomerWhereInput = {}
   if (search) {
     where.OR = [
       { name: { contains: search, mode: 'insensitive' } },
@@ -48,14 +57,14 @@ async function listCustomers({ page = 1, per_page = 20, search, sort, order } = 
     _sum: { total_amount: true, refunded_amount: true },
   })
   const spentById = new Map(
-    totals.map((t) => [t.customer_id, round2(parseFloat(t._sum.total_amount || 0) - parseFloat(t._sum.refunded_amount || 0))])
+    totals.map((t) => [t.customer_id, round2(Number(t._sum.total_amount ?? 0) - Number(t._sum.refunded_amount ?? 0))])
   )
   const withTotals = customers.map((c) => ({ ...c, total_purchases: spentById.get(c.id) ?? 0 }))
 
   return { customers: withTotals, total, page, per_page: take, total_pages: Math.ceil(total / take) }
 }
 
-async function getCustomerById(id) {
+export async function getCustomerById(id: string) {
   const customer = await prisma.customer.findUnique({
     where: { id },
     include: {
@@ -71,7 +80,7 @@ async function getCustomerById(id) {
     _count: { id: true },
     _max: { created_at: true },
   })
-  const totalSpent = round2(parseFloat(stats._sum.total_amount || 0) - parseFloat(stats._sum.refunded_amount || 0))
+  const totalSpent = round2(Number(stats._sum.total_amount ?? 0) - Number(stats._sum.refunded_amount ?? 0))
 
   return {
     ...customer,
@@ -84,7 +93,14 @@ async function getCustomerById(id) {
   }
 }
 
-async function createCustomer(data) {
+export interface CustomerInput {
+  name: string
+  phone?: string | null
+  email?: string | null
+  address?: string | null
+}
+
+export async function createCustomer(data: CustomerInput) {
   if (data.phone) {
     const existing = await prisma.customer.findUnique({ where: { phone: data.phone } })
     if (existing) throw new ConflictError('Phone number already registered', 'phone')
@@ -106,7 +122,7 @@ async function createCustomer(data) {
   return customer
 }
 
-async function updateCustomer(id, data) {
+export async function updateCustomer(id: string, data: Partial<CustomerInput>) {
   const existing = await prisma.customer.findUnique({ where: { id } })
   if (!existing) throw new NotFoundError('Customer not found')
 
@@ -130,12 +146,19 @@ async function updateCustomer(id, data) {
   })
 }
 
+export interface CustomerPurchasesOptions {
+  page?: number
+  per_page?: number
+  userId?: string
+  branchId?: string | null
+}
+
 /**
  * Pass userId to restrict the list to one cashier's sales. With `branchId` (a manager), other
  * branches' sales lose their id and transaction ID, so a return there still goes through the
  * receipt lookup.
  */
-async function getCustomerPurchases(id, { page = 1, per_page = 20, userId, branchId } = {}) {
+export async function getCustomerPurchases(id: string, { page = 1, per_page = 20, userId, branchId }: CustomerPurchasesOptions = {}) {
   const customer = await prisma.customer.findUnique({ where: { id } })
   if (!customer) throw new NotFoundError('Customer not found')
 
@@ -162,5 +185,3 @@ async function getCustomerPurchases(id, { page = 1, per_page = 20, userId, branc
     : sales
   return { sales: shown, total, page, per_page: take, total_pages: Math.ceil(total / take) }
 }
-
-module.exports = { CUSTOMER_SORTS, listCustomers, getCustomerById, createCustomer, updateCustomer, getCustomerPurchases }

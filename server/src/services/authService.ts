@@ -1,19 +1,36 @@
-const crypto = require('crypto')
-const bcrypt = require('bcrypt')
-const jwt = require('jsonwebtoken')
-const prisma = require('../utils/prismaClient').default
-const { UnauthorizedError, NotFoundError, ValidationError } = require('../utils/errors')
+import crypto from 'crypto'
+import bcrypt from 'bcrypt'
+import jwt from 'jsonwebtoken'
+import { Prisma, type Role, type User } from '@prisma/client'
+import prisma from '../utils/prismaClient'
+import { UnauthorizedError, NotFoundError, ValidationError } from '../utils/errors'
 
 const MAX_FAILED_ATTEMPTS = 5
 // Locked accounts stay locked until an admin unlocks them (POST /api/users/:id/unlock).
 // If every admin is locked out, run `npm run unlock-user -- <username>` on the server.
 const LOCKED_UNTIL_ADMIN_UNLOCK = new Date('9999-12-31T00:00:00Z')
 
+/** What this server puts in a refresh token (see generateRefreshToken). */
+interface RefreshTokenPayload {
+  userId: string
+  iat: number
+  exp: number
+  iat_ms?: number
+  jti?: string
+}
+
+/** The issue-time claims `issuedBeforeCutoff` reads, from an access or refresh token. */
+interface IssuedAt {
+  iat: number
+  iat_ms?: number
+}
+
 /** Payload of a valid refresh token, or null if it is missing, forged, or expired. */
-function verifyRefreshToken(token) {
+function verifyRefreshToken(token: string | null | undefined): RefreshTokenPayload | null {
   if (!token) return null
   try {
-    return jwt.verify(token, process.env.JWT_REFRESH_SECRET)
+    // The signature is verified, so the payload is one this server signed
+    return jwt.verify(token, process.env.JWT_REFRESH_SECRET ?? '') as RefreshTokenPayload
   } catch {
     return null
   }
@@ -24,13 +41,13 @@ function verifyRefreshToken(token) {
  * restarts and server instances. Returns false if it was already revoked: the insert doubles as
  * the check, so two requests racing to rotate the same token can't both succeed.
  */
-async function revokeToken(payload, token) {
+async function revokeToken(payload: RefreshTokenPayload, token: string): Promise<boolean> {
   // Tokens issued before jwtids were added are keyed by a hash instead
   const jti = payload.jti || crypto.createHash('sha256').update(token).digest('hex')
   try {
     await prisma.revokedToken.create({ data: { jti, expires_at: new Date(payload.exp * 1000) } })
   } catch (err) {
-    if (err.code === 'P2002') return false
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') return false
     throw err
   }
   // An entry past its token's expiry can never match a usable token, so drop it
@@ -38,7 +55,13 @@ async function revokeToken(payload, token) {
   return true
 }
 
-async function logAuthEvent(userId, eventType, ipAddress, userAgent, details) {
+async function logAuthEvent(
+  userId: string | null | undefined,
+  eventType: string,
+  ipAddress: string | null | undefined,
+  userAgent: string | null | undefined,
+  details: string | null
+) {
   await prisma.authLog.create({
     data: {
       user_id: userId || null,
@@ -57,28 +80,36 @@ async function logAuthEvent(userId, eventType, ipAddress, userAgent, details) {
  * would let a session that refreshes in a loop keep a token from the cut-off second and survive.
  * Tokens without `iat_ms` (issued before this check existed) fall back to the start of their `iat` second.
  */
-function issuedBeforeCutoff(payload, user) {
+export function issuedBeforeCutoff(payload: IssuedAt, user: Pick<User, 'tokens_valid_after'>): boolean {
   if (!user.tokens_valid_after) return false
   const issuedAtMs = typeof payload.iat_ms === 'number' ? payload.iat_ms : payload.iat * 1000
   return issuedAtMs < user.tokens_valid_after.getTime()
 }
 
-function generateAccessToken(userId, role) {
-  return jwt.sign({ userId, role, iat_ms: Date.now() }, process.env.JWT_ACCESS_SECRET, {
-    expiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
+// jsonwebtoken types `expiresIn` as a `ms` duration string; the env values are durations like '15m'
+type ExpiresIn = NonNullable<jwt.SignOptions['expiresIn']>
+
+function generateAccessToken(userId: string, role: Role): string {
+  return jwt.sign({ userId, role, iat_ms: Date.now() }, process.env.JWT_ACCESS_SECRET ?? '', {
+    expiresIn: (process.env.JWT_ACCESS_EXPIRES_IN || '15m') as ExpiresIn,
   })
 }
 
-function generateRefreshToken(userId) {
+function generateRefreshToken(userId: string): string {
   // A unique jwtid keeps rotated tokens distinct even when issued within the same second;
   // otherwise the "new" token equals the one just revoked and the session is lost
-  return jwt.sign({ userId, iat_ms: Date.now() }, process.env.JWT_REFRESH_SECRET, {
-    expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
+  return jwt.sign({ userId, iat_ms: Date.now() }, process.env.JWT_REFRESH_SECRET ?? '', {
+    expiresIn: (process.env.JWT_REFRESH_EXPIRES_IN || '7d') as ExpiresIn,
     jwtid: crypto.randomUUID(),
   })
 }
 
-async function login(username, password, ipAddress, userAgent) {
+export async function login(
+  username: string,
+  password: string,
+  ipAddress?: string | null,
+  userAgent?: string | null
+) {
   const user = await prisma.user.findFirst({
     where: {
       username: { equals: username, mode: 'insensitive' },
@@ -155,16 +186,21 @@ async function login(username, password, ipAddress, userAgent) {
   }
 }
 
-async function logout(userId, ipAddress, userAgent, refreshToken) {
+export async function logout(
+  userId: string | null | undefined,
+  ipAddress: string | null | undefined,
+  userAgent: string | null | undefined,
+  refreshToken: string | null | undefined
+) {
   const payload = verifyRefreshToken(refreshToken)
-  if (payload) await revokeToken(payload, refreshToken)
+  if (payload && refreshToken) await revokeToken(payload, refreshToken)
   if (userId) {
     await logAuthEvent(userId, 'LOGOUT', ipAddress, userAgent, null)
   }
   return true
 }
 
-async function refreshToken(tokenFromCookie) {
+export async function refreshToken(tokenFromCookie: string | null | undefined) {
   if (!tokenFromCookie) {
     throw new UnauthorizedError('No refresh token')
   }
@@ -201,7 +237,7 @@ async function refreshToken(tokenFromCookie) {
   return { accessToken, refreshToken: newRefreshToken }
 }
 
-async function getMe(userId) {
+export async function getMe(userId: string) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {
@@ -223,7 +259,12 @@ async function getMe(userId) {
   return user
 }
 
-async function changePassword(userId, currentPassword, newPassword, currentRefreshToken) {
+export async function changePassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string,
+  currentRefreshToken: string | null | undefined
+) {
   const user = await prisma.user.findUnique({ where: { id: userId } })
   if (!user) throw new NotFoundError('User not found')
 
@@ -239,15 +280,15 @@ async function changePassword(userId, currentPassword, newPassword, currentRefre
   // Sign out every existing session, then hand this device fresh tokens so it stays signed in
   await prisma.user.update({ where: { id: userId }, data: { password_hash, tokens_valid_after: new Date() } })
   const currentPayload = verifyRefreshToken(currentRefreshToken)
-  if (currentPayload) await revokeToken(currentPayload, currentRefreshToken)
+  if (currentPayload && currentRefreshToken) await revokeToken(currentPayload, currentRefreshToken)
   return {
     accessToken: generateAccessToken(user.id, user.role),
     refreshToken: generateRefreshToken(user.id),
   }
 }
 
-async function updateProfile(userId, { full_name, email }) {
-  const data = {}
+export async function updateProfile(userId: string, { full_name, email }: { full_name?: string; email?: string }) {
+  const data: Prisma.UserUpdateInput = {}
   if (full_name !== undefined) data.full_name = full_name
   if (email !== undefined) data.email = email
 
@@ -270,5 +311,3 @@ async function updateProfile(userId, { full_name, email }) {
   })
   return user
 }
-
-module.exports = { login, logout, refreshToken, getMe, changePassword, updateProfile, issuedBeforeCutoff }

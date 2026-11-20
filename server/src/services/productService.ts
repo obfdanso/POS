@@ -1,37 +1,42 @@
-const prisma = require('../utils/prismaClient').default
-const { buildOrderBy } = require('../middleware/sorting')
-const { recordAudit } = require('../utils/audit')
-const { NotFoundError, ConflictError, ForbiddenError, ValidationError } = require('../utils/errors')
-const { changeStock, branchStockFor, withStock } = require('../utils/branchStock')
+import type { Prisma } from '@prisma/client'
+import prisma from '../utils/prismaClient'
+import { buildOrderBy, type SortDirection } from '../middleware/sorting'
+import { recordAudit } from '../utils/audit'
+import { NotFoundError, ConflictError, ForbiddenError, ValidationError } from '../utils/errors'
+import { changeStock, branchStockFor, withStock, type StockTarget } from '../utils/branchStock'
+import type { AuthUser } from '../types/express'
 
-const PARENT = { select: { id: true, name: true, variant_name: true } }
+const PARENT = { select: { id: true, name: true, variant_name: true } } satisfies Prisma.Product$parentArgs
 const PRODUCT_INCLUDE = {
   category: { select: { id: true, name: true } },
   supplier: { select: { id: true, name: true } },
   parent: PARENT,
-}
+} satisfies Prisma.ProductInclude
 // What a product page or the till needs to know about each variant (stock is added per branch)
 const VARIANT_SELECT = {
   id: true, name: true, variant_name: true, sku: true, barcode: true, price: true, cost_price: true,
   is_active: true, image_url: true, category_id: true,
-}
+} satisfies Prisma.ProductSelect
 const STOCKS_INCLUDE = {
   stocks: {
     select: { branch_id: true, quantity: true, low_stock_threshold: true, branch: { select: { name: true, code: true } } },
     orderBy: { branch: { name: 'asc' } },
   },
-}
-const stockedAt = (branchId) => (branchId ? { stocks: { some: { branch_id: branchId } } } : {})
+} satisfies Prisma.ProductInclude
+const stockedAt = (branchId: string | null | undefined): Prisma.ProductWhereInput =>
+  branchId ? { stocks: { some: { branch_id: branchId } } } : {}
 
 /** Attach the acting branch's (or all branches') stock to products and their variants. */
-async function attachStock(products, branchId) {
+async function attachStock<T extends StockTarget>(products: T[], branchId: string | null | undefined) {
   const ids = products.flatMap((p) => [p.id, ...(p.variants || []).map((v) => v.id)])
   const stock = await branchStockFor(ids, branchId)
   return products.map((p) => withStock(p, stock))
 }
 
+type ProductOrderBy = Prisma.ProductOrderByWithRelationInput
+
 // status: 'active' (default), 'inactive', or 'all'
-const PRODUCT_SORTS = {
+export const PRODUCT_SORTS: Record<string, ((dir: SortDirection) => ProductOrderBy | ProductOrderBy[]) | null> = {
   name: (dir) => ({ name: dir }),
   sku: (dir) => ({ sku: dir }),
   category: (dir) => [{ category: { name: dir } }, { name: 'asc' }],
@@ -43,6 +48,19 @@ const PRODUCT_SORTS = {
   created_at: (dir) => ({ created_at: dir }),
 }
 
+export interface ListProductsOptions {
+  page?: number
+  per_page?: number
+  search?: string
+  category_id?: string
+  status?: string
+  group_variants?: boolean
+  include_unstocked?: boolean
+  sort?: string
+  order?: string
+  branchId?: string | null
+}
+
 /**
  * With `group_variants`, only main products are listed, each with its active `variants`, so the
  * till can show one card per product and offer its sizes or flavours.
@@ -51,18 +69,31 @@ const PRODUCT_SORTS = {
  * `include_unstocked` lists the branch's unstocked products too (with 0), so managers can find and
  * start stocking them from the Products page.
  */
-async function listProducts({ page = 1, per_page = 20, search, category_id, status = 'active', group_variants = false, include_unstocked = false, sort, order, branchId = null } = {}) {
+export async function listProducts({
+  page = 1,
+  per_page = 20,
+  search,
+  category_id,
+  status = 'active',
+  group_variants = false,
+  include_unstocked = false,
+  sort,
+  order,
+  branchId = null,
+}: ListProductsOptions = {}) {
   const skip = (page - 1) * per_page
   const take = Math.min(per_page, 100)
 
-  const where = {}
+  const where: Prisma.ProductWhereInput = {}
   if (status === 'active') where.is_active = true
   if (status === 'inactive') where.is_active = false
   if (category_id) where.category_id = category_id
   // Variants of a deactivated main product stand on their own, so they stay on the till
   if (group_variants) where.OR = [{ parent_id: null }, { parent: { is_active: false } }]
+  let and: Prisma.ProductWhereInput[] | undefined
   if (search) {
-    where.AND = [{ OR: [...(where.OR || [])] }].filter((c) => c.OR.length)
+    and = [{ OR: [...(where.OR || [])] }].filter((c) => c.OR.length)
+    where.AND = and
     where.OR = [
       { name: { contains: search, mode: 'insensitive' } },
       { sku: { contains: search, mode: 'insensitive' } },
@@ -74,16 +105,17 @@ async function listProducts({ page = 1, per_page = 20, search, category_id, stat
     const stocked = group_variants
       ? { OR: [stockedAt(branchId), { variants: { some: { is_active: true, ...stockedAt(branchId) } } }] }
       : stockedAt(branchId)
-    where.AND = [...(where.AND || []), stocked]
+    and = [...(and || []), stocked]
+    where.AND = and
   }
 
   const include = {
     ...PRODUCT_INCLUDE,
     _count: { select: { variants: true } },
     ...(group_variants && {
-      variants: { where: { is_active: true, ...stockedAt(branchId) }, select: VARIANT_SELECT, orderBy: [{ variant_name: 'asc' }] },
+      variants: { where: { is_active: true, ...stockedAt(branchId) }, select: VARIANT_SELECT, orderBy: [{ variant_name: 'asc' as const }] },
     }),
-  }
+  } satisfies Prisma.ProductInclude
 
   let products
   const total = await prisma.product.count({ where })
@@ -91,12 +123,12 @@ async function listProducts({ page = 1, per_page = 20, search, category_id, stat
     const desc = order === 'desc'
     // Products no branch stocks hold 0, so they come first going up and last going down. (With a
     // branch chosen, only products it stocks are listed, so there are none.)
-    const unstockedWhere = { ...where, stocks: { none: branchId ? { branch_id: branchId } : {} } }
+    const unstockedWhere: Prisma.ProductWhereInput = { ...where, stocks: { none: branchId ? { branch_id: branchId } : {} } }
     const unstockedCount = branchId && !include_unstocked ? 0 : await prisma.product.count({ where: unstockedWhere })
     const stockedCount = total - unstockedCount
     // This page's window over [unstocked..., stocked...] (ascending) or [stocked..., unstocked...]
-    const [first, firstCount] = desc ? ['stocked', stockedCount] : ['unstocked', unstockedCount]
-    const window = (part) => {
+    const [first, firstCount] = desc ? (['stocked', stockedCount] as const) : (['unstocked', unstockedCount] as const)
+    const window = (part: 'stocked' | 'unstocked') => {
       const offset = part === first ? 0 : firstCount
       const from = Math.max(0, skip - offset)
       const to = Math.min(part === 'stocked' ? stockedCount : unstockedCount, skip + take - offset)
@@ -119,7 +151,7 @@ async function listProducts({ page = 1, per_page = 20, search, category_id, stat
       : []
     const found = await prisma.product.findMany({ where: { id: { in: groups.map((g) => g.product_id) } }, include })
     const byId = new Map(found.map((p) => [p.id, p]))
-    const stocked = groups.map((g) => byId.get(g.product_id)).filter(Boolean)
+    const stocked = groups.map((g) => byId.get(g.product_id)).filter((p): p is (typeof found)[number] => Boolean(p))
     products = desc ? [...stocked, ...unstocked] : [...unstocked, ...stocked]
   } else {
     products = await prisma.product.findMany({
@@ -127,7 +159,7 @@ async function listProducts({ page = 1, per_page = 20, search, category_id, stat
       skip,
       take,
       include,
-      orderBy: buildOrderBy({ sort, order }, PRODUCT_SORTS, { name: 'asc' }),
+      orderBy: buildOrderBy<ProductOrderBy>({ sort, order }, PRODUCT_SORTS, { name: 'asc' }),
     })
   }
 
@@ -139,7 +171,11 @@ async function listProducts({ page = 1, per_page = 20, search, category_id, stat
  * (`allBranches`) see every branch's row; staff only their own branch's. A branch that doesn't
  * stock it still gets it (with `stocked: false`) so a manager can start stocking it.
  */
-async function getProductById(id, branchId = null, { allBranches = false } = {}) {
+export async function getProductById(
+  id: string,
+  branchId: string | null | undefined = null,
+  { allBranches = false }: { allBranches?: boolean } = {}
+) {
   const stocks = allBranches
     ? STOCKS_INCLUDE.stocks
     : { ...STOCKS_INCLUDE.stocks, where: { branch_id: branchId ?? '' } }
@@ -151,7 +187,7 @@ async function getProductById(id, branchId = null, { allBranches = false } = {})
   return (await attachStock([product], branchId))[0]
 }
 
-async function getProductByBarcode(barcode, branchId = null) {
+export async function getProductByBarcode(barcode: string, branchId: string | null | undefined = null) {
   const product = await prisma.product.findUnique({ where: { barcode }, include: PRODUCT_INCLUDE })
   if (!product) throw new NotFoundError('Product not found')
   if (!product.is_active) throw new NotFoundError('Product is inactive')
@@ -160,18 +196,25 @@ async function getProductByBarcode(barcode, branchId = null) {
   return withQty
 }
 
-const whichBranchError = (field) =>
+const whichBranchError = (field: string) =>
   new ValidationError('Choose a branch', [{ field, message: 'Choose a branch first, or list each branch under stocks' }])
-const stocksError = (message) => new ValidationError('Invalid branch stock', [{ field: 'stocks', message }])
+const stocksError = (message: string) => new ValidationError('Invalid branch stock', [{ field: 'stocks', message }])
+
+/** One branch that should stock a product, with its optional starting quantity and low-stock level. */
+export interface StockRowInput {
+  branch_id: string
+  quantity?: number
+  low_stock_threshold?: number
+}
 
 /**
  * Which branches a create or update may touch: an admin any open branch, a manager only their own.
  * Returns the open branches by id (for names in messages).
  */
-async function checkStockBranches(stocks, user) {
+async function checkStockBranches(stocks: StockRowInput[], user: AuthUser) {
   const open = await prisma.branch.findMany({ where: { is_active: true }, select: { id: true, name: true } })
   const byId = new Map(open.map((b) => [b.id, b]))
-  const seen = new Set()
+  const seen = new Set<string>()
   for (const s of stocks) {
     if (user.role !== 'ADMIN' && s.branch_id !== user.branch_id) {
       throw new ForbiddenError("You can only manage your own branch's stock")
@@ -184,27 +227,27 @@ async function checkStockBranches(stocks, user) {
 }
 
 /** Start stocking a product at a branch, logging any starting quantity. */
-async function addStockRow(tx, productId, row, userId) {
+async function addStockRow(tx: Prisma.TransactionClient, productId: string, row: StockRowInput, userId: string) {
   await tx.branchStock.create({
     data: { branch_id: row.branch_id, product_id: productId, low_stock_threshold: row.low_stock_threshold ?? 10 },
   })
-  if (row.quantity > 0) {
+  if (row.quantity !== undefined && row.quantity > 0) {
     await changeStock(tx, { branchId: row.branch_id, productId, change: row.quantity, type: 'RESTOCK', userId, notes: 'Starting stock' })
   }
 }
 
-async function assertSupplierExists(supplierId) {
+async function assertSupplierExists(supplierId: string | null | undefined) {
   if (!supplierId) return
   const supplier = await prisma.supplier.findUnique({ where: { id: supplierId }, select: { id: true } })
   if (!supplier) throw new ValidationError('Supplier not found', [{ field: 'supplier_id', message: 'Supplier does not exist' }])
 }
 
-function variantError(field, message) {
+function variantError(field: string, message: string) {
   return new ValidationError('Invalid variant', [{ field, message }])
 }
 
 /** Empty strings (e.g. from a form) mean no variant name. */
-function cleanVariantName(value) {
+function cleanVariantName(value: string | null | undefined): string | null | undefined {
   if (value === undefined) return undefined
   const name = typeof value === 'string' ? value.trim() : value
   return name || null
@@ -214,7 +257,7 @@ function cleanVariantName(value) {
  * Throws if `name` is already used by another option of the same product: the main product
  * (`familyId`) or any of its variants.
  */
-async function assertVariantNameFree(familyId, name, selfId) {
+async function assertVariantNameFree(familyId: string, name: string | null | undefined, selfId?: string) {
   if (!name) return
   const clash = await prisma.product.findFirst({
     where: {
@@ -227,9 +270,9 @@ async function assertVariantNameFree(familyId, name, selfId) {
   if (clash) throw new ConflictError('This product already has an option with that name', 'variant_name')
 }
 
-/** Checks a new variant's main product and returns it. */
-async function resolveParent(data) {
-  const parent = await prisma.product.findUnique({ where: { id: data.parent_id } })
+/** Checks a new variant's main product (`parentId`, from `data.parent_id`) and returns it. */
+async function resolveParent(parentId: string, data: ProductInput) {
+  const parent = await prisma.product.findUnique({ where: { id: parentId } })
   if (!parent) throw variantError('parent_id', 'The main product does not exist')
   if (parent.parent_id) throw variantError('parent_id', 'A variant cannot have variants of its own; add it to the main product')
   if (!cleanVariantName(data.variant_name)) throw variantError('variant_name', 'Name the variant, e.g. a size or flavour')
@@ -239,10 +282,32 @@ async function resolveParent(data) {
   return parent
 }
 
+type CostInput = number | string | null | undefined
+
 // Keeps a cost price of 0 instead of treating it as missing
-function optionalCost(value) {
+function optionalCost(value: CostInput) {
   return value === '' || value === null || value === undefined ? null : value
 }
+
+/** A validated product create or update body. */
+export interface ProductInput {
+  name?: string
+  sku?: string
+  barcode?: string | null
+  category_id?: string
+  supplier_id?: string | null
+  price?: number
+  cost_price?: CostInput
+  quantity?: number
+  low_stock_threshold?: number
+  image_url?: string | null
+  is_active?: boolean
+  parent_id?: string | null
+  variant_name?: string | null
+  stocks?: StockRowInput[]
+}
+
+export type NewProductInput = ProductInput & Required<Pick<ProductInput, 'name' | 'sku' | 'category_id' | 'price'>>
 
 /**
  * `stocks` lists the branches that will stock the product, each with an optional starting
@@ -250,7 +315,7 @@ function optionalCost(value) {
  * a manager's to their own; a top-level `quantity`/`low_stock_threshold` then applies to the
  * acting branch.
  */
-async function createProduct(data, user, branchId = null) {
+export async function createProduct(data: NewProductInput, user: AuthUser, branchId: string | null | undefined = null) {
   const userId = user.id
   // Check uniqueness
   const [existingSku, existingBarcode] = await Promise.all([
@@ -261,7 +326,7 @@ async function createProduct(data, user, branchId = null) {
   if (existingSku) throw new ConflictError('SKU already exists', 'sku')
   if (existingBarcode) throw new ConflictError('Barcode already exists', 'barcode')
 
-  const parent = data.parent_id ? await resolveParent(data) : null
+  const parent = data.parent_id ? await resolveParent(data.parent_id, data) : null
   const variantName = cleanVariantName(data.variant_name) ?? null
   if (parent) await assertVariantNameFree(parent.id, variantName)
 
@@ -273,19 +338,21 @@ async function createProduct(data, user, branchId = null) {
   let stocks = data.stocks
   // A starting quantity or low-stock level has to say which branch it is for
   if (!stocks && !branchId) {
-    if (data.quantity > 0) throw whichBranchError('quantity')
+    if (data.quantity !== undefined && data.quantity > 0) throw whichBranchError('quantity')
     if (data.low_stock_threshold !== undefined) throw whichBranchError('low_stock_threshold')
   }
   if (!stocks) {
     const targets = user.role === 'ADMIN'
       ? (await prisma.branch.findMany({ where: { is_active: true }, select: { id: true } })).map((b) => b.id)
-      : [user.branch_id]
+      // authenticate refuses staff without a branch, so a manager always has one
+      : [user.branch_id as string]
     stocks = targets.map((id) => ({
       branch_id: id,
       ...(id === branchId && { quantity: data.quantity ?? 0, low_stock_threshold: data.low_stock_threshold }),
     }))
   }
-  await checkStockBranches(stocks, user)
+  const rows: StockRowInput[] = stocks
+  await checkStockBranches(rows, user)
 
   // Create the product and its stock rows, logging starting stock, together
   const created = await prisma.$transaction(async (tx) => {
@@ -305,7 +372,7 @@ async function createProduct(data, user, branchId = null) {
       },
       include: PRODUCT_INCLUDE,
     })
-    for (const row of stocks) await addStockRow(tx, product.id, row, userId)
+    for (const row of rows) await addStockRow(tx, product.id, row, userId)
     return product
   })
   return getProductById(created.id, branchId, { allBranches: user.role === 'ADMIN' })
@@ -317,7 +384,7 @@ async function createProduct(data, user, branchId = null) {
  * their low-stock level updated, and branches left out stop stocking it if they hold none.
  * A top-level `low_stock_threshold` sets the acting branch's level.
  */
-async function updateProduct(id, data, user, branchId = null) {
+export async function updateProduct(id: string, data: ProductInput, user: AuthUser, branchId: string | null | undefined = null) {
   const existing = await prisma.product.findUnique({ where: { id }, include: { stocks: true } })
   if (!existing) throw new NotFoundError('Product not found')
 
@@ -360,8 +427,9 @@ async function updateProduct(id, data, user, branchId = null) {
   if (data.stocks) {
     const keep = new Set(data.stocks.map((s) => s.branch_id))
     for (const row of inScope.filter((s) => !keep.has(s.branch_id) && s.quantity > 0)) {
-      const name = branches.get(row.branch_id)?.name
-        ?? (await prisma.branch.findUnique({ where: { id: row.branch_id }, select: { name: true } })).name
+      // The stock row's branch exists (foreign key)
+      const name = branches?.get(row.branch_id)?.name
+        ?? (await prisma.branch.findUniqueOrThrow({ where: { id: row.branch_id }, select: { name: true } })).name
       throw stocksError(`"${name}" still has ${row.quantity} in stock`)
     }
   }
@@ -420,7 +488,7 @@ async function updateProduct(id, data, user, branchId = null) {
   return getProductById(id, branchId, { allBranches: user.role === 'ADMIN' })
 }
 
-async function softDeleteProduct(id, userId) {
+export async function softDeleteProduct(id: string, userId: string) {
   const existing = await prisma.product.findUnique({ where: { id } })
   if (!existing) throw new NotFoundError('Product not found')
 
@@ -434,14 +502,19 @@ async function softDeleteProduct(id, userId) {
 
 // ---- Categories ----
 
-async function listCategories() {
+export interface CategoryInput {
+  name?: string
+  description?: string | null
+}
+
+export async function listCategories() {
   return prisma.category.findMany({
     orderBy: { name: 'asc' },
     include: { _count: { select: { products: true } } },
   })
 }
 
-async function createCategory(data) {
+export async function createCategory(data: CategoryInput & { name: string }) {
   const existing = await prisma.category.findUnique({ where: { name: data.name } })
   if (existing) throw new ConflictError('Category name already exists', 'name')
 
@@ -450,7 +523,7 @@ async function createCategory(data) {
   })
 }
 
-async function updateCategory(id, data) {
+export async function updateCategory(id: string, data: CategoryInput) {
   const existing = await prisma.category.findUnique({ where: { id } })
   if (!existing) throw new NotFoundError('Category not found')
 
@@ -466,17 +539,4 @@ async function updateCategory(id, data) {
       ...(data.description !== undefined && { description: data.description || null }),
     },
   })
-}
-
-module.exports = {
-  PRODUCT_SORTS,
-  listProducts,
-  getProductById,
-  getProductByBarcode,
-  createProduct,
-  updateProduct,
-  softDeleteProduct,
-  listCategories,
-  createCategory,
-  updateCategory,
 }

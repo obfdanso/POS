@@ -1,14 +1,30 @@
-const prisma = require('../utils/prismaClient').default
-const { recordAudit } = require('../utils/audit')
-const { NotFoundError, ConflictError, ValidationError } = require('../utils/errors')
+import { Prisma } from '@prisma/client'
+import prisma from '../utils/prismaClient'
+import { recordAudit } from '../utils/audit'
+import { NotFoundError, ConflictError, ValidationError } from '../utils/errors'
 
-const PUBLIC_FIELDS = { id: true, name: true, code: true }
+const PUBLIC_FIELDS = { id: true, name: true, code: true } satisfies Prisma.BranchSelect
+
+export interface BranchInput {
+  name: string
+  code: string
+  address?: string | null
+  phone?: string | null
+}
+
+export interface BranchChanges {
+  name?: string
+  code?: string
+  address?: string | null
+  phone?: string | null
+  is_active?: boolean
+}
 
 /**
  * Branches, by name. `active: true` lists only open branches and only the fields every signed-in
  * user may see (id, name, code), for the branch switcher and product form.
  */
-function listBranches({ active = false } = {}) {
+export function listBranches({ active = false }: { active?: boolean } = {}) {
   return prisma.branch.findMany({
     where: active ? { is_active: true } : {},
     ...(active && { select: PUBLIC_FIELDS }),
@@ -16,19 +32,19 @@ function listBranches({ active = false } = {}) {
   })
 }
 
-async function getBranch(id) {
+export async function getBranch(id: string) {
   const branch = await prisma.branch.findUnique({ where: { id } })
   if (!branch) throw new NotFoundError('Branch not found')
   return branch
 }
 
-function conflict(err) {
-  if (err.code !== 'P2002') return err
+function conflict(err: unknown): unknown {
+  if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') return err
   const field = String(err.meta?.target ?? '').includes('code') ? 'code' : 'name'
   return new ConflictError(`A branch with that ${field} already exists`)
 }
 
-async function createBranch({ name, code, address, phone }, userId) {
+export async function createBranch({ name, code, address, phone }: BranchInput, userId: string) {
   try {
     return await prisma.$transaction(async (tx) => {
       const branch = await tx.branch.create({ data: { name, code, address: address || null, phone: phone || null } })
@@ -40,11 +56,13 @@ async function createBranch({ name, code, address, phone }, userId) {
   }
 }
 
-async function updateBranch(id, data, userId) {
+export async function updateBranch(id: string, data: BranchChanges, userId: string) {
   const existing = await getBranch(id)
-  const changes = {}
-  for (const key of ['name', 'code', 'address', 'phone', 'is_active']) {
-    if (data[key] !== undefined) changes[key] = data[key] === '' ? null : data[key]
+  const changes: Prisma.BranchUpdateInput = {}
+  for (const key of ['name', 'code', 'address', 'phone', 'is_active'] as const) {
+    const value = data[key]
+    // An empty string clears an optional field
+    if (value !== undefined) Object.assign(changes, { [key]: value === '' ? null : value })
   }
   try {
     return await prisma.$transaction(async (tx) => {
@@ -69,5 +87,3 @@ async function updateBranch(id, data, userId) {
     throw conflict(err)
   }
 }
-
-module.exports = { listBranches, getBranch, createBranch, updateBranch }

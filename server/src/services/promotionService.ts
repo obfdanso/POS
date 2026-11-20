@@ -1,33 +1,46 @@
-const prisma = require('../utils/prismaClient').default
-const { NotFoundError, ValidationError } = require('../utils/errors')
-const { recordAudit } = require('../utils/audit')
+import type { Prisma, Product, Promotion } from '@prisma/client'
+import prisma from '../utils/prismaClient'
+import { NotFoundError, ValidationError } from '../utils/errors'
+import { recordAudit } from '../utils/audit'
 
 const PROMO_INCLUDE = {
   product: { select: { id: true, name: true, sku: true } },
   category: { select: { id: true, name: true } },
-}
+} satisfies Prisma.PromotionInclude
+
+export type PromotionState = 'OFF' | 'SCHEDULED' | 'ENDED' | 'ACTIVE'
+
+/** The promotion fields `bestPromotionFor` needs to pick one. */
+export type PromotionRule = Pick<Promotion, 'percent_off' | 'product_id' | 'category_id'>
 
 /** Running now: switched on, started, and not yet ended. */
-function activeWhere(now = new Date()) {
-  return { is_active: true, starts_at: { lte: now }, OR: [{ ends_at: null }, { ends_at: { gt: now } }] }
+export function activeWhere(now = new Date()) {
+  return {
+    is_active: true,
+    starts_at: { lte: now },
+    OR: [{ ends_at: null }, { ends_at: { gt: now } }],
+  } satisfies Prisma.PromotionWhereInput
 }
 
 /** Where a promotion stands at `now`, for lists and badges. */
-function promotionState(promo, now = new Date()) {
+export function promotionState(
+  promo: { is_active: boolean; starts_at: Date | string; ends_at: Date | string | null },
+  now = new Date()
+): PromotionState {
   if (!promo.is_active) return 'OFF'
   if (new Date(promo.starts_at) > now) return 'SCHEDULED'
   if (promo.ends_at && new Date(promo.ends_at) <= now) return 'ENDED'
   return 'ACTIVE'
 }
 
-const SPECIFICITY = (p) => (p.product_id ? 2 : p.category_id ? 1 : 0)
+const SPECIFICITY = (p: PromotionRule | null) => (p?.product_id ? 2 : p?.category_id ? 1 : 0)
 
 /**
  * The promotion for one product among running ones: the biggest percentage off; on a tie the most
  * specific (product, then category, then storewide). The till uses the same rule (client/src/utils/saleTotals.js).
  */
-function bestPromotionFor(product, promotions) {
-  let best = null
+export function bestPromotionFor<P extends PromotionRule>(product: Pick<Product, 'id' | 'category_id'>, promotions: P[]): P | null {
+  let best: P | null = null
   for (const p of promotions) {
     const applies = p.product_id ? p.product_id === product.id : p.category_id ? p.category_id === product.category_id : true
     if (!applies) continue
@@ -39,7 +52,10 @@ function bestPromotionFor(product, promotions) {
 }
 
 /** Running promotions that could apply to any of these products. */
-async function activePromotionsFor(products, db = prisma) {
+export async function activePromotionsFor(
+  products: Pick<Product, 'id' | 'category_id'>[],
+  db: Prisma.TransactionClient = prisma
+) {
   if (products.length === 0) return []
   return db.promotion.findMany({
     where: {
@@ -59,7 +75,7 @@ async function activePromotionsFor(products, db = prisma) {
 }
 
 /** Every running promotion, for the till to price the cart exactly as the server will. */
-async function listActivePromotions() {
+export async function listActivePromotions() {
   const rows = await prisma.promotion.findMany({
     where: activeWhere(),
     select: { id: true, name: true, percent_off: true, product_id: true, category_id: true, ends_at: true },
@@ -68,7 +84,7 @@ async function listActivePromotions() {
   return rows.map((r) => ({ ...r, percent_off: Number(r.percent_off) }))
 }
 
-async function listPromotions({ status } = {}) {
+export async function listPromotions({ status }: { status?: string } = {}) {
   const now = new Date()
   const rows = await prisma.promotion.findMany({
     include: { ...PROMO_INCLUDE, _count: { select: { sale_items: true } } },
@@ -79,13 +95,18 @@ async function listPromotions({ status } = {}) {
     .filter((p) => !status || p.status === status)
 }
 
-async function getPromotion(id) {
+export async function getPromotion(id: string) {
   const promo = await prisma.promotion.findUnique({ where: { id }, include: PROMO_INCLUDE })
   if (!promo) throw new NotFoundError('Promotion not found')
   return { ...promo, status: promotionState(promo) }
 }
 
-async function checkTarget({ product_id, category_id }) {
+interface PromotionTarget {
+  product_id?: string | null
+  category_id?: string | null
+}
+
+async function checkTarget({ product_id, category_id }: PromotionTarget) {
   if (product_id && category_id) {
     throw new ValidationError('Choose one target', [{ field: 'category_id', message: 'A promotion applies to a product or a category, not both' }])
   }
@@ -97,13 +118,22 @@ async function checkTarget({ product_id, category_id }) {
   }
 }
 
-function checkDates(startsAt, endsAt) {
+function checkDates(startsAt: Date, endsAt: Date | string | null | undefined) {
   if (endsAt && new Date(endsAt) <= new Date(startsAt)) {
     throw new ValidationError('Invalid dates', [{ field: 'ends_at', message: 'The end must be after the start' }])
   }
 }
 
-async function createPromotion(data, userId) {
+/** A validated create or update body (dates are ISO 8601 strings). */
+export interface PromotionInput extends PromotionTarget {
+  name?: string
+  percent_off?: number
+  starts_at?: string
+  ends_at?: string | null
+  is_active?: boolean
+}
+
+export async function createPromotion(data: PromotionInput & { name: string; percent_off: number }, userId: string) {
   await checkTarget(data)
   const startsAt = data.starts_at ? new Date(data.starts_at) : new Date()
   checkDates(startsAt, data.ends_at)
@@ -123,7 +153,7 @@ async function createPromotion(data, userId) {
   return { ...promo, status: promotionState(promo) }
 }
 
-async function updatePromotion(id, data, userId) {
+export async function updatePromotion(id: string, data: PromotionInput, userId: string) {
   const existing = await prisma.promotion.findUnique({ where: { id } })
   if (!existing) throw new NotFoundError('Promotion not found')
   const merged = {
@@ -156,16 +186,4 @@ async function updatePromotion(id, data, userId) {
     details: `${promo.name}: ${Object.keys(data).join(', ')}`,
   })
   return { ...promo, status: promotionState(promo) }
-}
-
-module.exports = {
-  activeWhere,
-  promotionState,
-  bestPromotionFor,
-  activePromotionsFor,
-  listActivePromotions,
-  listPromotions,
-  getPromotion,
-  createPromotion,
-  updatePromotion,
 }

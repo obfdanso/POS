@@ -34,5 +34,7 @@ router.get('/category-performance', reportController.getCategoryPerformance)
 router.get('/cashier-performance', reportController.getCashierPerformance)
 router.get('/inventory-status', reportController.getInventoryStatus)
 router.get('/profit', reportController.getProfitReport)
+// Comparing branches is for admins, who see the whole chain
+router.get('/branch-performance', authorize(['ADMIN']), reportController.getBranchPerformance)
 
 module.exports = router

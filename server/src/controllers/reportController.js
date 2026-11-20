@@ -3,7 +3,7 @@ const reportService = require('../services/reportService')
 async function getSalesSummary(req, res, next) {
   try {
     const { start_date, end_date } = req.query
-    const data = await reportService.getSalesSummary({ start_date, end_date })
+    const data = await reportService.getSalesSummary({ start_date, end_date, branchId: req.branchId })
     res.json({ success: true, data })
   } catch (err) {
     next(err)
@@ -13,7 +13,7 @@ async function getSalesSummary(req, res, next) {
 async function getSalesByDay(req, res, next) {
   try {
     const { start_date, end_date } = req.query
-    const data = await reportService.getSalesByDay({ start_date, end_date })
+    const data = await reportService.getSalesByDay({ start_date, end_date, branchId: req.branchId })
     res.json({ success: true, data })
   } catch (err) {
     next(err)
@@ -23,7 +23,7 @@ async function getSalesByDay(req, res, next) {
 async function getTopProducts(req, res, next) {
   try {
     const { start_date, end_date, limit = 10, by = 'revenue' } = req.query
-    const data = await reportService.getTopProducts({ start_date, end_date, limit: parseInt(limit), by })
+    const data = await reportService.getTopProducts({ start_date, end_date, limit: parseInt(limit), by, branchId: req.branchId })
     res.json({ success: true, data })
   } catch (err) {
     next(err)
@@ -33,7 +33,7 @@ async function getTopProducts(req, res, next) {
 async function getCategoryPerformance(req, res, next) {
   try {
     const { start_date, end_date } = req.query
-    const data = await reportService.getCategoryPerformance({ start_date, end_date })
+    const data = await reportService.getCategoryPerformance({ start_date, end_date, branchId: req.branchId })
     res.json({ success: true, data })
   } catch (err) {
     next(err)
@@ -43,7 +43,7 @@ async function getCategoryPerformance(req, res, next) {
 async function getCashierPerformance(req, res, next) {
   try {
     const { start_date, end_date } = req.query
-    const data = await reportService.getCashierPerformance({ start_date, end_date })
+    const data = await reportService.getCashierPerformance({ start_date, end_date, branchId: req.branchId })
     res.json({ success: true, data })
   } catch (err) {
     next(err)
@@ -52,7 +52,7 @@ async function getCashierPerformance(req, res, next) {
 
 async function getInventoryStatus(req, res, next) {
   try {
-    const data = await reportService.getInventoryStatus()
+    const data = await reportService.getInventoryStatus(req.branchId)
     res.json({ success: true, data })
   } catch (err) {
     next(err)
@@ -62,7 +62,7 @@ async function getInventoryStatus(req, res, next) {
 async function getProfitReport(req, res, next) {
   try {
     const { start_date, end_date } = req.query
-    const data = await reportService.getProfitReport({ start_date, end_date })
+    const data = await reportService.getProfitReport({ start_date, end_date, branchId: req.branchId })
     res.json({ success: true, data })
   } catch (err) {
     next(err)
@@ -71,7 +71,17 @@ async function getProfitReport(req, res, next) {
 
 async function getDashboardSummary(req, res, next) {
   try {
-    const data = await reportService.getDashboardSummary()
+    const data = await reportService.getDashboardSummary(req.branchId)
+    res.json({ success: true, data })
+  } catch (err) {
+    next(err)
+  }
+}
+
+async function getBranchPerformance(req, res, next) {
+  try {
+    const { start_date, end_date } = req.query
+    const data = await reportService.getBranchPerformance({ start_date, end_date })
     res.json({ success: true, data })
   } catch (err) {
     next(err)
@@ -88,6 +98,7 @@ async function getCashierStats(req, res, next) {
 }
 
 module.exports = {
+  getBranchPerformance,
   getSalesSummary,
   getSalesByDay,
   getTopProducts,

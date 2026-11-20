@@ -1,6 +1,6 @@
 const prisma = require('../utils/prismaClient')
 const { recordAudit } = require('../utils/audit')
-const { NotFoundError, ConflictError } = require('../utils/errors')
+const { NotFoundError, ConflictError, ValidationError } = require('../utils/errors')
 
 const PUBLIC_FIELDS = { id: true, name: true, code: true }
 
@@ -41,7 +41,15 @@ async function createBranch({ name, code, address, phone }, userId) {
 }
 
 async function updateBranch(id, data, userId) {
-  await getBranch(id)
+  const existing = await getBranch(id)
+  // An open drawer has to be counted and closed before its branch closes
+  if (data.is_active === false && existing.is_active) {
+    const open = await prisma.shift.count({ where: { branch_id: id, status: 'OPEN' } })
+    if (open > 0) {
+      const message = `Close the ${open} open shift${open === 1 ? '' : 's'} at this branch first`
+      throw new ValidationError(message, [{ field: 'is_active', message }])
+    }
+  }
   const changes = {}
   for (const key of ['name', 'code', 'address', 'phone', 'is_active']) {
     if (data[key] !== undefined) changes[key] = data[key] === '' ? null : data[key]

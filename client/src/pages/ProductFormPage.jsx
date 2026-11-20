@@ -9,11 +9,78 @@ import { productsService } from '../services/products'
 import { useSettings } from '../context/SettingsContext'
 import api from '../services/api'
 import { useAuth } from '../hooks/useAuth'
+import { useBranch } from '../hooks/useBranch'
 import { getFieldErrors, getErrorMessage } from '../utils/apiErrors'
+
+const isWholeAtLeastZero = (v) => v !== '' && Number.isInteger(Number(v)) && Number(v) >= 0
+
+/**
+ * Which branches stock the product. One row per branch this user manages (all open branches for an
+ * admin, their own for a manager): a tick box, a starting quantity for branches that newly stock it,
+ * and the branch's low-stock level. Stock that is already there changes through Inventory.
+ */
+function StockedAt({ rows, onChange, errors }) {
+  if (rows.length === 0) return <p className="text-sm text-gray-400">Loading branches…</p>
+  return (
+    <div className="space-y-2">
+      <div className="hidden sm:grid grid-cols-[1fr_8rem_8rem] gap-3 px-1 text-xs font-medium text-gray-500 dark:text-gray-400">
+        <span>Branch</span>
+        <span>Quantity</span>
+        <span>Low-stock level</span>
+      </div>
+      {rows.map((row) => {
+        const locked = row.existing && row.current > 0
+        return (
+          <div key={row.branch_id} className="grid grid-cols-1 sm:grid-cols-[1fr_8rem_8rem] gap-3 items-start rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2">
+            <label className="flex items-center gap-2 text-sm text-gray-800 dark:text-gray-200 pt-2" title={locked ? `Still has ${row.current} in stock; sell or adjust it to 0 first` : undefined}>
+              <input
+                type="checkbox"
+                checked={row.stocked}
+                disabled={locked}
+                onChange={(e) => onChange(row.branch_id, { stocked: e.target.checked })}
+                className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
+              {row.name}
+            </label>
+            {row.existing ? (
+              <p className="text-sm text-gray-600 dark:text-gray-400 pt-2" aria-label={`Quantity at ${row.name}`}>{row.current} in stock</p>
+            ) : (
+              <Input
+                aria-label={`Starting quantity at ${row.name}`}
+                type="number"
+                min="0"
+                step="1"
+                value={row.quantity}
+                disabled={!row.stocked}
+                onChange={(e) => onChange(row.branch_id, { quantity: e.target.value })}
+                error={errors[`quantity-${row.branch_id}`]}
+              />
+            )}
+            <Input
+              aria-label={`Low-stock level at ${row.name}`}
+              type="number"
+              min="0"
+              step="1"
+              value={row.low_stock_threshold}
+              disabled={!row.stocked}
+              onChange={(e) => onChange(row.branch_id, { low_stock_threshold: e.target.value })}
+              error={errors[`threshold-${row.branch_id}`]}
+            />
+          </div>
+        )
+      })}
+      {errors.stocks && <p className="text-xs text-danger-600">{errors.stocks}</p>}
+    </div>
+  )
+}
 
 export default function ProductFormPage() {
   const navigate = useNavigate()
   const { id } = useParams()
+  const { branches } = useBranch()
+  // Stock rows as loaded (edit) and as being edited, by branch id
+  const [loadedStocks, setLoadedStocks] = useState(null)
+  const [stockEdits, setStockEdits] = useState({})
   const isEditing = Boolean(id)
   // /products/new?variantOf=<id> adds a size or flavour to that product
   const [searchParams] = useSearchParams()
@@ -64,6 +131,24 @@ export default function ProductFormPage() {
       .catch(() => {}) // non-critical — supplier field will just be empty
   }, [])
 
+  // One row per branch this user manages: every open branch for an admin, their own for a manager
+  const manageable = user?.role === 'ADMIN' ? branches : branches.filter((b) => b.id === user?.branch?.id)
+  const stockRows = manageable.map((b) => {
+    const loaded = loadedStocks?.find((r) => r.branch_id === b.id)
+    const edits = stockEdits[b.id] || {}
+    return {
+      branch_id: b.id,
+      name: b.name,
+      existing: Boolean(loaded),
+      current: loaded?.quantity ?? 0,
+      // New products start stocked everywhere this user manages; existing ones as they are
+      stocked: edits.stocked ?? (isEditing ? Boolean(loaded) : true),
+      quantity: edits.quantity ?? '0',
+      low_stock_threshold: edits.low_stock_threshold ?? String(loaded?.low_stock_threshold ?? form.low_stock_threshold ?? '10'),
+    }
+  })
+  const editStock = (branchId, change) => setStockEdits((prev) => ({ ...prev, [branchId]: { ...prev[branchId], ...change } }))
+
   // Load product if editing
   useEffect(() => {
     if (!isEditing) return
@@ -86,6 +171,7 @@ export default function ProductFormPage() {
         })
         setParent(p.parent || null)
         setVariants(p.variants || [])
+        setLoadedStocks(p.stocks || [])
         if (p.image_url) setImagePreview(p.image_url)
       })
       .catch(() => { toast.error('Failed to load product'); navigate('/products') })
@@ -164,13 +250,24 @@ export default function ProductFormPage() {
     if (!form.category_id) errs.category_id = 'Category is required'
     if (!form.price || parseFloat(form.price) <= 0) errs.price = 'Price must be greater than 0'
     if (form.cost_price && parseFloat(form.cost_price) < 0) errs.cost_price = 'Cost price cannot be negative'
-    const isWholeAtLeastZero = (v) => v !== '' && Number.isInteger(Number(v)) && Number(v) >= 0
-    if (!isWholeAtLeastZero(form.quantity)) errs.quantity = 'Quantity must be a whole number, 0 or more'
-    if (!isWholeAtLeastZero(form.low_stock_threshold)) errs.low_stock_threshold = 'Threshold must be a whole number, 0 or more'
+    for (const row of stockRows.filter((r) => r.stocked)) {
+      if (!row.existing && !isWholeAtLeastZero(row.quantity)) errs[`quantity-${row.branch_id}`] = 'A whole number, 0 or more'
+      if (!isWholeAtLeastZero(row.low_stock_threshold)) errs[`threshold-${row.branch_id}`] = 'A whole number, 0 or more'
+    }
     if (parent && !form.variant_name.trim()) errs.variant_name = 'Name the variant, e.g. a size or flavour'
     if (form.variant_name.trim().length > 50) errs.variant_name = 'Variant name must be 50 characters or fewer'
     setErrors(errs)
     return Object.keys(errs).length === 0
+  }
+
+  function stocksPayload() {
+    return stockRows
+      .filter((r) => r.stocked)
+      .map((r) => ({
+        branch_id: r.branch_id,
+        ...(!r.existing && { quantity: parseInt(r.quantity, 10) }),
+        low_stock_threshold: parseInt(r.low_stock_threshold, 10),
+      }))
   }
 
   async function handleSubmit(e) {
@@ -192,9 +289,8 @@ export default function ProductFormPage() {
         payload.append('supplier_id', form.supplier_id)
         payload.append('price', form.price)
         payload.append('cost_price', form.cost_price)
-        // Stock is only set on create; later changes go through inventory so they are logged
-        if (!isEditing) payload.append('quantity', form.quantity)
-        payload.append('low_stock_threshold', form.low_stock_threshold)
+        // Starting stock is only set when a branch starts stocking it; later changes go through inventory
+        payload.append('stocks', JSON.stringify(stocksPayload()))
         if (canToggleActive) payload.append('is_active', form.is_active ? 'true' : 'false')
         payload.append('variant_name', form.variant_name.trim())
         if (!isEditing && parent) payload.append('parent_id', parent.id)
@@ -208,8 +304,7 @@ export default function ProductFormPage() {
           supplier_id: form.supplier_id || null,
           price: parseFloat(form.price),
           cost_price: form.cost_price ? parseFloat(form.cost_price) : null,
-          ...(!isEditing && { quantity: parseInt(form.quantity) }),
-          low_stock_threshold: parseInt(form.low_stock_threshold),
+          stocks: stocksPayload(),
           ...(canToggleActive && { is_active: form.is_active }),
           ...(isEditing && imageRemoved && { image_url: null }),
           variant_name: form.variant_name.trim() || null,
@@ -391,37 +486,15 @@ export default function ProductFormPage() {
             </div>
           </div>
 
-          {/* Inventory */}
+          {/* Branch stock */}
           <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6 space-y-4 mt-4">
-            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Inventory</h2>
-            <div className="grid grid-cols-2 gap-4">
-              <Input
-                label="Current Quantity"
-                type="number"
-                min="0"
-                step="1"
-                value={form.quantity}
-                onChange={(e) => setField('quantity', e.target.value)}
-                placeholder="0"
-                error={errors.quantity}
-                disabled={isEditing}
-              />
-              <Input
-                label="Low Stock Threshold"
-                type="number"
-                min="0"
-                step="1"
-                value={form.low_stock_threshold}
-                onChange={(e) => setField('low_stock_threshold', e.target.value)}
-                placeholder="10"
-                error={errors.low_stock_threshold}
-              />
-            </div>
-            {isEditing && (
-              <p className="text-xs text-gray-400">
-                To adjust stock, use the Inventory page after saving.
+            <div>
+              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Stocked at</h2>
+              <p className="text-xs text-gray-400 mt-1">
+                Tick each branch that sells this product. {isEditing ? 'To change stock that is already there, use the Inventory page.' : ''}
               </p>
-            )}
+            </div>
+            <StockedAt rows={stockRows} onChange={editStock} errors={errors} />
           </div>
 
           {/* Image upload */}

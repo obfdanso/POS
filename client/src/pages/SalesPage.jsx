@@ -160,23 +160,26 @@ function SaleDetailModal({ saleId, initialSale = null, onClose, onRefunded }) {
 // Finds a sale from any branch by the transaction ID on its receipt, so its items can be returned here
 function FindSaleModal({ onClose, onFound }) {
   const [txn, setTxn] = useState('')
+  const [total, setTotal] = useState('')
   const [error, setError] = useState('')
+  const [totalError, setTotalError] = useState('')
   const [isFinding, setIsFinding] = useState(false)
 
   async function handleSubmit(e) {
     e.preventDefault()
     const value = txn.trim().toUpperCase()
-    if (!/^TXN-\d{8}-\d{4,}$/.test(value)) {
-      setError('Enter the transaction ID from the receipt, e.g. TXN-20260101-0001')
-      return
-    }
+    const amount = Number(total)
+    const txnError = /^TXN-\d{8}-\d{4,}$/.test(value) ? '' : 'Enter the transaction ID from the receipt, e.g. TXN-20260101-0001'
+    const amountError = total !== '' && Number.isFinite(amount) && amount >= 0 ? '' : 'Enter the total printed on the receipt'
+    setError(txnError)
+    setTotalError(amountError)
+    if (txnError || amountError) return
     setIsFinding(true)
-    setError('')
     try {
-      const res = await salesService.lookup(value)
+      const res = await salesService.lookup(value, amount)
       onFound(res.data.data)
     } catch (err) {
-      setError(err?.response?.status === 404 ? 'No sale with that transaction ID' : getErrorMessage(err, 'Could not look up the sale'))
+      setError(err?.response?.status === 404 ? 'No sale with that transaction ID and total' : getErrorMessage(err, 'Could not look up the sale'))
     } finally {
       setIsFinding(false)
     }
@@ -186,9 +189,11 @@ function FindSaleModal({ onClose, onFound }) {
     <Modal isOpen onClose={onClose} title="Return from another branch" size="sm">
       <form onSubmit={handleSubmit} className="space-y-4" noValidate>
         <p className="text-sm text-gray-600 dark:text-gray-400">
-          Returned items go back into this branch's stock, and any cash comes out of this branch's drawer.
+          Enter the transaction ID and total from the customer's receipt. Returned items go back into this branch's
+          stock, and any cash comes out of this branch's drawer.
         </p>
         <Input label="Transaction ID" placeholder="TXN-20260101-0001" value={txn} onChange={(e) => setTxn(e.target.value)} error={error} autoFocus />
+        <Input label="Total on the receipt" type="number" min="0" step="0.01" value={total} onChange={(e) => setTotal(e.target.value)} error={totalError} />
         <div className="flex gap-3">
           <Button type="button" variant="secondary" className="flex-1" onClick={onClose} disabled={isFinding}>Cancel</Button>
           <Button type="submit" className="flex-1" isLoading={isFinding}>Find sale</Button>

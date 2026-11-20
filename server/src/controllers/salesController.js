@@ -66,7 +66,7 @@ async function getSale(req, res, next) {
  */
 async function lookupSale(req, res, next) {
   try {
-    const sale = await salesService.getSaleByTransactionId(req.params.transactionId)
+    const sale = await salesService.getSaleByTransactionId(req.params.transactionId, Number(req.query.total))
     await recordAudit({ userId: req.user.id, action: 'SALE_LOOKUP', entity: 'Sale', entityId: sale.id, details: sale.transaction_id })
     const trimmed = {
       ...sale,

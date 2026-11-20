@@ -412,10 +412,15 @@ async function getSaleById(id) {
   return sale
 }
 
-/** A sale found by its receipt number, at any branch (for returns made at another branch). */
-async function getSaleByTransactionId(transactionId) {
-  const found = await prisma.sale.findUnique({ where: { transaction_id: transactionId }, select: { id: true } })
-  if (!found) throw new NotFoundError('No sale with that transaction ID')
+/**
+ * A sale found by its receipt number and total, at any branch (for returns made at another branch).
+ * Asking for the total too means sequential transaction IDs can't simply be tried one by one.
+ */
+async function getSaleByTransactionId(transactionId, total) {
+  const found = await prisma.sale.findUnique({ where: { transaction_id: transactionId }, select: { id: true, total_amount: true } })
+  if (!found || Math.abs(parseFloat(found.total_amount) - total) >= 0.005) {
+    throw new NotFoundError('No sale with that transaction ID and total')
+  }
   return getSaleById(found.id)
 }
 

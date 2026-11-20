@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import { AuthProvider } from './context/AuthContext'
+import { BranchProvider } from './context/BranchContext'
 import { CartProvider } from './context/CartContext'
 import { SettingsProvider } from './context/SettingsContext'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -18,6 +19,7 @@ createRoot(document.getElementById('root')).render(
   <StrictMode>
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <AuthProvider>
+        <BranchProvider>
         <SettingsProvider>
           <CartProvider>
             <ErrorBoundary>
@@ -36,6 +38,7 @@ createRoot(document.getElementById('root')).render(
             />
           </CartProvider>
         </SettingsProvider>
+        </BranchProvider>
       </AuthProvider>
     </BrowserRouter>
   </StrictMode>

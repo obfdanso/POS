@@ -48,8 +48,10 @@ const PRODUCT_SORTS = {
  * till can show one card per product and offer its sizes or flavours.
  * With a `branchId`, only products that branch stocks are listed, with its quantities; without one
  * (an admin viewing all branches) every product is listed with quantities summed across branches.
+ * `include_unstocked` lists the branch's unstocked products too (with 0), so managers can find and
+ * start stocking them from the Products page.
  */
-async function listProducts({ page = 1, per_page = 20, search, category_id, status = 'active', group_variants = false, sort, order, branchId = null } = {}) {
+async function listProducts({ page = 1, per_page = 20, search, category_id, status = 'active', group_variants = false, include_unstocked = false, sort, order, branchId = null } = {}) {
   const skip = (page - 1) * per_page
   const take = Math.min(per_page, 100)
 
@@ -67,7 +69,13 @@ async function listProducts({ page = 1, per_page = 20, search, category_id, stat
       { barcode: { contains: search, mode: 'insensitive' } },
     ]
   }
-  Object.assign(where, stockedAt(branchId))
+  if (branchId && !include_unstocked) {
+    // A main product also stays on the till when only one of its variants is stocked here
+    const stocked = group_variants
+      ? { OR: [stockedAt(branchId), { variants: { some: { is_active: true, ...stockedAt(branchId) } } }] }
+      : stockedAt(branchId)
+    where.AND = [...(where.AND || []), stocked]
+  }
 
   const include = {
     ...PRODUCT_INCLUDE,
@@ -83,8 +91,8 @@ async function listProducts({ page = 1, per_page = 20, search, category_id, stat
     const desc = order === 'desc'
     // Products no branch stocks hold 0, so they come first going up and last going down. (With a
     // branch chosen, only products it stocks are listed, so there are none.)
-    const unstockedWhere = { ...where, stocks: { none: {} } }
-    const unstockedCount = branchId ? 0 : await prisma.product.count({ where: unstockedWhere })
+    const unstockedWhere = { ...where, stocks: { none: branchId ? { branch_id: branchId } : {} } }
+    const unstockedCount = branchId && !include_unstocked ? 0 : await prisma.product.count({ where: unstockedWhere })
     const stockedCount = total - unstockedCount
     // This page's window over [unstocked..., stocked...] (ascending) or [stocked..., unstocked...]
     const [first, firstCount] = desc ? ['stocked', stockedCount] : ['unstocked', unstockedCount]

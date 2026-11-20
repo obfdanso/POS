@@ -100,6 +100,7 @@ function listProductsValidation() {
     query('category_id').optional().isUUID().withMessage('Invalid category ID'),
     query('status').optional().isIn(['active', 'inactive', 'all']).withMessage('Status must be active, inactive, or all'),
     query('group_variants').optional().isBoolean().withMessage('group_variants must be true or false'),
+    query('include_unstocked').optional().isBoolean().withMessage('include_unstocked must be true or false'),
     ...sortRules(Object.keys(PRODUCT_SORTS)),
   ]
 }

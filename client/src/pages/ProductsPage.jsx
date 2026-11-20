@@ -42,7 +42,7 @@ export default function ProductsPage() {
     const requestId = ++latestRequest.current
     setIsLoading(true)
     try {
-      const params = { page, per_page: 20 }
+      const params = { page, per_page: 20, include_unstocked: true }
       if (search.trim()) params.search = search.trim()
       if (categoryFilter) params.category_id = categoryFilter
       params.status = statusFilter

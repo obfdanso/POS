@@ -10,8 +10,9 @@ async function listProducts(req, res, next) {
     const status = canSeeInactive ? req.query.status : 'active'
 
     const group_variants = req.query.group_variants === 'true'
+    const include_unstocked = canSeeInactive && req.query.include_unstocked === 'true'
     const result = await productService.listProducts({
-      page, per_page, search, category_id, status, group_variants, sort: req.query.sort, order: req.query.order, branchId: req.branchId,
+      page, per_page, search, category_id, status, group_variants, include_unstocked, sort: req.query.sort, order: req.query.order, branchId: req.branchId,
     })
 
     res.json({
